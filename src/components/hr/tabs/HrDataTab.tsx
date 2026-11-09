@@ -10,13 +10,9 @@ import {
   Search,
   Plus,
   Trash2,
-  CheckCircle,
-  DollarSign,
-  Info,
   Sliders,
   Download,
   Upload,
-  Clock,
   Pencil,
 } from 'lucide-react';
 import {
@@ -558,1431 +554,463 @@ export default function HrDataTab(props: HrDataTabProps) {
     }, ['Nội Dung', 'Đơn Giá']);
   };
 
+  // ───────────────────────── HIỂN THỊ (thiết kế mới) ─────────────────────────
+  // Logic lọc / xuất-nhập Excel / xóa hàng loạt ở trên giữ nguyên; phần dưới chỉ là giao diện:
+  // chip chuyển 6 danh mục (kèm số lượng) → thanh công cụ gọn (tìm kiếm + Xuất/Nhập chỉ biểu tượng + nút xanh "Thêm")
+  // → bảng (máy tính) / thẻ (điện thoại) → thanh xóa hàng loạt chỉ hiện khi có dòng được tích.
+  const PILL = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] outline-none focus:border-blue-400';
+  const iconBtn36 = 'w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  const rowIcon = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  const rowDel = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer';
+  const chk = 'w-4 h-4 rounded cursor-pointer';
+  const th = 'py-2.5 px-3 text-left';
+  const money = (n: number) => `${(Number(n) || 0).toLocaleString('vi-VN')} đ`;
+
+  // ── Danh sách đã lọc của từng danh mục (đúng điều kiện lọc cũ) ──
+  const holidayQ = holidaySearchQuery.toLowerCase();
+  const filteredHolidays = holidays
+    .filter(h => h.name.toLowerCase().includes(holidayQ) || h.date.includes(holidayQ) || h.id.toLowerCase().includes(holidayQ))
+    .sort((a, b) => parseHolidayDate(a.date) - parseHolidayDate(b.date));
+
+  const coefQ = coefSearchQuery.toLowerCase();
+  const filteredCoefs = leaveCoefficients.filter(c => c.type.toLowerCase().includes(coefQ) || c.id.toLowerCase().includes(coefQ));
+
+  const allCriteria = departmentCriteria[0]?.criteria || [];
+  const critQ = removeVietnameseTones(criteriaSearchQuery);
+  const filteredCriteria = allCriteria.filter(c => removeVietnameseTones(c.content).includes(critQ) || removeVietnameseTones(c.id).includes(critQ));
+  // Nhãn + màu pill theo nhóm tiêu chí
+  const critMeta = (cat: string) =>
+    cat === 'progress' ? { label: 'Hiệu suất & Tiến độ', cls: 'bg-sky-50 text-sky-700 border-sky-200' }
+    : cat === 'reporting' ? { label: 'Báo cáo & Đạo đức', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+    : { label: 'Tác phong & Chuyên cần', cls: 'bg-violet-50 text-violet-700 border-violet-200' };
+
+  const scaleQ = salaryScalesSearch.toLowerCase();
+  const filteredScales = salaryScales.filter(item => {
+    const groupMatch = selectedGroupFilter === 'all' || item.groupCode === selectedGroupFilter;
+    const textMatch = item.id.toLowerCase().includes(scaleQ) || item.levelName.toLowerCase().includes(scaleQ) || item.groupName.toLowerCase().includes(scaleQ);
+    return groupMatch && textMatch;
+  });
+
+  // BHXH & thuế
+  const insQ = insSearchText.trim().toLowerCase();
+  const filteredIns = employees.filter((emp: any) => {
+    const matchesSearch = insQ === '' || emp.id.toLowerCase().includes(insQ) || emp.name.toLowerCase().includes(insQ) || (emp.bhxhBookNo && emp.bhxhBookNo.toLowerCase().includes(insQ));
+    const matchesDept = insDeptFilter === 'all' || emp.department === insDeptFilter;
+    const matchesBook = insBookFilter === 'all' ||
+      (insBookFilter === 'has_book' && emp.bhxhBookNo && emp.bhxhBookNo.trim() !== '') ||
+      (insBookFilter === 'no_book' && (!emp.bhxhBookNo || emp.bhxhBookNo.trim() === ''));
+    return matchesSearch && matchesDept && matchesBook;
+  });
+  const insSalaryOf = (e: any) => Number(e.bhxhSalary) || (salaryScales.find((s: any) => s.id === e.salaryCode)?.baseSalary || 0);
+  const insStats = (() => {
+    const withBook = employees.filter((e: any) => e.bhxhBookNo && e.bhxhBookNo.trim() !== '');
+    const totalSalary = withBook.reduce((sum: number, e: any) => sum + insSalaryOf(e), 0);
+    const totalPayment = withBook.reduce((sum: number, e: any) => sum + (insSalaryOf(e) * (Number(e.bhxhRate) || 10.5) / 100), 0);
+    return { total: employees.length, withBookCount: withBook.length, withoutBookCount: employees.length - withBook.length, totalSalary, totalPayment };
+  })();
+  // Cấp số sổ BHXH tự động cho người chưa có (logic giữ nguyên như bản cũ)
+  const handleBatchGenerateBHXH = () => {
+    let count = 0;
+    const updated = employees.map((emp: any, index: number) => {
+      if (!emp.bhxhBookNo || emp.bhxhBookNo.trim() === '') {
+        count++;
+        const numericSuffix = String(4000 + index + 1).padStart(4, '0');
+        return {
+          ...emp,
+          bhxhBookNo: `SHX260${numericSuffix}`,
+          bhxhSalary: salaryScales.find((s: any) => s.id === emp.salaryCode)?.baseSalary || 5200000,
+          bhxhRate: 10.5,
+          bhxhDate: '2026-04-01',
+          taxPersonalRelief: 15500000,
+          dependentCount: 0,
+        };
+      }
+      return emp;
+    });
+    if (count === 0) {
+      addToast({ title: 'ℹ️ Thông báo', message: 'Tất cả nhân viên hiện tại đều đã được đăng ký sổ BHXH!', type: 'warning' });
+      return;
+    }
+    setEmployees(updated);
+    addToast({ title: '✅ Thành công', message: `Đã cấp số sổ BHXH tự động hàng loạt thành công cho ${count} nhân sự chưa có sổ!`, type: 'success' });
+  };
+  const handleOpenEditIns = (emp: any) => {
+    setEditingInsEmpId(emp.id);
+    setInsBookNo(emp.bhxhBookNo || '');
+    setInsSalary(emp.bhxhSalary || (salaryScales.find((s: any) => s.id === emp.salaryCode)?.baseSalary || 0));
+    setInsRate(emp.bhxhRate || 10.5);
+    setInsPersonalRelief(emp.taxPersonalRelief || 15500000);
+    setInsDependentCount(emp.dependentCount || 0);
+    setInsDate(emp.bhxhDate || '2026-04-01');
+    setShowInsModal(true);
+  };
+  const departments = Array.from(new Set(employees.map((e: any) => e.department))).filter(Boolean);
+
+  const travelQ = travelNormSearch.toLowerCase();
+  const filteredNorms = travelNorms.filter(norm =>
+    norm.content.toLowerCase().includes(travelQ) || (norm.code && norm.code.toLowerCase().includes(travelQ)) || (norm.notes && norm.notes.toLowerCase().includes(travelQ)));
+
+  // ── Chip chuyển danh mục (kèm số lượng) ──
+  const TABS: Array<[string, string, React.ComponentType<{ className?: string }>, number, string]> = [
+    ['holidays', 'Ngày nghỉ lễ', Calendar, holidays.length, 'holiday_tab_trigger'],
+    ['coefficients', 'Hệ số chấm công', Percent, leaveCoefficients.length, 'coefficient_tab_trigger'],
+    ['criteria', 'Tiêu chí hiệu suất', Building, allCriteria.length, 'criteria_tab_trigger'],
+    ['salary_scales', 'Bậc lương', Award, salaryScales.length, 'salary_scales_tab_trigger'],
+    ['insurance', 'BHXH & Thuế', FileSpreadsheet, employees.length, 'insurance_tab_trigger'],
+    ['travel_norms', 'Định mức công tác phí', MapPin, travelNorms.length, 'travel_norms_tab_trigger'],
+  ];
+
+  // Ô chọn tất cả (đúng điều kiện cũ: bật cờ hrSelectAll và mọi dòng đang lọc đều được tích)
+  const allSelected = (items: { id: string }[]) => hrSelectAll && items.length > 0 && items.every(i => hrSelectedRows.has(i.id));
+  const headCheck = (items: { id: string }[]) => (
+    <input type="checkbox" className={chk} aria-label="Chọn tất cả" checked={allSelected(items)} onChange={(e) => handleHrSelectAll(e.target.checked, items)} />
+  );
+  const rowCheck = (id: string) => (
+    <input type="checkbox" className={chk} aria-label="Chọn dòng" checked={hrSelectedRows.has(id)} onChange={(e) => { e.stopPropagation(); handleHrRowSelect(id, e.target.checked); }} />
+  );
+
+  // Thanh công cụ dùng chung: tìm kiếm + (bộ lọc riêng) + Xuất/Nhập chỉ biểu tượng + nút xanh "Thêm"
+  const toolbar = (o: {
+    search: string; setSearch: (v: string) => void; placeholder: string; extra?: React.ReactNode;
+    onExport: () => void; exportTitle: string; fileRef: React.RefObject<HTMLInputElement>; onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    addLabel: string; onAdd: () => void; addId?: string; more?: React.ReactNode;
+  }) => (
+    <div className="flex flex-wrap items-center gap-2" data-testid="hrdata-toolbar">
+      <div className="relative flex-1 min-w-[180px]">
+        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+        <input type="text" value={o.search} onChange={(e) => o.setSearch(e.target.value)} placeholder={o.placeholder} data-testid="hrdata-search"
+          className={`${inputCls} w-full pl-9 pr-3`} />
+      </div>
+      {o.extra}
+      <button type="button" onClick={o.onExport} title={o.exportTitle} aria-label="Xuất Excel" data-testid="hrdata-export" className={iconBtn36}><Download className="w-4 h-4" /></button>
+      <button type="button" onClick={() => o.fileRef.current?.click()} title="Nhập từ Excel" aria-label="Nhập Excel" data-testid="hrdata-import" className={iconBtn36}><Upload className="w-4 h-4" /></button>
+      <input ref={o.fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={o.onImport} />
+      {o.more}
+      <button type="button" onClick={o.onAdd} id={o.addId} data-testid="hrdata-add"
+        // Nền xanh đặt inline vì index.css ép màu cho bg-* / text-white
+        style={{ background: '#0d47c9', color: '#ffffff' }}
+        className="h-9 px-3.5 rounded-xl flex items-center gap-1.5 text-[13px] font-bold cursor-pointer">
+        <Plus className="w-4 h-4" /><span>{o.addLabel}</span>
+      </button>
+    </div>
+  );
+
+  // Thanh xóa hàng loạt: chỉ hiện khi có dòng được tích
+  const bulkBar = hrSelectedRows.size > 0 && (
+    <div className="flex items-center gap-2 rounded-xl border px-3 py-2" style={{ background: '#e8efff', borderColor: '#bcd0ff' }} data-testid="hrdata-bulk">
+      <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {hrSelectedRows.size}</span>
+      <span className="flex-1" />
+      <button type="button" onClick={handleBulkDeleteHrData} data-testid="hrdata-bulk-delete"
+        style={{ background: '#e11d48', color: '#ffffff' }} className="h-8 px-3 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
+    </div>
+  );
+
+  // Khung bảng (máy tính) + khung thẻ (điện thoại) + dòng đếm
+  const shell = (o: { tableHead: React.ReactNode; tableBody: React.ReactNode; cards: React.ReactNode; empty: boolean; emptyText: string; count: React.ReactNode; minW?: string }) => (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      {o.empty ? (
+        <div className="py-12 text-center text-slate-500 text-sm" data-testid="hrdata-empty">{o.emptyText}</div>
+      ) : (
+        <>
+          <div className="hidden md:block overflow-x-auto" data-testid="hrdata-table">
+            <table className={`w-full text-[13px] ${o.minW || ''}`}>
+              <thead><tr className="bg-slate-50 text-slate-500 text-[11px] font-bold border-b border-slate-200">{o.tableHead}</tr></thead>
+              <tbody className="divide-y divide-slate-100">{o.tableBody}</tbody>
+            </table>
+          </div>
+          <div className="md:hidden divide-y divide-slate-100" data-testid="hrdata-cards">{o.cards}</div>
+        </>
+      )}
+      <div className="px-4 py-2.5 border-t border-slate-100 text-xs text-slate-500" data-testid="hrdata-count">{o.count}</div>
+    </div>
+  );
+  const rowCls = (id: string) => `hover:bg-blue-50/40 ${hrSelectedRows.has(id) ? 'bg-blue-50/60' : ''}`;
+  const actions = (onEdit: (() => void) | null, onDelete: () => void, what: string) => (
+    <div className="flex items-center justify-end gap-1.5">
+      {onEdit && <button type="button" className={rowIcon} title={`Sửa ${what}`} aria-label={`Sửa ${what}`} onClick={onEdit}><Pencil className="w-3.5 h-3.5" /></button>}
+      <button type="button" className={rowDel} title={`Xóa ${what}`} aria-label={`Xóa ${what}`} onClick={onDelete}><Trash2 className="w-3.5 h-3.5" /></button>
+    </div>
+  );
+
   return (
-              <div className="space-y-4 font-sans" id="hr_data_tab_content">
-                {/* Internal subtab navigation — underline-tab style */}
-                <div className="bg-white border-b border-slate-200 mb-2 rounded-t-lg">
-                  <ul className="flex flex-nowrap md:flex-wrap items-center gap-1 -mb-px text-sm font-medium overflow-x-auto scrollbar-none" style={{ WebkitOverflowScrolling: 'touch' }}>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => setActiveHrDataSubTab('holidays')}
-                        aria-current={activeHrDataSubTab === 'holidays' ? 'page' : undefined}
-                        className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeHrDataSubTab === 'holidays' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                        id="holiday_tab_trigger"
-                      >
-                        <Calendar className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'holidays' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>Ngày nghỉ lễ</span>
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => setActiveHrDataSubTab('coefficients')}
-                        aria-current={activeHrDataSubTab === 'coefficients' ? 'page' : undefined}
-                        className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeHrDataSubTab === 'coefficients' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                        id="coefficient_tab_trigger"
-                      >
-                        <Percent className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'coefficients' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>Hệ Số Chấm Công</span>
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => setActiveHrDataSubTab('criteria')}
-                        aria-current={activeHrDataSubTab === 'criteria' ? 'page' : undefined}
-                        className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeHrDataSubTab === 'criteria' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                        id="criteria_tab_trigger"
-                      >
-                        <Building className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'criteria' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>Tiêu Chí Hiệu Suất</span>
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => setActiveHrDataSubTab('salary_scales')}
-                        aria-current={activeHrDataSubTab === 'salary_scales' ? 'page' : undefined}
-                        className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeHrDataSubTab === 'salary_scales' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                        id="salary_scales_tab_trigger"
-                      >
-                        <Award className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'salary_scales' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>Hệ Thống Bậc Lương</span>
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => setActiveHrDataSubTab('insurance')}
-                        aria-current={activeHrDataSubTab === 'insurance' ? 'page' : undefined}
-                        className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeHrDataSubTab === 'insurance' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                        id="insurance_tab_trigger"
-                      >
-                        <FileSpreadsheet className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'insurance' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>BHXH & Thuế</span>
-                      </button>
-                    </li>
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => setActiveHrDataSubTab('travel_norms')}
-                        aria-current={activeHrDataSubTab === 'travel_norms' ? 'page' : undefined}
-                        className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeHrDataSubTab === 'travel_norms' ? 'text-amber-600 border-amber-500' : 'text-slate-600 hover:text-amber-600 hover:border-slate-300'}`}
-                        id="travel_norms_tab_trigger"
-                      >
-                        <MapPin className={`w-4 h-4 me-2 ${activeHrDataSubTab === 'travel_norms' ? 'text-amber-600' : 'text-slate-400 group-hover:text-amber-600'}`} />
-                        <span>Định mức công tác phí</span>
-                      </button>
-                    </li>
-                  </ul>
+    <div className="space-y-3 font-sans min-w-0" id="hr_data_tab_content" data-testid="hrdata-root">
+      {/* Chip chuyển danh mục kèm số lượng */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" data-testid="hrdata-chips">
+        {TABS.map(([id, label, Icon, n, trig]) => {
+          const on = activeHrDataSubTab === id;
+          return (
+            <button key={id} type="button" id={trig} onClick={() => setActiveHrDataSubTab(id)} aria-current={on ? 'page' : undefined} data-testid={`hrdata-chip-${id}`}
+              style={on ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
+              className={`h-9 pl-3 pr-2 rounded-full text-[13px] font-bold whitespace-nowrap border cursor-pointer inline-flex items-center gap-1.5 ${on ? '' : 'bg-white text-slate-600 border-slate-200'}`}>
+              <Icon className="w-4 h-4" />{label}
+              <span className="min-w-[22px] h-[20px] px-1.5 rounded-full text-[11px] leading-[20px] text-center font-black"
+                style={on ? { background: '#0d47c9', color: '#ffffff' } : { background: '#e2e8f0', color: '#475569' }}>{n}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ═══ 1. NGÀY NGHỈ LỄ ═══ */}
+      {activeHrDataSubTab === 'holidays' && (
+        <>
+          {toolbar({ search: holidaySearchQuery, setSearch: setHolidaySearchQuery, placeholder: 'Tìm dịp lễ, ngày…', onExport: handleExportHolidays, exportTitle: 'Xuất Excel ngày nghỉ lễ', fileRef: holidaysFileRef, onImport: handleImportHolidays, addLabel: 'Thêm ngày nghỉ lễ', onAdd: () => setShowHolidayModal(true), addId: 'add_holiday_btn' })}
+          {bulkBar}
+          {shell({
+            empty: filteredHolidays.length === 0, emptyText: 'Không tìm thấy ngày nghỉ lễ nào khớp với bộ lọc.',
+            count: <>Tổng cộng <b className="text-slate-700">{holidays.length}</b> ngày nghỉ lễ{filteredHolidays.length !== holidays.length && <> · đang hiển thị {filteredHolidays.length}</>}</>,
+            tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredHolidays)}</th><th className={th}>Ngày nghỉ</th><th className={th}>Tên dịp lễ</th><th className={th}>Mã</th><th className={`${th} text-right`}>Thao tác</th></>),
+            tableBody: filteredHolidays.map(item => (
+              <tr key={item.id} data-testid={`hrdata-row-${item.id}`} className={rowCls(item.id)}>
+                <td className="py-2.5 px-3">{rowCheck(item.id)}</td>
+                <td className="py-2.5 px-3"><span className={`${PILL} bg-slate-50 text-slate-700 border-slate-200 font-mono`}>{item.date}</span></td>
+                <td className="py-2.5 px-3 font-bold text-slate-900">{item.name}</td>
+                <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{item.id}</td>
+                <td className="py-2.5 px-3">{actions(() => onEditHoliday(item), () => handleDeleteHoliday(item.id), 'ngày nghỉ')}</td>
+              </tr>)),
+            cards: filteredHolidays.map(item => (
+              <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
+                <div className="pt-1">{rowCheck(item.id)}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-slate-900 text-sm">{item.name}</div>
+                  <div className="mt-1 flex items-center gap-2"><span className={`${PILL} bg-slate-50 text-slate-700 border-slate-200 font-mono`}>{item.date}</span><span className="font-mono text-[11px] text-slate-400">{item.id}</span></div>
                 </div>
+                {actions(() => onEditHoliday(item), () => handleDeleteHoliday(item.id), 'ngày nghỉ')}
+              </div>)),
+          })}
+        </>
+      )}
 
-                {activeHrDataSubTab === 'holidays' && (
-                  <>
-                    {/* Filter and Addition controls */}
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
-                      <div className="relative w-full md:w-72">
-                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-                        <input
-                          type="text"
-                          placeholder="Tìm kiếm dịp lễ, ngày..."
-                          value={holidaySearchQuery}
-                          onChange={(e) => setHolidaySearchQuery(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-white outline-none focus:border-amber-500 transition-colors"
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handleExportHolidays}
-                          className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          title="Xuất Excel ngày nghỉ lễ"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Xuất Excel</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => holidaysFileRef.current?.click()}
-                          className="bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          title="Nhập Excel ngày nghỉ lễ"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Nhập Excel</span>
-                        </button>
-                        <input
-                          ref={holidaysFileRef}
-                          type="file"
-                          accept=".xlsx,.xls"
-                          className="hidden"
-                          onChange={handleImportHolidays}
-                        />
-                        <button
-                          onClick={() => setShowHolidayModal(true)}
-                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/20"
-                          id="add_holiday_btn"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Thêm ngày nghỉ lễ</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Holidays list table */}
-                    <div className="bg-slate-900/80 border border-slate-850 rounded-xl overflow-hidden shadow-xl">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-850/65 text-slate-350 border-b border-slate-800 uppercase tracking-wider font-extrabold text-[10px]">
-                              <th className="py-3 px-2 w-10 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={hrSelectAll && (() => {
-                                    const filtered = holidays.filter(h => {
-                                      const query = holidaySearchQuery.toLowerCase();
-                                      return h.name.toLowerCase().includes(query) || h.date.includes(query) || h.id.toLowerCase().includes(query);
-                                    });
-                                    return filtered.length > 0 && filtered.every(h => hrSelectedRows.has(h.id));
-                                  })()}
-                                  onChange={(e) => {
-                                    const filtered = holidays.filter(h => {
-                                      const query = holidaySearchQuery.toLowerCase();
-                                      return h.name.toLowerCase().includes(query) || h.date.includes(query) || h.id.toLowerCase().includes(query);
-                                    });
-                                    handleHrSelectAll(e.target.checked, filtered);
-                                  }}
-                                  className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                />
-                              </th>
-                              <th className="py-3 px-4">Mã NL (khóa chính tự sinh)</th>
-                              <th className="py-3 px-4">Ngày nghỉ</th>
-                              <th className="py-3 px-4">Tên dịp lễ</th>
-                              <th className="py-4 px-4 text-center">Hành động</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-850 text-slate-300 font-medium">
-                            {holidays
-                              .filter(h => {
-                                const query = holidaySearchQuery.toLowerCase();
-                                return h.name.toLowerCase().includes(query) || h.date.includes(query) || h.id.toLowerCase().includes(query);
-                              })
-                              .sort((a, b) => parseHolidayDate(a.date) - parseHolidayDate(b.date))
-                              .map((item) => (
-                                <tr key={item.id} className={`hover:bg-slate-800/30 transition-colors ${hrSelectedRows.has(item.id) ? 'bg-amber-500/10' : ''}`}>
-                                  <td className="py-3 px-2 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={hrSelectedRows.has(item.id)}
-                                      onChange={(e) => { e.stopPropagation(); handleHrRowSelect(item.id, e.target.checked); }}
-                                      className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                    />
-                                  </td>
-                                  <td className="py-3 px-4 font-mono font-bold text-amber-500">{item.id}</td>
-                                  <td className="py-3 px-4 text-slate-205 font-mono font-bold">{item.date}</td>
-                                  <td className="py-3 px-4 text-white text-[11.5px]">{item.name}</td>
-                                  <td className="py-3 px-4 text-center">
-                                    <div className="flex items-center justify-center gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => onEditHoliday(item)}
-                                        className="text-slate-500 hover:text-amber-400 p-1.5 rounded transition-colors cursor-pointer"
-                                        title="Sửa ngày nghỉ"
-                                      >
-                                        <Pencil className="w-4 h-4" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteHoliday(item.id)}
-                                        className="text-slate-500 hover:text-red-400 p-1.5 rounded transition-colors cursor-pointer"
-                                        title="Xóa ngày nghỉ"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            {holidays.filter(h => {
-                              const query = holidaySearchQuery.toLowerCase();
-                              return h.name.toLowerCase().includes(query) || h.date.includes(query) || h.id.toLowerCase().includes(query);
-                            }).length === 0 && (
-                              <tr>
-                                <td colSpan={5} className="py-8 text-center text-slate-500 font-semibold italic">
-                                  Không tìm thấy ngày nghỉ lễ nào khớp với bộ lọc.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="bg-slate-900 px-4 py-2.5 border-t border-slate-850 flex justify-between items-center text-[10.5px] text-slate-400">
-                        <div className="flex items-center gap-3">
-                          <span>Tổng cộng: <strong className="text-amber-500 font-mono font-bold">{holidays.length}</strong> ngày nghỉ lễ</span>
-                          {hrSelectedRows.size > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-amber-500 font-bold">Đã chọn: {hrSelectedRows.size}</span>
-                              <button
-                                onClick={handleBulkDeleteHrData}
-                                className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px] flex items-center gap-1"
-                              >
-                                <Trash2 className="w-3 h-3" /> Xóa
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <span className="italic">Hoàng Long ERP • 2026 Calendar</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {activeHrDataSubTab === 'coefficients' && (
-                  <>
-                    {/* Filter and Addition controls */}
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
-                      <div className="relative w-full md:w-72">
-                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-                        <input
-                          type="text"
-                          placeholder="Tìm kiếm nội dung chấm công, mã HSCC..."
-                          value={coefSearchQuery}
-                          onChange={(e) => setCoefSearchQuery(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-white outline-none focus:border-amber-500 transition-colors"
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handleExportCoefficients}
-                          className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          title="Xuất Excel hệ số chấm công"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Xuất Excel</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => coefFileRef.current?.click()}
-                          className="bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          title="Nhập Excel hệ số chấm công"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Nhập Excel</span>
-                        </button>
-                        <input
-                          ref={coefFileRef}
-                          type="file"
-                          accept=".xlsx,.xls"
-                          className="hidden"
-                          onChange={handleImportCoefficients}
-                        />
-                        <button
-                          onClick={() => setShowCoefModal(true)}
-                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/20"
-                          id="add_coef_btn"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Thêm hệ số chấm công</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Coefficients list table */}
-                    <div className="bg-slate-900/80 border border-slate-850 rounded-xl overflow-hidden shadow-xl">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-850/65 text-slate-350 border-b border-slate-800 uppercase tracking-wider font-extrabold text-[10px]">
-                              <th className="py-3 px-2 w-10 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={hrSelectAll && (() => {
-                                    const filtered = leaveCoefficients.filter(c => {
-                                      const query = coefSearchQuery.toLowerCase();
-                                      return c.type.toLowerCase().includes(query) || c.id.toLowerCase().includes(query);
-                                    });
-                                    return filtered.length > 0 && filtered.every(c => hrSelectedRows.has(c.id));
-                                  })()}
-                                  onChange={(e) => {
-                                    const filtered = leaveCoefficients.filter(c => {
-                                      const query = coefSearchQuery.toLowerCase();
-                                      return c.type.toLowerCase().includes(query) || c.id.toLowerCase().includes(query);
-                                    });
-                                    handleHrSelectAll(e.target.checked, filtered);
-                                  }}
-                                  className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                />
-                              </th>
-                              <th className="py-3 px-4">Mã HSCC (Khóa chính)</th>
-                              <th className="py-3 px-4">Nội Dung Chấm Công</th>
-                              <th className="py-3 px-4">Chấm tự động (kiểu boolean)</th>
-                              <th className="py-3 px-4">Hệ Số</th>
-                              <th className="py-3 px-4 text-center">Hành động</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-850 text-slate-300 font-medium font-sans">
-                            {leaveCoefficients
-                              .filter(c => {
-                                const query = coefSearchQuery.toLowerCase();
-                                return c.type.toLowerCase().includes(query) || c.id.toLowerCase().includes(query);
-                              })
-                              .map((item) => (
-                                <tr key={item.id} className={`hover:bg-slate-800/30 transition-colors ${hrSelectedRows.has(item.id) ? 'bg-amber-500/10' : ''}`}>
-                                  <td className="py-3 px-2 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={hrSelectedRows.has(item.id)}
-                                      onChange={(e) => { e.stopPropagation(); handleHrRowSelect(item.id, e.target.checked); }}
-                                      className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                    />
-                                  </td>
-                                  <td className="py-3 px-4 font-mono font-bold text-amber-500">
-                                    <span className="bg-slate-850 border border-slate-800 text-amber-500 font-extrabold rounded-md px-2 py-0.5 text-[11px]">
-                                      {item.id}
-                                    </span>
-                                  </td>
-                                  <td className="py-3 px-4 text-white text-[11.5px]">{item.type}</td>
-                                  <td className="py-3 px-4">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleCoefficientAuto(item.id)}
-                                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                        item.isAuto ? 'bg-emerald-500' : 'bg-slate-700'
-                                      }`}
-                                    >
-                                      <span
-                                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                          item.isAuto ? 'translate-x-4' : 'translate-x-0'
-                                        }`}
-                                      />
-                                    </button>
-                                  </td>
-                                  <td className="py-3 px-4">
-                                    <div className="flex items-center gap-1.5">
-                                      <input
-                                        type="number"
-                                        step="0.1"
-                                        className="w-16 bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-center font-mono text-amber-500 font-extrabold text-xs focus:outline-none focus:border-amber-500 transition-colors"
-                                        value={item.coefficient}
-                                        onChange={(e) => {
-                                          const val = Number(e.target.value);
-                                          setLeaveCoefficients(prev => prev.map(c => c.id === item.id ? { ...c, coefficient: val } : c));
-                                        }}
-                                      />
-                                      <span className="text-[9px] text-slate-400 font-bold uppercase">hệ số</span>
-                                    </div>
-                                  </td>
-                                  <td className="py-3 px-4 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteCoefficient(item.id)}
-                                      className="text-slate-500 hover:text-red-400 p-1.5 rounded transition-colors cursor-pointer"
-                                      title="Xóa hệ số chấm công"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            {leaveCoefficients.filter(c => {
-                              const query = coefSearchQuery.toLowerCase();
-                              return c.type.toLowerCase().includes(query) || c.id.toLowerCase().includes(query);
-                            }).length === 0 && (
-                              <tr>
-                                <td colSpan={6} className="py-8 text-center text-slate-500 font-semibold italic">
-                                  Không tìm thấy hệ số chấm công nào khớp với bộ lọc.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="bg-slate-900 px-4 py-2.5 border-t border-slate-850 flex justify-between items-center text-[10.5px] text-slate-400">
-                        <div className="flex items-center gap-3">
-                          <span>Tổng cộng: <strong className="text-amber-500 font-mono font-bold">{leaveCoefficients.length}</strong> loại hệ số chấm công</span>
-                          {hrSelectedRows.size > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-amber-500 font-bold">Đã chọn: {hrSelectedRows.size}</span>
-                              <button
-                                onClick={handleBulkDeleteHrData}
-                                className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px] flex items-center gap-1"
-                              >
-                                <Trash2 className="w-3 h-3" /> Xóa
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <span className="italic">Hoàng Long ERP • Attendance Coefficients</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {activeHrDataSubTab === 'criteria' && (
-                  <div className="space-y-4" id="criteria_workspace">
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
-                      <div className="relative w-full md:w-72">
-                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-                        <input
-                          type="text"
-                          placeholder="Tìm nhanh tiêu chí đánh giá hiệu suất..."
-                          value={criteriaSearchQuery}
-                          onChange={(e) => setCriteriaSearchQuery(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-white outline-none focus:border-amber-500 transition-colors"
-                        />
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={handleExportCriteria}
-                          className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          title="Xuất Excel tiêu chí hiệu suất"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Xuất Excel</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => criteriaFileRef.current?.click()}
-                          className="bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          title="Nhập Excel tiêu chí hiệu suất"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Nhập Excel</span>
-                        </button>
-                        <input
-                          ref={criteriaFileRef}
-                          type="file"
-                          accept=".xlsx,.xls"
-                          className="hidden"
-                          onChange={handleImportCriteria}
-                        />
-                        <button
-                          onClick={() => {
-                            setEditingCritId(null);
-                            setEditingCritDeptId(null);
-                            setNewCritContent('');
-                            setNewCritCategory('readiness');
-                            setShowCriteriaModal(true);
-                          }}
-                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/20"
-                          id="add_criterion_btn"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Thêm tiêu chí đánh giá</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
-                      <div className="p-4 border-b border-slate-800 bg-slate-950/40 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                        <div>
-                          <h5 className="font-extrabold text-sm text-amber-500 uppercase tracking-wider font-sans">Bảng Toàn Bộ Tiêu Chí Đánh Giá Hiệu Suất</h5>
-                          <p className="text-[10px] text-slate-400 mt-0.5">Sử dụng để đánh giá hiệu suất, thưởng phạt hoặc xếp loại kpi hằng kỳ</p>
-                        </div>
-                        <span className="text-[10px] text-slate-400 bg-slate-950 px-2 py-0.5 rounded font-mono font-bold">
-                          Đang hiển thị: {
-                            ((departmentCriteria[0]?.criteria || []).filter(crit => {
-                              const q = removeVietnameseTones(criteriaSearchQuery);
-                              return removeVietnameseTones(crit.content).includes(q) ||
-                                     removeVietnameseTones(crit.id).includes(q);
-                            })).length
-                          } tiêu chí
-                        </span>
-                      </div>
-
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs font-sans">
-                          <thead>
-                            <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 font-extrabold text-[10px] uppercase tracking-wider">
-                              <th className="p-3.5 w-10 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={hrSelectAll && (() => {
-                                    const unfiltered = departmentCriteria[0]?.criteria || [];
-                                    const filtered = unfiltered.filter(crit => {
-                                      const q = removeVietnameseTones(criteriaSearchQuery);
-                                      return removeVietnameseTones(crit.content).includes(q) ||
-                                             removeVietnameseTones(crit.id).includes(q);
-                                    });
-                                    return filtered.length > 0 && filtered.every(c => hrSelectedRows.has(c.id));
-                                  })()}
-                                  onChange={(e) => {
-                                    const unfiltered = departmentCriteria[0]?.criteria || [];
-                                    const filtered = unfiltered.filter(crit => {
-                                      const q = removeVietnameseTones(criteriaSearchQuery);
-                                      return removeVietnameseTones(crit.content).includes(q) ||
-                                             removeVietnameseTones(crit.id).includes(q);
-                                    });
-                                    handleHrSelectAll(e.target.checked, filtered);
-                                  }}
-                                  className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                />
-                              </th>
-                              <th className="p-3.5 w-12 text-center">STT</th>
-                              <th className="p-3.5 w-32">Mã Tiêu Chí</th>
-                              <th className="p-3.5 w-44">Phân Nhóm</th>
-                              <th className="p-3.5">Nội Dung Tiêu Chí Đánh Giá</th>
-                              <th className="p-3.5 w-32 text-center">Thao Tác</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800 font-sans">
-                            {(() => {
-                              const unfiltered = departmentCriteria[0]?.criteria || [];
-                              const filtered = unfiltered.filter(crit => {
-                                const q = removeVietnameseTones(criteriaSearchQuery);
-                                return removeVietnameseTones(crit.content).includes(q) ||
-                                       removeVietnameseTones(crit.id).includes(q);
-                              });
-
-                              if (filtered.length === 0) {
-                                return (
-                                  <tr>
-                                    <td colSpan={6} className="p-8 text-center text-slate-500 italic">
-                                      Không tìm thấy tiêu chí nào khớp với từ khóa tìm kiếm.
-                                    </td>
-                                  </tr>
-                                );
-                              }
-
-                              return filtered.map((crit, idx) => {
-                                let catLabel = "Tác phong & Chuyên cần";
-                                let catBg = "bg-purple-50 text-purple-700 border-purple-200";
-                                if (crit.category === 'progress') {
-                                  catLabel = "Hiệu suất & Tiến độ";
-                                  catBg = "bg-sky-50 text-sky-700 border-sky-200";
-                                } else if (crit.category === 'reporting') {
-                                  catLabel = "Báo cáo & Đạo đức";
-                                  catBg = "bg-emerald-50 text-emerald-700 border-emerald-200";
-                                }
-
-                                return (
-                                  <tr key={crit.id} className={`hover:bg-slate-850/20 transition-all font-sans ${hrSelectedRows.has(crit.id) ? 'bg-amber-500/10' : ''}`}>
-                                    <td className="p-3 text-center">
-                                      <input
-                                        type="checkbox"
-                                        checked={hrSelectedRows.has(crit.id)}
-                                        onChange={(e) => { e.stopPropagation(); handleHrRowSelect(crit.id, e.target.checked); }}
-                                        className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                      />
-                                    </td>
-                                    <td className="p-3 text-center text-slate-500 font-mono font-bold border-r border-slate-800/40">{idx + 1}</td>
-                                    <td className="p-3 text-slate-400 font-mono font-bold">{crit.id}</td>
-                                    <td className="p-3">
-                                      <span className={`text-[10px] px-2 py-0.5 font-extrabold rounded-md uppercase tracking-wide border ${catBg}`}>
-                                        {catLabel}
-                                      </span>
-                                    </td>
-                                    <td className="p-3 text-white font-extrabold text-[12px]">{crit.content}</td>
-                                    <td className="p-3 text-center">
-                                      <div className="flex items-center justify-center gap-2">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleEditCriteriaTrigger('dept_all', crit)}
-                                          className="bg-slate-850 hover:bg-amber-600 hover:text-white text-slate-350 font-bold px-2 py-1 rounded text-[10px] flex items-center gap-1 transition-all cursor-pointer border border-slate-750"
-                                        >
-                                          Cập nhật
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteCriteria('dept_all', crit.id)}
-                                          className="hover:bg-rose-955/45 hover:text-rose-450 text-slate-500 font-bold p-1 rounded transition-colors cursor-pointer"
-                                          title="Xóa tiêu chí"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              });
-                            })()}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
+      {/* ═══ 2. HỆ SỐ CHẤM CÔNG ═══ */}
+      {activeHrDataSubTab === 'coefficients' && (
+        <>
+          {toolbar({ search: coefSearchQuery, setSearch: setCoefSearchQuery, placeholder: 'Tìm nội dung chấm công, mã…', onExport: handleExportCoefficients, exportTitle: 'Xuất Excel hệ số chấm công', fileRef: coefFileRef, onImport: handleImportCoefficients, addLabel: 'Thêm hệ số', onAdd: () => setShowCoefModal(true), addId: 'add_coef_btn' })}
+          {bulkBar}
+          {(() => {
+            // Công tắc "Chấm tự động" (bấm đổi ngay, như cũ) và ô sửa hệ số tại chỗ
+            const toggle = (item: LeaveCoefficient) => (
+              <button type="button" role="switch" aria-checked={item.isAuto} aria-label="Chấm tự động" data-testid={`hrdata-auto-${item.id}`} onClick={() => handleToggleCoefficientAuto(item.id)}
+                style={{ background: item.isAuto ? '#0d47c9' : '#cbd5e1' }} className="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
+                <span className={`pointer-events-none inline-block h-4 w-4 m-0.5 transform rounded-full bg-white shadow transition ${item.isAuto ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>);
+            const coefInput = (item: LeaveCoefficient) => (
+              <input type="number" step="0.1" value={item.coefficient} data-testid={`hrdata-coef-${item.id}`} aria-label="Hệ số"
+                onChange={(e) => { const val = Number(e.target.value); setLeaveCoefficients(prev => prev.map(c => c.id === item.id ? { ...c, coefficient: val } : c)); }}
+                className="w-16 h-8 bg-white border border-slate-200 rounded-lg px-1.5 text-center font-mono font-bold text-[13px] outline-none focus:border-blue-400" />);
+            return shell({
+              empty: filteredCoefs.length === 0, emptyText: 'Không tìm thấy hệ số chấm công nào khớp với bộ lọc.',
+              count: <>Tổng cộng <b className="text-slate-700">{leaveCoefficients.length}</b> loại hệ số chấm công</>,
+              tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredCoefs)}</th><th className={th}>Nội dung chấm công</th><th className={th}>Mã</th><th className={th}>Chấm tự động</th><th className={th}>Hệ số</th><th className={`${th} text-right`}>Thao tác</th></>),
+              tableBody: filteredCoefs.map(item => (
+                <tr key={item.id} data-testid={`hrdata-row-${item.id}`} className={rowCls(item.id)}>
+                  <td className="py-2.5 px-3">{rowCheck(item.id)}</td>
+                  <td className="py-2.5 px-3 font-bold text-slate-900">{item.type}</td>
+                  <td className="py-2.5 px-3"><span className={`${PILL} bg-slate-50 text-slate-600 border-slate-200 font-mono`}>{item.id}</span></td>
+                  <td className="py-2.5 px-3">{toggle(item)}</td>
+                  <td className="py-2.5 px-3">{coefInput(item)}</td>
+                  <td className="py-2.5 px-3">{actions(null, () => handleDeleteCoefficient(item.id), 'hệ số')}</td>
+                </tr>)),
+              cards: filteredCoefs.map(item => (
+                <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    <div className="pt-1">{rowCheck(item.id)}</div>
+                    <div className="flex-1 min-w-0"><div className="font-bold text-slate-900 text-sm">{item.type}</div><span className={`${PILL} bg-slate-50 text-slate-600 border-slate-200 font-mono mt-1`}>{item.id}</span></div>
+                    {actions(null, () => handleDeleteCoefficient(item.id), 'hệ số')}
                   </div>
-                )}
+                  <div className="flex items-center gap-4 pl-7"><label className="flex items-center gap-2 text-xs text-slate-500">Chấm tự động {toggle(item)}</label><label className="flex items-center gap-2 text-xs text-slate-500">Hệ số {coefInput(item)}</label></div>
+                </div>)),
+            });
+          })()}
+        </>
+      )}
 
-                {activeHrDataSubTab === 'salary_scales' && (
-                  <div className="space-y-4" id="salary_scales_workspace">
-                    {/* Filter and configuration header */}
-                    <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
-                      <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
-                        <div className="relative w-full sm:w-60">
-                          <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-                          <input
-                            type="text"
-                            placeholder="Tìm mã, ngạch, bậc..."
-                            value={salaryScalesSearch}
-                            onChange={(e) => setSalaryScalesSearch(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-white outline-none focus:border-amber-500 transition-colors"
-                          />
-                        </div>
-
-                        <select
-                          value={selectedGroupFilter}
-                          onChange={(e) => setSelectedGroupFilter(e.target.value)}
-                          className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-amber-500 transition-colors cursor-pointer font-bold"
-                        >
-                          <option value="all">📍 Tất cả các ngạch</option>
-                          <option value="QLDH">I. QUẢN LÝ - ĐIỀU HÀNH (QLDH)</option>
-                          <option value="KTTC">II. KỸ THUẬT - THI CÔNG (KTTC)</option>
-                          <option value="HCKT">III. HÀNH CHÍNH - NHÂN SỰ (HCKT)</option>
-                        </select>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                        <button
-                          type="button"
-                          onClick={handleExportSalaryScales}
-                          className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          title="Xuất Excel bảng lương"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Xuất Excel</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => salaryScaleFileRef.current?.click()}
-                          className="bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                          title="Nhập Excel bảng lương"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Nhập Excel</span>
-                        </button>
-                        <input
-                          ref={salaryScaleFileRef}
-                          type="file"
-                          accept=".xlsx,.xls"
-                          className="hidden"
-                          onChange={handleImportSalaryScales}
-                        />
-                        <button
-                          type="button"
-                          onClick={handleResetSalaryScales}
-                          className="bg-slate-850 hover:bg-slate-800 text-slate-300 font-bold text-xs px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer border border-slate-755"
-                        >
-                          <FileSpreadsheet className="w-4 h-4 text-teal-400" />
-                          <span>Khôi phục mẫu Excel</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleAddNewSalaryScaleClick}
-                          className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-amber-500/20 animate-pulse"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Thêm Bậc Lương mới</span>
-                        </button>
-                      </div>
-                    </div>
-
-
-                    {/* Main Salary Scales List Table */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-                      <div className="p-4 border-b border-slate-850 bg-slate-950/40 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-                        <div>
-                          <h5 className="font-extrabold text-sm text-amber-400 uppercase tracking-wider font-sans">Bảng Tra Cứu Hệ Thống Bậc Lương</h5>
-                          <p className="text-[10px] text-slate-400 mt-0.5">Chi tiết bảng ngạch, hệ số, tỷ lệ chia lương cơ bản & hiệu suất đạt 100%</p>
-                        </div>
-                        <span className="text-[10px] text-slate-350 bg-slate-950/80 border border-slate-800 px-2.5 py-1 rounded font-mono font-bold">
-                          Đang tìm thấy: <strong className="text-amber-500">{
-                            salaryScales.filter(item => {
-                              const q = salaryScalesSearch.toLowerCase();
-                              const groupMatch = selectedGroupFilter === 'all' || item.groupCode === selectedGroupFilter;
-                              const textMatch = item.id.toLowerCase().includes(q) ||
-                                              item.levelName.toLowerCase().includes(q) ||
-                                              item.groupName.toLowerCase().includes(q);
-                              return groupMatch && textMatch;
-                            }).length
-                          }</strong> / {salaryScales.length} bậc lương
-                        </span>
-                      </div>
-
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs font-sans">
-                          <thead>
-                            <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-350 font-extrabold text-[10px] uppercase tracking-wider">
-                              <th className="py-3 px-2 text-center w-10 border-r border-slate-850">
-                                <input
-                                  type="checkbox"
-                                  checked={hrSelectAll && (() => {
-                                    const filtered = salaryScales.filter(item => {
-                                      const q = salaryScalesSearch.toLowerCase();
-                                      const groupMatch = selectedGroupFilter === 'all' || item.groupCode === selectedGroupFilter;
-                                      const textMatch = item.id.toLowerCase().includes(q) ||
-                                                      item.levelName.toLowerCase().includes(q) ||
-                                                      item.groupName.toLowerCase().includes(q);
-                                      return groupMatch && textMatch;
-                                    });
-                                    return filtered.length > 0 && filtered.every(item => hrSelectedRows.has(item.id));
-                                  })()}
-                                  onChange={(e) => {
-                                    const filtered = salaryScales.filter(item => {
-                                      const q = salaryScalesSearch.toLowerCase();
-                                      const groupMatch = selectedGroupFilter === 'all' || item.groupCode === selectedGroupFilter;
-                                      const textMatch = item.id.toLowerCase().includes(q) ||
-                                                      item.levelName.toLowerCase().includes(q) ||
-                                                      item.groupName.toLowerCase().includes(q);
-                                      return groupMatch && textMatch;
-                                    });
-                                    handleHrSelectAll(e.target.checked, filtered);
-                                  }}
-                                  className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                />
-                              </th>
-                              <th className="py-3 px-3 text-center w-12 border-r border-slate-850">TT</th>
-                              <th className="py-3 px-3 border-r border-slate-850">Mã Chi Trả</th>
-                              <th className="py-3 px-3 border-r border-slate-850">Mã Ngạch</th>
-                              <th className="py-3 px-4 border-r border-slate-850">Tên Ngạch / Đối tượng áp dụng</th>
-                              <th className="py-3 px-3 border-r border-slate-850 text-center">Bậc</th>
-                              <th className="py-3 px-3 border-r border-slate-850">Tên Bậc</th>
-                              <th className="py-3 px-3 border-r border-slate-850 text-right">Lương Cơ Bản (LCB)</th>
-                              <th className="py-3 px-3 border-r border-slate-850 text-center">Tỉ Lệ %</th>
-                              <th className="py-3 px-3 border-r border-slate-850 text-right">Lương Hiệu Suất</th>
-                              <th className="py-3 px-3 border-r border-slate-850 text-right text-emerald-400 bg-emerald-950/10">Tổng Lương (100%)</th>
-                              <th className="py-3 px-3">Ghi chú</th>
-                              <th className="py-3 px-3 text-center">Hành động</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-850 text-slate-300 font-medium">
-                            {(() => {
-                              // Let's filter first
-                              const filtered = salaryScales.filter(item => {
-                                const q = salaryScalesSearch.toLowerCase();
-                                const groupMatch = selectedGroupFilter === 'all' || item.groupCode === selectedGroupFilter;
-                                const textMatch = item.id.toLowerCase().includes(q) ||
-                                                item.levelName.toLowerCase().includes(q) ||
-                                                item.groupName.toLowerCase().includes(q);
-                                return groupMatch && textMatch;
-                              });
-
-                              if (filtered.length === 0) {
-                                return (
-                                  <tr>
-                                    <td colSpan={13} className="py-12 text-center text-slate-500 font-semibold italic">
-                                      Không tìm thấy thông tin bậc lương nào khớp với bộ lọc tìm kiếm.
-                                    </td>
-                                  </tr>
-                                );
-                              }
-
-                              // Render sorted or as inputted
-                              let globalIndex = 0;
-                              return filtered.map((item) => {
-                                globalIndex++;
-                                return (
-                                  <tr key={item.id} className={`hover:bg-slate-800/35 transition-colors group ${hrSelectedRows.has(item.id) ? 'bg-amber-500/10' : ''}`}>
-                                    <td className="py-3 px-2 text-center border-r border-slate-850">
-                                      <input
-                                        type="checkbox"
-                                        checked={hrSelectedRows.has(item.id)}
-                                        onChange={(e) => { e.stopPropagation(); handleHrRowSelect(item.id, e.target.checked); }}
-                                        className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                      />
-                                    </td>
-                                    <td className="py-3 px-3 text-center border-r border-slate-850 font-mono text-slate-400 text-[10.5px]">
-                                      {globalIndex}
-                                    </td>
-                                    <td className="py-3 px-3 border-r border-slate-850 font-mono font-bold text-amber-500 text-[11px]">
-                                      {item.id}
-                                    </td>
-                                    <td className="py-3 px-3 border-r border-slate-850 font-mono font-black text-slate-400 text-[10.5px]">
-                                      {item.groupCode}
-                                    </td>
-                                    <td className="py-3 px-4 border-r border-slate-850">
-                                      <div className="space-y-0.5">
-                                        <div className="font-extrabold text-white text-[11px]">{item.groupName}</div>
-                                        {item.groupDesc && (
-                                          <div className="text-[9.5px] text-slate-400 line-clamp-1 group-hover:line-clamp-none transition-all">
-                                            {item.groupDesc}
-                                          </div>
-                                        )}
-                                      </div>
-                                    </td>
-                                    <td className="py-3 px-3 border-r border-slate-850 text-center font-mono font-black text-blue-400 text-[11px]">
-                                      {item.level}
-                                    </td>
-                                    <td className="py-3 px-3 border-r border-slate-850 text-white font-semibold text-[11px]">
-                                      {item.levelName}
-                                    </td>
-                                    <td className="py-3 px-3 border-r border-slate-850 text-right font-mono font-bold text-slate-100 text-[11px]">
-                                      {item.baseSalary.toLocaleString('vi-VN')} ₫
-                                    </td>
-                                    <td className="py-3 px-3 border-r border-slate-850 text-center font-mono">
-                                      <span className="bg-slate-950/80 px-2 py-0.5 rounded text-[11px] border border-slate-800 text-amber-400 font-extrabold font-mono">
-                                        {item.allocationRate}%
-                                      </span>
-                                    </td>
-                                    <td className="py-3 px-3 border-r border-slate-850 text-right font-mono font-bold text-slate-300 text-[11px]">
-                                      {item.performanceSalary.toLocaleString('vi-VN')} ₫
-                                    </td>
-                                    <td className="py-3 px-3 border-r border-slate-850 text-right font-mono font-black text-emerald-400 text-[11.5px] bg-emerald-950/10">
-                                      {item.totalSalary.toLocaleString('vi-VN')} ₫
-                                    </td>
-                                    <td className="py-3 px-3 text-[10.5px] text-slate-400 italic">
-                                      {item.notes || '-'}
-                                    </td>
-                                    <td className="py-3 px-3 text-center">
-                                      <div className="flex items-center justify-center gap-1.5">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleEditSalaryScaleClick(item)}
-                                          className="bg-slate-850 hover:bg-amber-600 hover:text-white text-slate-350 font-extrabold px-2 py-0.5 rounded text-[10px] transition-all cursor-pointer border border-slate-750"
-                                        >
-                                          Sửa
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteSalaryScale(item.id)}
-                                          className="hover:bg-rose-955/45 hover:text-rose-450 text-slate-500 font-bold p-1 rounded transition-colors cursor-pointer"
-                                          title="Xóa ngạch bậc này"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              });
-                            })()}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div className="bg-slate-950 px-4 py-3 border-t border-slate-850 flex flex-col sm:flex-row justify-between items-center text-[10px] text-slate-400 gap-2">
-                        <div className="flex items-center gap-3">
-                          <span>Định dạng dữ liệu bảng bậc lương: <strong>Dữ liệu chuẩn hóa SQL • Chống sai lệch %</strong></span>
-                          {hrSelectedRows.size > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-amber-500 font-bold">Đã chọn: {hrSelectedRows.size}</span>
-                              <button
-                                onClick={handleBulkDeleteHrData}
-                                className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px] flex items-center gap-1"
-                              >
-                                <Trash2 className="w-3 h-3" /> Xóa
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <span className="italic">Bản quyền của Hoàng Long ERP • Quản trị tài chính nhân sự</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {activeHrDataSubTab === 'insurance' && (() => {
-              const filteredInsEmployees = employees.filter((emp: any) => {
-                const searchLower = insSearchText.trim().toLowerCase();
-                const matchesSearch = searchLower === '' ||
-                  emp.id.toLowerCase().includes(searchLower) ||
-                  emp.name.toLowerCase().includes(searchLower) ||
-                  (emp.bhxhBookNo && emp.bhxhBookNo.toLowerCase().includes(searchLower));
-
-                const matchesDept = insDeptFilter === 'all' || emp.department === insDeptFilter;
-
-                const matchesBook = insBookFilter === 'all' ||
-                  (insBookFilter === 'has_book' && emp.bhxhBookNo && emp.bhxhBookNo.trim() !== '') ||
-                  (insBookFilter === 'no_book' && (!emp.bhxhBookNo || emp.bhxhBookNo.trim() === ''));
-
-                return matchesSearch && matchesDept && matchesBook;
-              });
-
-              const insStats = (() => {
-                const withBook = employees.filter((e: any) => e.bhxhBookNo && e.bhxhBookNo.trim() !== '');
-                const withoutBook = employees.filter((e: any) => !e.bhxhBookNo || e.bhxhBookNo.trim() === '');
-                const getInsSalary = (e: any) => Number(e.bhxhSalary) || (salaryScales.find((s: any) => s.id === e.salaryCode)?.baseSalary || 0);
-                const totalSalary = withBook.reduce((sum: number, e: any) => sum + getInsSalary(e), 0);
-                const totalPayment = withBook.reduce((sum: number, e: any) => {
-                  const rate = Number(e.bhxhRate) || 10.5;
-                  const sal = getInsSalary(e);
-                  return sum + (sal * rate / 100);
-                }, 0);
-
-                return {
-                  total: employees.length,
-                  withBookCount: withBook.length,
-                  withoutBookCount: withoutBook.length,
-                  totalSalary,
-                  totalPayment
-                };
-              })();
-
-              const handleBatchGenerateBHXH = () => {
-                let count = 0;
-                const updated = employees.map((emp: any, index: number) => {
-                  if (!emp.bhxhBookNo || emp.bhxhBookNo.trim() === '') {
-                    count++;
-                    const numericSuffix = String(4000 + index + 1).padStart(4, '0');
-                    return {
-                      ...emp,
-                      bhxhBookNo: `SHX260${numericSuffix}`,
-                      bhxhSalary: salaryScales.find((s: any) => s.id === emp.salaryCode)?.baseSalary || 5200000,
-                      bhxhRate: 10.5,
-                      bhxhDate: '2026-04-01',
-                      taxPersonalRelief: 15500000,
-                      dependentCount: 0
-                    };
-                  }
-                  return emp;
-                });
-                if (count === 0) {
-                  addToast({ title: 'ℹ️ Thông báo', message: 'Tất cả nhân viên hiện tại đều đã được đăng ký sổ BHXH!', type: 'warning' });
-                  return;
-                }
-                setEmployees(updated);
-                addToast({ title: '✅ Thành công', message: `Đã cấp số sổ BHXH tự động hàng loạt thành công cho ${count} nhân sự chưa có sổ!`, type: 'success' });
-              };
-
-              const handleOpenEditIns = (emp: any) => {
-                setEditingInsEmpId(emp.id);
-                setInsBookNo(emp.bhxhBookNo || '');
-                setInsSalary(emp.bhxhSalary || (salaryScales.find((s: any) => s.id === emp.salaryCode)?.baseSalary || 0));
-                setInsRate(emp.bhxhRate || 10.5);
-                setInsPersonalRelief(emp.taxPersonalRelief || 15500000);
-                setInsDependentCount(emp.dependentCount || 0);
-                setInsDate(emp.bhxhDate || '2026-04-01');
-                setShowInsModal(true);
-              };
-
-              // Extract departments
-              const departments = Array.from(new Set(employees.map((e: any) => e.department))).filter(Boolean);
-
+      {/* ═══ 3. TIÊU CHÍ HIỆU SUẤT ═══ */}
+      {activeHrDataSubTab === 'criteria' && (
+        <div className="space-y-3" id="criteria_workspace">
+          {toolbar({ search: criteriaSearchQuery, setSearch: setCriteriaSearchQuery, placeholder: 'Tìm tiêu chí đánh giá…', onExport: handleExportCriteria, exportTitle: 'Xuất Excel tiêu chí hiệu suất', fileRef: criteriaFileRef, onImport: handleImportCriteria, addLabel: 'Thêm tiêu chí', addId: 'add_criterion_btn',
+            onAdd: () => { setEditingCritId(null); setEditingCritDeptId(null); setNewCritContent(''); setNewCritCategory('readiness'); setShowCriteriaModal(true); } })}
+          {bulkBar}
+          {shell({
+            empty: filteredCriteria.length === 0, emptyText: 'Không tìm thấy tiêu chí nào khớp với từ khóa tìm kiếm.',
+            count: <>Đang hiển thị <b className="text-slate-700">{filteredCriteria.length}</b> / {allCriteria.length} tiêu chí</>,
+            tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredCriteria)}</th><th className={`${th} w-12`}>STT</th><th className={th}>Phân nhóm</th><th className={th}>Nội dung tiêu chí đánh giá</th><th className={th}>Mã</th><th className={`${th} text-right`}>Thao tác</th></>),
+            tableBody: filteredCriteria.map((crit, idx) => {
+              const m = critMeta(crit.category);
               return (
-                <div className="space-y-4 font-sans" id="payroll_bhxh_view_pane">
+                <tr key={crit.id} data-testid={`hrdata-row-${crit.id}`} className={rowCls(crit.id)}>
+                  <td className="py-2.5 px-3">{rowCheck(crit.id)}</td>
+                  <td className="py-2.5 px-3 text-slate-400 font-mono">{idx + 1}</td>
+                  <td className="py-2.5 px-3"><span className={`${PILL} ${m.cls}`}>{m.label}</span></td>
+                  <td className="py-2.5 px-3 font-bold text-slate-900">{crit.content}</td>
+                  <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{crit.id}</td>
+                  <td className="py-2.5 px-3">{actions(() => handleEditCriteriaTrigger('dept_all', crit), () => handleDeleteCriteria('dept_all', crit.id), 'tiêu chí')}</td>
+                </tr>);
+            }),
+            cards: filteredCriteria.map(crit => {
+              const m = critMeta(crit.category);
+              return (
+                <div key={crit.id} data-testid={`hrdata-card-${crit.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(crit.id) ? 'bg-blue-50/60' : ''}`}>
+                  <div className="pt-1">{rowCheck(crit.id)}</div>
+                  <div className="flex-1 min-w-0"><span className={`${PILL} ${m.cls}`}>{m.label}</span><div className="mt-1.5 font-bold text-slate-900 text-sm break-words">{crit.content}</div><div className="font-mono text-[11px] text-slate-400 mt-0.5">{crit.id}</div></div>
+                  {actions(() => handleEditCriteriaTrigger('dept_all', crit), () => handleDeleteCriteria('dept_all', crit.id), 'tiêu chí')}
+                </div>);
+            }),
+          })}
+        </div>
+      )}
 
-                  {/* Summary Cards Row */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-md flex items-center justify-between">
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Đã có Số sổ BHXH</span>
-                        <div className="text-xl font-black text-emerald-400 flex items-baseline gap-1.5">
-                          {insStats.withBookCount}
-                          <span className="text-slate-500 text-xs font-semibold">/ {insStats.total} NV</span>
-                        </div>
-                        <p className="text-[10px] text-slate-450 font-bold">
-                          Tỷ lệ: {insStats.total > 0 ? ((insStats.withBookCount / insStats.total) * 100).toFixed(1) : 0}% nhân sự
-                        </p>
-                      </div>
-                      <div className="h-10 w-10 rounded-xl bg-emerald-950/40 border border-emerald-550/30 flex items-center justify-center">
-                        <CheckCircle className="w-5 h-5 text-emerald-450" />
-                      </div>
-                    </div>
-
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-md flex items-center justify-between">
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Mức Thù Lao BHXH</span>
-                        <div className="text-xl font-black text-teal-400">
-                          {insStats.totalSalary.toLocaleString('vi-VN')} <span className="text-[10px] text-teal-500">đ</span>
-                        </div>
-                        <p className="text-[10px] text-slate-450 font-semibold italic">Tổng mức lương nền đóng bảo lưu</p>
-                      </div>
-                      <div className="h-10 w-10 rounded-xl bg-teal-950/40 border border-teal-500/20 flex items-center justify-center">
-                        <DollarSign className="w-5 h-5 text-teal-450" />
-                      </div>
-                    </div>
-
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-md flex items-center justify-between">
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Tiền Trích Đóng (10.5%)</span>
-                        <div className="text-xl font-black text-sky-400">
-                          {Math.round(insStats.totalPayment).toLocaleString('vi-VN')} <span className="text-[10px] text-sky-500">đ/tháng</span>
-                        </div>
-                        <p className="text-[10px] text-sky-450/80 font-bold">Trừ trực tiếp từ thu nhập ròng</p>
-                      </div>
-                      <div className="h-10 w-10 rounded-xl bg-sky-950/40 border border-sky-550/30 flex items-center justify-center">
-                        <Percent className="w-5 h-5 text-sky-400" />
-                      </div>
-                    </div>
-
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-md flex items-center justify-between">
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Chưa Đăng Ký BHXH</span>
-                        <div className="text-xl font-black text-rose-400 flex items-baseline gap-1.5">
-                          {insStats.withoutBookCount}
-                          <span className="text-slate-500 text-xs font-medium">nhân viên</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={handleBatchGenerateBHXH}
-                          className="text-[9.5px] text-amber-500 hover:text-amber-450 underline font-bold transition-all text-left block cursor-pointer"
-                        >
-                          ⚡ Đăng ký tự động hàng loạt
-                        </button>
-                      </div>
-                      <div className="h-10 w-10 rounded-xl bg-rose-955/20 border border-rose-500/20 flex items-center justify-center">
-                        <Info className="w-5 h-5 text-rose-450 animate-pulse" />
-                      </div>
-                    </div>
-
+      {/* ═══ 4. BẬC LƯƠNG ═══ */}
+      {activeHrDataSubTab === 'salary_scales' && (
+        <div className="space-y-3" id="salary_scales_workspace">
+          {toolbar({ search: salaryScalesSearch, setSearch: setSalaryScalesSearch, placeholder: 'Tìm mã, ngạch, bậc…', onExport: handleExportSalaryScales, exportTitle: 'Xuất Excel bậc lương', fileRef: salaryScaleFileRef, onImport: handleImportSalaryScales, addLabel: 'Thêm bậc lương', onAdd: handleAddNewSalaryScaleClick,
+            extra: (
+              <select value={selectedGroupFilter} onChange={(e) => setSelectedGroupFilter(e.target.value)} aria-label="Ngạch" data-testid="hrdata-group-filter" className={`${inputCls} cursor-pointer font-bold`}>
+                <option value="all">Tất cả các ngạch</option>
+                <option value="QLDH">I. Quản lý - Điều hành (QLDH)</option>
+                <option value="KTTC">II. Kỹ thuật - Thi công (KTTC)</option>
+                <option value="HCKT">III. Hành chính - Nhân sự (HCKT)</option>
+              </select>),
+            more: (<button type="button" onClick={handleResetSalaryScales} data-testid="hrdata-reset-scales" className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" /><span className="hidden sm:inline">Khôi phục mẫu</span></button>) })}
+          {bulkBar}
+          {shell({
+            minW: 'min-w-[1000px]',
+            empty: filteredScales.length === 0, emptyText: 'Không tìm thấy thông tin bậc lương nào khớp với bộ lọc tìm kiếm.',
+            count: <>Đang hiển thị <b className="text-slate-700">{filteredScales.length}</b> / {salaryScales.length} bậc lương</>,
+            tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredScales)}</th><th className={th}>Mã chi trả</th><th className={th}>Ngạch / đối tượng áp dụng</th><th className={th}>Bậc</th><th className={`${th} text-right`}>Lương cơ bản</th><th className={`${th} text-center`}>Tỉ lệ</th><th className={`${th} text-right`}>Lương hiệu suất</th><th className={`${th} text-right`}>Tổng (100%)</th><th className={th}>Ghi chú</th><th className={`${th} text-right`}>Thao tác</th></>),
+            tableBody: filteredScales.map(item => (
+              <tr key={item.id} data-testid={`hrdata-row-${item.id}`} className={rowCls(item.id)}>
+                <td className="py-2.5 px-3">{rowCheck(item.id)}</td>
+                <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{item.id}</td>
+                <td className="py-2.5 px-3"><div className="font-bold text-slate-900">{item.groupName}</div><div className="text-[11px] text-slate-500"><span className="font-mono">{item.groupCode}</span>{item.groupDesc ? ` · ${item.groupDesc}` : ''}</div></td>
+                <td className="py-2.5 px-3"><span className={`${PILL} bg-sky-50 text-sky-700 border-sky-200 font-mono`}>{item.level}</span> <span className="text-slate-700">{item.levelName}</span></td>
+                <td className="py-2.5 px-3 text-right font-mono text-slate-800">{money(item.baseSalary)}</td>
+                <td className="py-2.5 px-3 text-center"><span className={`${PILL} bg-amber-50 text-amber-700 border-amber-200 font-mono`}>{item.allocationRate}%</span></td>
+                <td className="py-2.5 px-3 text-right font-mono text-slate-800">{money(item.performanceSalary)}</td>
+                <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-700">{money(item.totalSalary)}</td>
+                <td className="py-2.5 px-3 text-[12px] text-slate-500 max-w-[200px] truncate" title={item.notes || ''}>{item.notes || '—'}</td>
+                <td className="py-2.5 px-3">{actions(() => handleEditSalaryScaleClick(item), () => handleDeleteSalaryScale(item.id), 'bậc lương')}</td>
+              </tr>)),
+            cards: filteredScales.map(item => (
+              <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
+                <div className="flex items-start gap-3">
+                  <div className="pt-1">{rowCheck(item.id)}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-slate-900 text-sm">{item.groupName}</div>
+                    <div className="mt-1 flex items-center gap-1.5 flex-wrap"><span className={`${PILL} bg-sky-50 text-sky-700 border-sky-200 font-mono`}>{item.level}</span><span className="text-xs text-slate-600">{item.levelName}</span><span className="font-mono text-[11px] text-slate-400">{item.id}</span></div>
                   </div>
-
-                  {/* Filter controls row */}
-                  <div className="bg-slate-900/90 p-4 rounded-2xl border border-slate-800/80 flex flex-col md:flex-row gap-4 items-center justify-between">
-
-                    {/* Search Input Box */}
-                    <div className="relative w-full md:max-w-md">
-                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                      <input
-                        type="text"
-                        value={insSearchText}
-                        onChange={(e) => setInsSearchText(e.target.value)}
-                        placeholder="Tìm theo Mã NV, Tên NV, Số sổ BHXH..."
-                        className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-800 focus:border-amber-600 focus:outline-none rounded-xl text-xs text-white placeholder-slate-500 font-sans shadow-inner transition-all"
-                      />
-                    </div>
-
-                    {/* Filter Select Boxes */}
-                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto shrink-0">
-
-                      {/* Department Filter */}
-                      <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
-                        <span className="text-slate-500 text-[10px] font-bold uppercase select-none">BỘ PHẬN:</span>
-                        <select
-                          value={insDeptFilter}
-                          onChange={(e) => setInsDeptFilter(e.target.value)}
-                          className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-bold select-none pr-1"
-                        >
-                          <option value="all">Tất cả phòng ban</option>
-                          {departments.map((dept: any) => (
-                            <option key={dept} value={dept}>{dept}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Code Status Filter */}
-                      <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
-                        <span className="text-slate-500 text-[10px] font-bold uppercase select-none">SỔ BH:</span>
-                        <select
-                          value={insBookFilter}
-                          onChange={(e) => setInsBookFilter(e.target.value)}
-                          className="bg-transparent text-xs text-white focus:outline-none cursor-pointer font-bold select-none pr-1"
-                        >
-                          <option value="all">Toàn bộ hồ sơ</option>
-                          <option value="has_book">Đã cấp sổ BHXH</option>
-                          <option value="no_book">Chưa đăng ký sổ</option>
-                        </select>
-                      </div>
-
-                      {/* Export / Import Insurance */}
-                      <button
-                        type="button"
-                        onClick={handleExportInsurance}
-                        className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-extrabold px-3 py-2.5 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
-                        title="Xuất Excel BHXH & Thuế"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Xuất Excel</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => insuranceFileRef.current?.click()}
-                        className="bg-blue-700 hover:bg-blue-600 text-white text-xs font-extrabold px-3 py-2.5 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
-                        title="Nhập Excel BHXH & Thuế"
-                      >
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Nhập Excel</span>
-                      </button>
-                      <input
-                        ref={insuranceFileRef}
-                        type="file"
-                        accept=".xlsx,.xls"
-                        className="hidden"
-                        onChange={handleImportInsurance}
-                      />
-                      {/* Export / Batch Action Button */}
-                      <button
-                        type="button"
-                        onClick={handleBatchGenerateBHXH}
-                        className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-extrabold px-4 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 cursor-pointer"
-                      >
-                        <Sliders className="w-3.5 h-3.5" />
-                        <span>Đăng ký nhanh</span>
-                      </button>
-
-                    </div>
-
-                  </div>
-
-                  {/* Main Database Table Container */}
-                  <div className="bg-slate-900 border border-slate-800/85 rounded-2xl shadow-xl overflow-hidden">
-
-                    <div className="p-4 bg-slate-900/60 border-b border-slate-800/80 flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        <span className="text-xs font-extrabold text-white">Danh sách BHXH & Thiết lập Giảm thuế TNCN ({filteredInsEmployees.length} nhân sự)</span>
-                      </div>
-                      <div className="text-[10px] text-slate-450 italic font-medium">Định dạng hiển thị: <strong>Lịch thanh toán đồng bộ</strong></div>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left whitespace-nowrap">
-                        <thead>
-                          <tr className="bg-slate-950/70 border-b border-slate-800 text-[10px] text-slate-400 uppercase font-black tracking-wider">
-                            <th className="p-3 text-center border-r border-slate-800/40 w-10 border-b border-slate-800">
-                              <input
-                                type="checkbox"
-                                checked={hrSelectAll && (filteredInsEmployees.length > 0 && filteredInsEmployees.every(emp => hrSelectedRows.has(emp.id)))}
-                                onChange={(e) => handleHrSelectAll(e.target.checked, filteredInsEmployees)}
-                                className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                              />
-                            </th>
-                            <th className="p-3 text-center border-r border-slate-800/40 w-12 border-b border-slate-800">STT</th>
-                            <th className="p-3 border-b border-slate-800">Mã NV</th>
-                            <th className="p-3 border-b border-slate-800">Họ và Tên</th>
-                            <th className="p-3 border-b border-slate-800">Bộ phận / Chức vụ</th>
-                            <th className="p-3 text-center border-b border-slate-800">Số sổ BHXH</th>
-                            <th className="p-3 text-right border-b border-slate-800">Mức đóng BH</th>
-                            <th className="p-3 text-center border-b border-slate-800">Tỷ lệ đóng</th>
-                            <th className="p-3 text-right border-b border-slate-800">Tiền trích đóng</th>
-                            <th className="p-3 text-center border-b border-slate-800">Ngày hiệu lực</th>
-                            <th className="p-3 text-right border-b border-slate-800">Thuế: Bản thân</th>
-                            <th className="p-3 text-center border-b border-slate-800">Số người PT</th>
-                            <th className="p-3 text-center w-24 border-b border-slate-800">Thao tác</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-850/60">
-                          {filteredInsEmployees.length === 0 ? (
-                            <tr>
-                              <td colSpan={13} className="p-10 text-center text-slate-500 font-medium italic text-xs font-sans">
-                                ❌ Không tìm thấy nhân sự phù hợp với điều kiện tìm kiếm.
-                              </td>
-                            </tr>
-                          ) : (
-                            filteredInsEmployees.map((emp: any, idx: number) => {
-                              const bxhSal = Number(emp.bhxhSalary) || (salaryScales.find((s: any) => s.id === emp.salaryCode)?.baseSalary || 0);
-                              const rate = Number(emp.bhxhRate) || 10.5;
-                              const monthlyDeduction = (bxhSal * rate) / 100;
-                              const personalDeduction = Number(emp.taxPersonalRelief) || 15500000;
-                              const depCount = Number(emp.dependentCount) || 0;
-
-                              return (
-                                <tr key={emp.id} className={`hover:bg-slate-850/20 transition-colors font-sans text-xs ${hrSelectedRows.has(emp.id) ? 'bg-amber-500/10' : ''}`}>
-                                  <td className="p-3 text-center border-r border-slate-800/40">
-                                    <input
-                                      type="checkbox"
-                                      checked={hrSelectedRows.has(emp.id)}
-                                      onChange={(e) => { e.stopPropagation(); handleHrRowSelect(emp.id, e.target.checked); }}
-                                      className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                    />
-                                  </td>
-                                  <td className="p-3 text-center text-slate-500 font-mono font-black border-r border-slate-805/30">{idx + 1}</td>
-                                  <td className="p-3 font-mono font-extrabold text-amber-500 text-[11px]">{emp.id}</td>
-                                  <td className="p-3 text-white font-black text-[12.5px]">{emp.name}</td>
-                                  <td className="p-3">
-                                    <div className="flex flex-col">
-                                      <span className="text-slate-350 font-bold tracking-tight">{emp.department}</span>
-                                      <span className="text-[10px] text-slate-500 font-semibold">{emp.position}</span>
-                                    </div>
-                                  </td>
-                                  <td className="p-3 text-center">
-                                    {emp.bhxhBookNo && emp.bhxhBookNo.trim() !== '' ? (
-                                      <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono font-extrabold text-[11px] px-2.5 py-1 rounded-lg">
-                                        {emp.bhxhBookNo}
-                                      </span>
-                                    ) : (
-                                      <span className="bg-rose-50 border border-rose-200 text-rose-700 font-bold text-[10px] px-2 py-0.5 rounded-md italic">
-                                        Chưa đăng ký sổ
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="p-3 text-right font-mono font-bold text-slate-300">
-                                    {bxhSal.toLocaleString('vi-VN')}đ
-                                  </td>
-                                  <td className="p-3 text-center font-mono font-extrabold text-sky-400">
-                                    {rate}%
-                                  </td>
-                                  <td className="p-3 text-right font-mono font-bold text-teal-400">
-                                    {Math.round(monthlyDeduction).toLocaleString('vi-VN')}đ
-                                  </td>
-                                  <td className="p-3 text-center font-mono text-slate-450 text-[11px]">
-                                    {emp.bhxhDate || '2026-04-01'}
-                                  </td>
-                                  <td className="p-3 text-right font-mono text-slate-400 border-l border-slate-850/40">
-                                    {personalDeduction.toLocaleString('vi-VN')}đ
-                                  </td>
-                                  <td className="p-3 text-center font-mono font-extrabold text-amber-550">
-                                    {depCount}
-                                  </td>
-                                  <td className="p-3 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenEditIns(emp)}
-                                      className="bg-slate-850 hover:bg-amber-600 hover:text-white text-slate-300 font-bold px-2.5 py-1.5 rounded-lg text-[10px] inline-flex items-center gap-1 hover:shadow transition-all cursor-pointer border border-slate-750"
-                                    >
-                                      <Sliders className="w-3.5 h-3.5 text-amber-500" />
-                                      <span>Thiết lập</span>
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/* Bottom table info notice */}
-                    <div className="bg-slate-955 px-4 py-3 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center text-[10px] text-slate-450 gap-2">
-                      <div className="flex items-center gap-1">
-                        <Info className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Mức đóng mặc định: BHXH trích 8%, BHYT trích 1.5%, BHTN trích 1%. Tổng mức người lao động đóng là 10.5%.</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {hrSelectedRows.size > 0 && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-amber-500 font-bold">Đã chọn: {hrSelectedRows.size}</span>
-                            <button
-                              onClick={handleBulkDeleteHrData}
-                              className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors text-[10px] flex items-center gap-1"
-                            >
-                              <Trash2 className="w-3 h-3" /> Xóa
-                            </button>
-                          </div>
-                        )}
-                        <span className="italic font-medium text-slate-500">Hệ quản trị Hoàng Long ERP v2.1</span>
-                      </div>
-                    </div>
-
-                  </div>
-
+                  {actions(() => handleEditSalaryScaleClick(item), () => handleDeleteSalaryScale(item.id), 'bậc lương')}
                 </div>
-              );
-            })()}
-
-            {activeHrDataSubTab === 'travel_norms' && (
-              <div className="space-y-4 animate-fadeIn" id="travel_allowance_subpanel">
-                {/* Header bar of the tab inside */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-900/40 p-4 rounded-xl border border-slate-800/60 shadow-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-orange-50 border border-orange-200 rounded-xl">
-                      <MapPin className="w-5 h-5 text-orange-600" />
-                    </div>
-                    <div>
-                      <span className="text-[10px] bg-orange-50 text-orange-700 font-extrabold font-mono px-2 py-0.5 rounded border border-orange-200 uppercase tracking-wider">PHỤ LỤC 02</span>
-                      <h3 className="text-sm font-extrabold text-white mt-1">BẢNG ĐỊNH MỨC TÍNH TIỀN CÔNG TÁC PHÍ 2026</h3>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Ban hành kèm theo Quy chế điều hành tài chính, tác nghiệp ngày 31/03/2026</p>
-                    </div>
-                  </div>
-                  <div className="flex w-full sm:w-auto items-center gap-3 self-stretch sm:self-auto justify-end">
-                    <div className="relative w-48 sm:w-64">
-                      <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-500" />
-                      <input
-                        type="text"
-                        placeholder="Tìm kiếm định mức..."
-                        value={travelNormSearch}
-                        onChange={(e) => setTravelNormSearch(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-4 py-2 text-xs text-white outline-none focus:border-amber-500"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleExportTravelNorms}
-                      className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-[11px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-lg cursor-pointer"
-                      title="Xuất Excel định mức công tác phí"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Xuất Excel</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => travelNormFileRef.current?.click()}
-                      className="bg-blue-700 hover:bg-blue-600 text-white font-bold text-[11px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-lg cursor-pointer"
-                      title="Nhập Excel định mức công tác phí"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Nhập Excel</span>
-                    </button>
-                    <input
-                      ref={travelNormFileRef}
-                      type="file"
-                      accept=".xlsx,.xls"
-                      className="hidden"
-                      onChange={handleImportTravelNorms}
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddTravelNormClick}
-                      className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-[11px] px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-orange-500/20 active:scale-95 duration-100 cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Thêm định mức mới</span>
-                    </button>
-                  </div>
+                <div className="grid grid-cols-3 gap-2 pl-7 text-center">
+                  <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Cơ bản</div><div className="text-xs font-bold font-mono text-slate-800">{(item.baseSalary || 0).toLocaleString('vi-VN')}</div></div>
+                  <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Hiệu suất ({item.allocationRate}%)</div><div className="text-xs font-bold font-mono text-slate-800">{(item.performanceSalary || 0).toLocaleString('vi-VN')}</div></div>
+                  <div className="rounded-lg py-1.5" style={{ background: '#ecfdf5' }}><div className="text-[10px] text-emerald-700">Tổng 100%</div><div className="text-xs font-black font-mono text-emerald-700">{(item.totalSalary || 0).toLocaleString('vi-VN')}</div></div>
                 </div>
+              </div>)),
+          })}
+        </div>
+      )}
 
-                {/* Table View of Travel Allowance Norms */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse whitespace-nowrap">
-                      <thead>
-                        <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 uppercase text-[9px] font-mono tracking-wider">
-                          <th className="px-2 py-3 font-bold text-center w-10">
-                            <input
-                              type="checkbox"
-                              checked={hrSelectAll && (() => {
-                                const filtered = travelNorms.filter(norm =>
-                                  norm.content.toLowerCase().includes(travelNormSearch.toLowerCase()) ||
-                                  (norm.code && norm.code.toLowerCase().includes(travelNormSearch.toLowerCase())) ||
-                                  (norm.notes && norm.notes.toLowerCase().includes(travelNormSearch.toLowerCase()))
-                                );
-                                return filtered.length > 0 && filtered.every(n => hrSelectedRows.has(n.id));
-                              })()}
-                              onChange={(e) => {
-                                const filtered = travelNorms.filter(norm =>
-                                  norm.content.toLowerCase().includes(travelNormSearch.toLowerCase()) ||
-                                  (norm.code && norm.code.toLowerCase().includes(travelNormSearch.toLowerCase())) ||
-                                  (norm.notes && norm.notes.toLowerCase().includes(travelNormSearch.toLowerCase()))
-                                );
-                                handleHrSelectAll(e.target.checked, filtered);
-                              }}
-                              className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                            />
-                          </th>
-                          <th className="px-4 py-3 font-bold text-center w-24">Mã CTP</th>
-                          <th className="px-4 py-3 font-bold">Nội Dung</th>
-                          <th className="px-4 py-3 font-bold text-right font-sans w-36">Đơn Giá</th>
-                          <th className="px-4 py-3 font-bold text-center w-28 font-sans">Thao tác</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {(() => {
-                          const filtered = travelNorms.filter(norm =>
-                            norm.content.toLowerCase().includes(travelNormSearch.toLowerCase()) ||
-                            (norm.code && norm.code.toLowerCase().includes(travelNormSearch.toLowerCase())) ||
-                            (norm.notes && norm.notes.toLowerCase().includes(travelNormSearch.toLowerCase()))
-                          );
-                          if (filtered.length === 0) {
-                            return (
-                              <tr>
-                                <td colSpan={5} className="px-4 py-12 text-center text-slate-500 font-medium font-sans">
-                                  Không tìm thấy dòng dữ liệu định mức công tác phí nào phù hợp với từ khóa tìm kiếm.
-                                </td>
-                              </tr>
-                            );
-                          }
-                          return filtered.map((norm) => (
-                            <tr key={norm.id} className={`hover:bg-slate-800/40 transition-colors ${hrSelectedRows.has(norm.id) ? 'bg-amber-500/10' : ''}`}>
-                              <td className="px-2 py-3 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={hrSelectedRows.has(norm.id)}
-                                  onChange={(e) => { e.stopPropagation(); handleHrRowSelect(norm.id, e.target.checked); }}
-                                  className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                                />
-                              </td>
-                              <td className="px-4 py-3 text-center font-mono font-black text-orange-400 bg-orange-500/5">{norm.code || ''}</td>
-                              <td className="px-4 py-3 font-bold text-slate-100">{norm.content}</td>
-                              <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400">{(norm.unitPrice).toLocaleString('vi-VN')} đ</td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleEditTravelNormClick(norm)}
-                                    className="p-1 px-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 rounded-lg transition-all flex items-center gap-1 text-[10px] font-semibold cursor-pointer"
-                                    title="Chỉnh sửa định mức"
-                                  >
-                                    <Sliders className="w-3 text-orange-400" />
-                                    <span>Sửa</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteTravelNorm(norm.id)}
-                                    className="p-1 px-2 text-slate-400 hover:text-rose-455 bg-slate-800/40 hover:bg-rose-950/25 rounded-lg transition-all flex items-center gap-1 text-[10px] cursor-pointer"
-                                    title="Xóa bỏ"
-                                  >
-                                    <Trash2 className="w-3 text-rose-500" />
-                                    <span>Xóa</span>
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ));
-                        })()}
-                      </tbody>
-                    </table>
+      {/* ═══ 5. BHXH & THUẾ ═══ */}
+      {activeHrDataSubTab === 'insurance' && (
+        <div className="space-y-3" id="payroll_bhxh_view_pane">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2" data-testid="hrdata-ins-tiles">
+            {([
+              ['Đã có sổ BHXH', `${insStats.withBookCount}/${insStats.total}`, '#047857', `${insStats.total > 0 ? ((insStats.withBookCount / insStats.total) * 100).toFixed(1) : 0}% nhân sự`],
+              ['Lương nền đóng BH', money(insStats.totalSalary), '#0f766e', 'Tổng mức lương nền của người đã có sổ'],
+              ['Trích đóng / tháng', money(Math.round(insStats.totalPayment)), '#0369a1', 'Trừ trực tiếp từ thu nhập'],
+              ['Chưa đăng ký sổ', `${insStats.withoutBookCount}`, '#be123c', 'nhân viên'],
+            ] as Array<[string, string, string, string]>).map(([label, v, color, sub]) => (
+              <div key={label} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 min-w-0">
+                <div className="text-[11px] text-slate-500 font-bold">{label}</div>
+                <div className="text-lg font-black mt-0.5 truncate" style={{ color }}>{v}</div>
+                <div className="text-[11px] text-slate-400 truncate">{sub}</div>
+              </div>))}
+          </div>
+          {toolbar({ search: insSearchText, setSearch: setInsSearchText, placeholder: 'Tìm mã NV, tên, số sổ BHXH…', onExport: handleExportInsurance, exportTitle: 'Xuất Excel BHXH & Thuế', fileRef: insuranceFileRef, onImport: handleImportInsurance, addLabel: 'Đăng ký nhanh', onAdd: handleBatchGenerateBHXH,
+            extra: (<>
+              <select value={insDeptFilter} onChange={(e) => setInsDeptFilter(e.target.value)} aria-label="Bộ phận" data-testid="hrdata-ins-dept" className={`${inputCls} cursor-pointer font-bold`}>
+                <option value="all">Tất cả phòng ban</option>
+                {departments.map((dept: any) => <option key={dept} value={dept}>{dept}</option>)}
+              </select>
+              <select value={insBookFilter} onChange={(e) => setInsBookFilter(e.target.value)} aria-label="Sổ BH" data-testid="hrdata-ins-book" className={`${inputCls} cursor-pointer font-bold`}>
+                <option value="all">Toàn bộ hồ sơ</option>
+                <option value="has_book">Đã cấp sổ BHXH</option>
+                <option value="no_book">Chưa đăng ký sổ</option>
+              </select></>) })}
+          {bulkBar}
+          {(() => {
+            const bookPill = (emp: any) => emp.bhxhBookNo && emp.bhxhBookNo.trim() !== ''
+              ? <span className={`${PILL} bg-emerald-50 text-emerald-700 border-emerald-200 font-mono`}>{emp.bhxhBookNo}</span>
+              : <span className={`${PILL} bg-rose-50 text-rose-700 border-rose-200`}>Chưa có sổ</span>;
+            const calc = (emp: any) => { const sal = insSalaryOf(emp); const rate = Number(emp.bhxhRate) || 10.5; return { sal, rate, pay: (sal * rate) / 100, relief: Number(emp.taxPersonalRelief) || 15500000, dep: Number(emp.dependentCount) || 0 }; };
+            return shell({
+              minW: 'min-w-[1000px]',
+              empty: filteredIns.length === 0, emptyText: 'Không tìm thấy nhân sự phù hợp với điều kiện tìm kiếm.',
+              count: <>Danh sách BHXH & giảm trừ thuế TNCN: <b className="text-slate-700">{filteredIns.length}</b> nhân sự · Mức đóng mặc định 10,5% (BHXH 8% + BHYT 1,5% + BHTN 1%)</>,
+              tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredIns)}</th><th className={th}>Nhân viên</th><th className={th}>Bộ phận / chức vụ</th><th className={th}>Số sổ BHXH</th><th className={`${th} text-right`}>Mức đóng</th><th className={`${th} text-center`}>Tỷ lệ</th><th className={`${th} text-right`}>Tiền trích</th><th className={th}>Hiệu lực</th><th className={`${th} text-right`}>Giảm trừ bản thân</th><th className={`${th} text-center`}>NPT</th><th className={`${th} text-right`}>Thao tác</th></>),
+              tableBody: filteredIns.map((emp: any) => { const c = calc(emp); return (
+                <tr key={emp.id} data-testid={`hrdata-row-${emp.id}`} className={rowCls(emp.id)}>
+                  <td className="py-2.5 px-3">{rowCheck(emp.id)}</td>
+                  <td className="py-2.5 px-3"><div className="font-bold text-slate-900">{emp.name}</div><div className="font-mono text-[11px] text-slate-400">{emp.id}</div></td>
+                  <td className="py-2.5 px-3"><div className="text-slate-700">{emp.department}</div><div className="text-[11px] text-slate-500">{emp.position}</div></td>
+                  <td className="py-2.5 px-3">{bookPill(emp)}</td>
+                  <td className="py-2.5 px-3 text-right font-mono text-slate-800">{money(c.sal)}</td>
+                  <td className="py-2.5 px-3 text-center font-mono font-bold text-sky-700">{c.rate}%</td>
+                  <td className="py-2.5 px-3 text-right font-mono font-bold text-teal-700">{money(Math.round(c.pay))}</td>
+                  <td className="py-2.5 px-3 font-mono text-[12px] text-slate-500">{emp.bhxhDate || '2026-04-01'}</td>
+                  <td className="py-2.5 px-3 text-right font-mono text-slate-600">{money(c.relief)}</td>
+                  <td className="py-2.5 px-3 text-center font-mono font-bold">{c.dep}</td>
+                  <td className="py-2.5 px-3 text-right"><button type="button" onClick={() => handleOpenEditIns(emp)} data-testid={`hrdata-ins-edit-${emp.id}`} className="h-8 px-3 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1"><Sliders className="w-3.5 h-3.5" />Thiết lập</button></td>
+                </tr>); }),
+              cards: filteredIns.map((emp: any) => { const c = calc(emp); return (
+                <div key={emp.id} data-testid={`hrdata-card-${emp.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(emp.id) ? 'bg-blue-50/60' : ''}`}>
+                  <div className="flex items-start gap-3">
+                    <div className="pt-1">{rowCheck(emp.id)}</div>
+                    <div className="flex-1 min-w-0"><div className="font-bold text-slate-900 text-sm">{emp.name} <span className="font-mono text-[11px] text-slate-400 font-normal">{emp.id}</span></div><div className="text-[11px] text-slate-500">{emp.position} · {emp.department}</div></div>
+                    {bookPill(emp)}
                   </div>
-                  {hrSelectedRows.size > 0 && (
-                    <div className="bg-slate-950 px-4 py-2 border-t border-slate-850 flex items-center gap-2 text-[10px]">
-                      <span className="text-amber-500 font-bold">Đã chọn: {hrSelectedRows.size}</span>
-                      <button
-                        onClick={handleBulkDeleteHrData}
-                        className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3 h-3" /> Xóa
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+                  <div className="grid grid-cols-3 gap-2 pl-7 text-center">
+                    <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Mức đóng</div><div className="text-xs font-bold font-mono text-slate-800">{c.sal.toLocaleString('vi-VN')}</div></div>
+                    <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Trích ({c.rate}%)</div><div className="text-xs font-bold font-mono text-teal-700">{Math.round(c.pay).toLocaleString('vi-VN')}</div></div>
+                    <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Người PT</div><div className="text-xs font-bold font-mono text-slate-800">{c.dep}</div></div>
+                  </div>
+                  <div className="pl-7"><button type="button" onClick={() => handleOpenEditIns(emp)} className="h-8 px-3 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 cursor-pointer inline-flex items-center gap-1"><Sliders className="w-3.5 h-3.5" />Thiết lập</button></div>
+                </div>); }),
+            });
+          })()}
+        </div>
+      )}
 
-              </div>
+      {/* ═══ 6. ĐỊNH MỨC CÔNG TÁC PHÍ ═══ */}
+      {activeHrDataSubTab === 'travel_norms' && (
+        <div className="space-y-3" id="travel_allowance_subpanel">
+          {toolbar({ search: travelNormSearch, setSearch: setTravelNormSearch, placeholder: 'Tìm định mức…', onExport: handleExportTravelNorms, exportTitle: 'Xuất Excel định mức công tác phí', fileRef: travelNormFileRef, onImport: handleImportTravelNorms, addLabel: 'Thêm định mức', onAdd: handleAddTravelNormClick })}
+          {bulkBar}
+          {shell({
+            empty: filteredNorms.length === 0, emptyText: 'Không tìm thấy định mức công tác phí nào phù hợp với từ khóa tìm kiếm.',
+            count: <>Tổng cộng <b className="text-slate-700">{travelNorms.length}</b> định mức{filteredNorms.length !== travelNorms.length && <> · đang hiển thị {filteredNorms.length}</>}</>,
+            tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredNorms)}</th><th className={th}>Mã CTP</th><th className={th}>Nội dung</th><th className={`${th} text-right`}>Đơn giá</th><th className={`${th} text-right`}>Thao tác</th></>),
+            tableBody: filteredNorms.map(norm => (
+              <tr key={norm.id} data-testid={`hrdata-row-${norm.id}`} className={rowCls(norm.id)}>
+                <td className="py-2.5 px-3">{rowCheck(norm.id)}</td>
+                <td className="py-2.5 px-3">{norm.code ? <span className={`${PILL} bg-orange-50 text-orange-700 border-orange-200 font-mono`}>{norm.code}</span> : '—'}</td>
+                <td className="py-2.5 px-3 font-bold text-slate-900">{norm.content}{norm.notes ? <div className="text-[11px] text-slate-500 font-normal">{norm.notes}</div> : null}</td>
+                <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">{money(norm.unitPrice)}</td>
+                <td className="py-2.5 px-3">{actions(() => handleEditTravelNormClick(norm), () => handleDeleteTravelNorm(norm.id), 'định mức')}</td>
+              </tr>)),
+            cards: filteredNorms.map(norm => (
+              <div key={norm.id} data-testid={`hrdata-card-${norm.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(norm.id) ? 'bg-blue-50/60' : ''}`}>
+                <div className="pt-1">{rowCheck(norm.id)}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-slate-900 text-sm">{norm.content}</div>
+                  <div className="mt-1 flex items-center gap-2 flex-wrap">{norm.code && <span className={`${PILL} bg-orange-50 text-orange-700 border-orange-200 font-mono`}>{norm.code}</span>}<span className="font-mono font-bold text-emerald-700 text-sm">{money(norm.unitPrice)}</span></div>
+                  {norm.notes && <div className="text-[11px] text-slate-500 mt-0.5">{norm.notes}</div>}
+                </div>
+                {actions(() => handleEditTravelNormClick(norm), () => handleDeleteTravelNorm(norm.id), 'định mức')}
+              </div>)),
+          })}
+        </div>
+      )}
+    </div>
   );
 }

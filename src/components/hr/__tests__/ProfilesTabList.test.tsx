@@ -72,7 +72,7 @@ describe('Hồ sơ nhân viên — giao diện danh sách mới', () => {
 
   it('tab Hồ sơ không còn dùng khối tiêu đề + mô tả + nút cũ ở HumanResourcesManagement', () => {
     const src = fs.readFileSync('src/components/HumanResourcesManagement.tsx', 'utf8');
-    expect(src).toContain("activeSubTab !== 'profiles' && activeSubTab !== 'attendance' && activeSubTab !== 'leaves' && activeSubTab !== 'payroll' && activeSubTab !== 'trips' && activeSubTab !== 'performance' && (");
+    expect(src).toContain("activeSubTab !== 'profiles' && activeSubTab !== 'attendance' && activeSubTab !== 'leaves' && activeSubTab !== 'payroll' && activeSubTab !== 'trips' && activeSubTab !== 'performance' && activeSubTab !== 'hr_data' && (");
     expect(src).toContain('onAddEmployee=');
   });
 });

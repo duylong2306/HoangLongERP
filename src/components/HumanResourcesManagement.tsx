@@ -4113,8 +4113,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             )}
 
             {/* Header block summarizing currently viewed subtab */}
-                        {/* Tab Hồ sơ, Chấm công, Nghỉ phép, Lương, Công tác phí và Hiệu suất đã có thanh công cụ riêng nên bỏ khối tiêu đề + mô tả + nút cũ; các tab khác giữ nguyên đến khi thiết kế lại */}
-            {activeSubTab !== 'profiles' && activeSubTab !== 'attendance' && activeSubTab !== 'leaves' && activeSubTab !== 'payroll' && activeSubTab !== 'trips' && activeSubTab !== 'performance' && (
+                        {/* Tab Hồ sơ, Chấm công, Nghỉ phép, Lương, Công tác phí, Hiệu suất và Dữ liệu nhân sự đã có thanh công cụ riêng nên bỏ khối tiêu đề + mô tả + nút cũ; các tab khác giữ nguyên đến khi thiết kế lại */}
+            {activeSubTab !== 'profiles' && activeSubTab !== 'attendance' && activeSubTab !== 'leaves' && activeSubTab !== 'payroll' && activeSubTab !== 'trips' && activeSubTab !== 'performance' && activeSubTab !== 'hr_data' && (
 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
                 <h3 className="text-base font-extrabold text-white flex items-center gap-2 capitalize">
