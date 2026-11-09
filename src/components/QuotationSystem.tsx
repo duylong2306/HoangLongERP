@@ -1728,6 +1728,7 @@ export default function QuotationSystem({
                   customers={customers}
                   projects={projects}
                   showTemplateOnly={true}
+                  currentUser={currentUser} /* cần để kiểm tra quyền Sửa mẫu; thiếu thì ai cũng bị chặn 'Không đủ quyền' */
                 />
               </div>
             ) : (
@@ -1905,6 +1906,7 @@ export default function QuotationSystem({
                   customers={customers}
                   projects={projects}
                   showTemplateOnly={true}
+                  currentUser={currentUser} /* cần để kiểm tra quyền Sửa mẫu; thiếu thì ai cũng bị chặn 'Không đủ quyền' */
                 />
               </div>
             ) : (
@@ -2925,6 +2927,7 @@ export default function QuotationSystem({
                   customers={customers}
                   projects={projects}
                   showTemplateOnly={true}
+                  currentUser={currentUser} /* cần để kiểm tra quyền Sửa mẫu; thiếu thì ai cũng bị chặn 'Không đủ quyền' */
                 />
               </div>
             ) : (
@@ -3108,6 +3111,7 @@ export default function QuotationSystem({
                   customers={customers}
                   projects={projects}
                   showTemplateOnly={true}
+                  currentUser={currentUser} /* cần để kiểm tra quyền Sửa mẫu; thiếu thì ai cũng bị chặn 'Không đủ quyền' */
                 />
               </div>
             ) : (
