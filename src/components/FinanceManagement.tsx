@@ -5643,108 +5643,37 @@ export default function FinanceManagement({
         <div className={`${(menuDisplayMode === 'tabs' || activeSubTab === 'du_lieu_ke_toan') ? 'lg:col-span-12' : 'lg:col-span-9'} p-6 bg-slate-950 flex flex-col justify-between`} id="accounting_workspace_panel">
           <div>
             
-            {/* Top Navigation Bar: Tab layout active only when menuDisplayMode is 'tabs' */}
+            {/* Thanh tab chính của Tài chính kế toán — CÙNG KIỂU với thanh tab "Quản lý nhân sự" (HrDesktopTabs):
+                nút bo xl, tab đang chọn tô xanh LoLo chữ trắng, tab thường nền xám nhạt, có đường kẻ dưới.
+                Chỉ hiện khi menuDisplayMode = 'tabs'. Điện thoại cuộn ngang. */}
             {menuDisplayMode === 'tabs' && activeSubTab !== 'du_lieu_ke_toan' && (
-              <div className="flex flex-col bg-slate-900 border border-slate-800 p-3 rounded-2xl mb-6 gap-3 shadow-md border-t-4 border-t-orange-500 animate-slideDown" id="accounting_tabs_navigation">
-                
-                {/* Horizontal header holding tab buttons on the left and Layout selector on the right */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
-                  
-                  {/* Horizontal list of subtabs — underline-tab style */}
-                  <div className="w-full bg-white border-b border-slate-200 rounded-t-lg">
-                    <ul className="flex flex-nowrap md:flex-wrap items-center gap-1 -mb-px text-sm font-medium overflow-x-auto scrollbar-thin" style={{ WebkitOverflowScrolling: 'touch' }}>
-
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => { setActiveSubTab('de_xuat_thu_chi'); setSearchTerm(''); }}
-                          aria-current={activeSubTab === 'de_xuat_thu_chi' ? 'page' : undefined}
-                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'de_xuat_thu_chi' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
-                        >
-                          <FileCheck className={`w-4 h-4 me-2 ${activeSubTab === 'de_xuat_thu_chi' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
-                          <span>Đề Xuất Chi</span>
-                        </button>
-                      </li>
-
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => { setActiveSubTab('don_hang'); setSearchTerm(''); }}
-                          aria-current={activeSubTab === 'don_hang' ? 'page' : undefined}
-                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'don_hang' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
-                        >
-                          <ShoppingCart className={`w-4 h-4 me-2 ${activeSubTab === 'don_hang' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
-                          <span>Đơn Hàng</span>
-                        </button>
-                      </li>
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => { setActiveSubTab('nhap_thu'); setSearchTerm(''); }}
-                          aria-current={activeSubTab === 'nhap_thu' ? 'page' : undefined}
-                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'nhap_thu' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
-                        >
-                          <Heart className={`w-4 h-4 me-2 ${activeSubTab === 'nhap_thu' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
-                          <span>Nhập Thu</span>
-                        </button>
-                      </li>
-
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => { setActiveSubTab('nhap_chi'); setSearchTerm(''); }}
-                          aria-current={activeSubTab === 'nhap_chi' ? 'page' : undefined}
-                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'nhap_chi' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
-                        >
-                          <Circle className={`w-4 h-4 me-2 ${activeSubTab === 'nhap_chi' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
-                          <span>Nhập Chi</span>
-                        </button>
-                      </li>
-
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => { setActiveSubTab('quy_tien_mat'); setSearchTerm(''); }}
-                          aria-current={activeSubTab === 'quy_tien_mat' ? 'page' : undefined}
-                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'quy_tien_mat' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
-                        >
-                          <Wallet className={`w-4 h-4 me-2 ${activeSubTab === 'quy_tien_mat' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
-                          <span>Quỹ Tiền Mặt</span>
-                        </button>
-                      </li>
-
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => { setActiveSubTab('cong_no_phai_thu'); setSearchTerm(''); }}
-                          aria-current={activeSubTab === 'cong_no_phai_thu' ? 'page' : undefined}
-                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'cong_no_phai_thu' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
-                        >
-                          <TrendingUp className={`w-4 h-4 me-2 ${activeSubTab === 'cong_no_phai_thu' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
-                          <span>Công nợ Thu</span>
-                        </button>
-                      </li>
-
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => { setActiveSubTab('cong_no_phai_tra'); setSearchTerm(''); }}
-                          aria-current={activeSubTab === 'cong_no_phai_tra' ? 'page' : undefined}
-                          className={`group inline-flex items-center justify-center px-4 py-3 border-b border-transparent rounded-t-lg transition-all whitespace-nowrap cursor-pointer text-xs font-bold ${activeSubTab === 'cong_no_phai_tra' ? 'text-orange-600 border-orange-500' : 'text-slate-600 hover:text-orange-600 hover:border-slate-300'}`}
-                        >
-                          <TrendingDown className={`w-4 h-4 me-2 ${activeSubTab === 'cong_no_phai_tra' ? 'text-orange-600' : 'text-slate-400 group-hover:text-orange-600'}`} />
-                          <span>Công nợ Trả</span>
-                        </button>
-                      </li>
-
-                    </ul>
-                  </div>
-
-                </div>
-
-              </div>
+              <nav aria-label="Menu tài chính kế toán" id="accounting_tabs_navigation" data-testid="fin-tabs"
+                className="flex items-center gap-1.5 overflow-x-auto mb-5 pb-4 border-b border-slate-200">
+                {([
+                  ['de_xuat_thu_chi', 'Đề Xuất Chi', FileCheck],
+                  ['don_hang', 'Đơn Hàng', ShoppingCart],
+                  ['nhap_thu', 'Nhập Thu', Heart],
+                  ['nhap_chi', 'Nhập Chi', Circle],
+                  ['quy_tien_mat', 'Quỹ Tiền Mặt', Wallet],
+                  ['cong_no_phai_thu', 'Công nợ Thu', TrendingUp],
+                  ['cong_no_phai_tra', 'Công nợ Trả', TrendingDown],
+                ] as [string, string, React.ComponentType<{ className?: string }>][]).map(([id, label, Icon]) => {
+                  const on = activeSubTab === id;
+                  return (
+                    <button key={id} type="button" data-testid={`fin-tab-${id}`}
+                      onClick={() => { setActiveSubTab(id); setSearchTerm(''); }}
+                      aria-current={on ? 'page' : undefined}
+                      // Nền/chữ đặt inline: index.css ép màu cho text-white / bg-* nên class Tailwind không đủ tin cậy cho nút nền xanh
+                      style={on ? { background: '#0d47c9', color: '#ffffff' } : undefined}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold whitespace-nowrap cursor-pointer transition-colors ${on ? '' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'}`}>
+                      <Icon className="w-4 h-4" />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
             )}
-            
+
             {/* Header / Sub-tab Title */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>

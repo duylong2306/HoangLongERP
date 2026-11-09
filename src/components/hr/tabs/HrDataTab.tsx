@@ -735,21 +735,25 @@ export default function HrDataTab(props: HrDataTabProps) {
 
   return (
     <div className="space-y-3 font-sans min-w-0" id="hr_data_tab_content" data-testid="hrdata-root">
-      {/* Chip chuyển danh mục kèm số lượng */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" data-testid="hrdata-chips">
+      {/* Thanh chuyển danh mục — CÙNG KIỂU với thanh tab của "Quản lý nhân sự" (HrDesktopTabs):
+          nút bo xl, tab đang chọn tô xanh LoLo chữ trắng, tab thường nền xám nhạt, có đường kẻ dưới.
+          Giữ thêm số lượng từng danh mục; điện thoại cuộn ngang (ít tab nên không cần ngăn kéo). */}
+      <nav aria-label="Danh mục dữ liệu nhân sự" className="flex items-center gap-1.5 overflow-x-auto pb-3 border-b border-slate-200" data-testid="hrdata-chips">
         {TABS.map(([id, label, Icon, n, trig]) => {
           const on = activeHrDataSubTab === id;
           return (
             <button key={id} type="button" id={trig} onClick={() => setActiveHrDataSubTab(id)} aria-current={on ? 'page' : undefined} data-testid={`hrdata-chip-${id}`}
-              style={on ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
-              className={`h-9 pl-3 pr-2 rounded-full text-[13px] font-bold whitespace-nowrap border cursor-pointer inline-flex items-center gap-1.5 ${on ? '' : 'bg-white text-slate-600 border-slate-200'}`}>
-              <Icon className="w-4 h-4" />{label}
-              <span className="min-w-[22px] h-[20px] px-1.5 rounded-full text-[11px] leading-[20px] text-center font-black"
-                style={on ? { background: '#0d47c9', color: '#ffffff' } : { background: '#e2e8f0', color: '#475569' }}>{n}</span>
+              // Nền/chữ đặt inline: index.css ép màu cho text-white / bg-* nên class Tailwind không đủ tin cậy cho nút nền xanh
+              style={on ? { background: '#0d47c9', color: '#ffffff' } : undefined}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold whitespace-nowrap cursor-pointer transition-colors ${on ? '' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'}`}>
+              <Icon className="w-4 h-4" />
+              <span>{label}</span>
+              <span className="min-w-[18px] h-[18px] px-1 rounded-full text-[10px] leading-[18px] text-center font-black"
+                style={on ? { background: '#ffffff', color: '#0d47c9' } : { background: '#e2e8f0', color: '#475569' }}>{n}</span>
             </button>
           );
         })}
-      </div>
+      </nav>
 
       {/* ═══ 1. NGÀY NGHỈ LỄ ═══ */}
       {activeHrDataSubTab === 'holidays' && (
