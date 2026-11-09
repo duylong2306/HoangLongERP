@@ -86,4 +86,14 @@ describe('Tab Lương — giao diện mới', () => {
     expect(screen.queryByTestId('payroll-row-P1')).toBeNull();
     expect(screen.queryByTestId('payroll-row-P2')).toBeTruthy();
   });
+
+  it('cảnh báo khi có dòng lương tính theo công chuẩn khác công chuẩn của tháng', () => {
+    // 2 dòng chia 27 (đúng với std=27), 1 dòng chia 26 → lệch 1
+    const mk = (id: string, spd: number) => ({ id, empId: id, empName: id, month: '11/2026', baseSalary: 6970000, kpiBonus: 6970000, salaryPerDay: spd, status: 'unpaid', workedDays: 26 }) as any;
+    setup({ payroll: [mk('A', 516296.296), mk('B', 516296.296), mk('C', 536153.846)], standardWorkDays: 27 });
+    expect(screen.getByTestId('payroll-std-mismatch').textContent).toContain('1');
+    cleanup();
+    setup({ payroll: [mk('A', 516296.296), mk('B', 516296.296)], standardWorkDays: 27 });
+    expect(screen.queryByTestId('payroll-std-mismatch')).toBeNull();
+  });
 });

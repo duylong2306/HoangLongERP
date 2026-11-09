@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Calculator, Download, Pencil, Search, Lock } from 'lucide-react';
 import { PayrollItem } from '../hrTypes';
+import { countStandardMismatch } from '../hrCalculations';
 
 interface PayrollTabProps {
   payroll: PayrollItem[];
@@ -184,7 +185,7 @@ export default function PayrollTab({
         <select value={payrollYear} onChange={(e) => { setPayrollYear(e.target.value); setPayrollPage(1); }} aria-label="Năm" data-testid="payroll-year" className={`${inputCls} cursor-pointer`}>
           {['2024', '2025', '2026', '2027'].map(y => <option key={y} value={y}>Năm {y}</option>)}
         </select>
-        <label className="flex items-center gap-1.5 h-9 px-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-500" title="Ngày công quy chuẩn của tháng">
+        <label className="flex items-center gap-1.5 h-9 px-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-500" title="Công chuẩn của tháng: mặc định = số ngày trong tháng trừ ngày nghỉ tuần (hoặc theo các dòng đã tính). Có thể sửa, được nhớ riêng cho từng tháng.">
           Công chuẩn
           <input type="number" min={20} max={31} value={standardWorkDays} data-testid="payroll-std-days"
             onChange={(e) => setStandardWorkDays(Math.max(20, Math.min(31, Number(e.target.value) || 26)))}
@@ -199,6 +200,18 @@ export default function PayrollTab({
           <Calculator className="w-4 h-4" /><span className="hidden sm:inline">Tính lương tự động</span><span className="sm:hidden">Tính lương</span>
         </button>
       </div>
+
+      {/* Cảnh báo: có dòng lương đã tính theo công chuẩn KHÁC với công chuẩn của tháng → "Lương ngày chuẩn" các dòng không đồng đều */}
+      {(() => {
+        const n = countStandardMismatch(periodPayrollAll as any[], standardWorkDays);
+        if (n === 0) return null;
+        return (
+          <div data-testid="payroll-std-mismatch" className="rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-xs px-3 py-2">
+            ⚠️ Có <b>{n}</b> dòng lương đang tính theo công chuẩn khác với công chuẩn của tháng (<b>{standardWorkDays}</b> ngày) nên "Lương ngày chuẩn" không đồng đều.
+            Bấm <b>Tính lương tự động</b> để tính lại cả kỳ theo {standardWorkDays} ngày.
+          </div>
+        );
+      })()}
 
       {/* Chip chế độ xem + trạng thái khóa kỳ */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" data-testid="payroll-views">

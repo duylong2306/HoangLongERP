@@ -686,3 +686,48 @@ export function calculatePersonalIncomeTax(taxableNetIncome: number): number {
   else result = taxableNetIncome * 0.35 - 14500000;
   return Math.max(0, result);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CÔNG CHUẨN CỦA THÁNG (số ngày dùng làm mẫu số của "Lương ngày chuẩn")
+// Trước đây "Công chuẩn" là 1 state tạm của màn hình (mặc định 26, mất khi tải lại trang, không gắn với tháng nào),
+// nên cùng 1 kỳ lương có dòng chia 27, dòng chia 26 → 2 người cùng mức lương ra lương ngày chuẩn khác nhau.
+// Nay công chuẩn là thuộc tính CỦA THÁNG, luôn suy ra theo thứ tự ưu tiên:
+//   (1) giá trị người dùng đã chọn cho đúng tháng đó  →  (2) giá trị các dòng lương đã tính của tháng đang dùng
+//   →  (3) mặc định theo lịch: số ngày trong tháng trừ số ngày nghỉ tuần.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Mặc định theo lịch: số ngày trong tháng trừ các ngày nghỉ tuần (weekendDays: 0 = CN … 6 = T7). Kẹp trong 20..31. */
+export function defaultStandardWorkDays(month: number, year: number, weekendDays: number[] = [0]): number {
+  const daysInMonth = new Date(year, month, 0).getDate();   // ngày 0 của tháng sau = ngày cuối tháng này
+  let off = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (weekendDays.includes(new Date(year, month - 1, d).getDay())) off++;
+  }
+  return Math.max(20, Math.min(31, daysInMonth - off));
+}
+
+/**
+ * Suy ra công chuẩn mà 1 dòng lương ĐÃ được tính theo, từ chính số liệu đã lưu:
+ * salaryPerDay = (lương cơ bản + thưởng hiệu suất) ÷ công chuẩn  ⇒  công chuẩn = (cơ bản + thưởng) ÷ salaryPerDay.
+ * Trả về null nếu thiếu số liệu hoặc không ra số nguyên (dòng nhập tay/dữ liệu cũ) — khi đó coi là "không rõ".
+ */
+export function inferStandardWorkDays(row: { baseSalary?: number; kpiBonus?: number; salaryPerDay?: number } | null | undefined): number | null {
+  if (!row || !row.salaryPerDay || row.salaryPerDay <= 0) return null;
+  const ratio = ((row.baseSalary || 0) + (row.kpiBonus || 0)) / row.salaryPerDay;
+  const n = Math.round(ratio);
+  return Math.abs(ratio - n) < 0.05 && n >= 20 && n <= 31 ? n : null;
+}
+
+/** Công chuẩn phổ biến nhất trong các dòng lương của 1 tháng; không có dòng nào suy ra được thì null. */
+export function pickMonthStandardWorkDays(rows: Array<{ baseSalary?: number; kpiBonus?: number; salaryPerDay?: number }>): number | null {
+  const count = new Map<number, number>();
+  rows.forEach(r => { const n = inferStandardWorkDays(r); if (n) count.set(n, (count.get(n) || 0) + 1); });
+  let best: number | null = null, bestN = 0;
+  count.forEach((c, n) => { if (c > bestN || (c === bestN && best !== null && n > best)) { best = n; bestN = c; } });
+  return best;
+}
+
+/** Số dòng lương đang tính theo công chuẩn KHÁC với `std` (bỏ qua dòng không suy ra được) — để cảnh báo lệch. */
+export function countStandardMismatch(rows: Array<{ baseSalary?: number; kpiBonus?: number; salaryPerDay?: number }>, std: number): number {
+  return rows.filter(r => { const n = inferStandardWorkDays(r); return n !== null && n !== std; }).length;
+}

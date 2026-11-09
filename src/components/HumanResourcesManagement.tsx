@@ -32,7 +32,7 @@ import * as XLSX from 'xlsx';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog, ERP_MODULE_CODES } from './hr/hrTypes';
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
-import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses } from './hr/hrCalculations';
+import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses, defaultStandardWorkDays, pickMonthStandardWorkDays } from './hr/hrCalculations';
 import { saveProjectPermissions } from './hr/hrProjectPermissions';
 import TripsTab from './hr/tabs/TripsTab';
 import SearchableSelect from './SearchableSelect';
@@ -2595,7 +2595,28 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   // -----------------------------------------------------------------
   const [payrollMonth, setPayrollMonth] = useState<string>(() => String(new Date().getMonth() + 1).padStart(2, '0'));
   const [payrollYear, setPayrollYear] = useState<string>(() => String(new Date().getFullYear()));
-  const [standardWorkDays, setStandardWorkDays] = useState<number>(26);
+  // CÔNG CHUẨN CỦA THÁNG — thuộc tính của tháng chứ không còn là state tạm (trước đây mặc định 26 mỗi lần tải trang
+  // → cùng kỳ lương có dòng chia 27, dòng chia 26). Ưu tiên: giá trị đã chọn cho tháng đó (nhớ ở trình duyệt)
+  // → công chuẩn các dòng lương đã tính của tháng → mặc định theo lịch (số ngày trong tháng trừ ngày nghỉ tuần).
+  const STD_OVERRIDE_KEY = companyScopedKey('hl_payroll_std_days_v1');   // theo công ty để các công ty không lẫn nhau
+  const [stdOverrides, setStdOverrides] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem(STD_OVERRIDE_KEY) || '{}') || {}; } catch { return {}; }
+  });
+  // Công chuẩn áp dụng cho 1 tháng dạng "MM/YYYY" (dùng cho cả tính lương hàng loạt lẫn sửa 1 dòng)
+  const standardDaysFor = (monthStr: string): number => {
+    const [mm, yyyy] = monthStr.split('/');
+    const key = `${yyyy}-${mm}`;
+    if (stdOverrides[key]) return stdOverrides[key];
+    const fromRows = pickMonthStandardWorkDays(payroll.filter(p => p.month === monthStr) as any[]);
+    return fromRows ?? defaultStandardWorkDays(Number(mm), Number(yyyy), weekendDays);
+  };
+  const standardWorkDays = standardDaysFor(`${payrollMonth}/${payrollYear}`);
+  // Người dùng đổi ô "Công chuẩn" → nhớ riêng cho tháng đang xem
+  const setStandardWorkDays = (n: number) => {
+    const next = { ...stdOverrides, [`${payrollYear}-${payrollMonth}`]: n };
+    setStdOverrides(next);
+    try { localStorage.setItem(STD_OVERRIDE_KEY, JSON.stringify(next)); } catch { /* trình duyệt chặn lưu: vẫn dùng được trong phiên */ }
+  };
   const [payrollViewMode, setPayrollViewMode] = useState<'summary' | 'detail'>('summary');
   const [showEditPayrollModal, setShowEditPayrollModal] = useState(false);
   const [editingPayrollItem, setEditingPayrollItem] = useState<PayrollItem | null>(null);
@@ -2623,8 +2644,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
   const [editOtherDeductions, setEditOtherDeductions] = useState(0);
   const [editExpenses, setEditExpenses] = useState(0);
 
-  // ↓ Wrapper quanh calculateSingleEmployeePayroll (từ ./hr/hrCalculations); truyền closure salaryScales + standardWorkDays
-  const _calcPayroll = (emp: any, monthStr: string, inputs: any) => calculateSingleEmployeePayroll(emp, monthStr, inputs, salaryScales, standardWorkDays);
+  // ↓ Wrapper quanh calculateSingleEmployeePayroll (từ ./hr/hrCalculations); truyền closure salaryScales + công chuẩn CỦA ĐÚNG THÁNG đang tính
+  const _calcPayroll = (emp: any, monthStr: string, inputs: any) => calculateSingleEmployeePayroll(emp, monthStr, inputs, salaryScales, standardDaysFor(monthStr));
 
   // ===================== BLOCK TÍNH LƯƠNG (payroll) =====================
   const handleCalculatePayroll = async () => {
