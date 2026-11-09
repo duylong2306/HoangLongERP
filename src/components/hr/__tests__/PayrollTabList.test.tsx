@@ -77,6 +77,22 @@ describe('Tab Lương — giao diện mới', () => {
     expect(screen.getByTestId('payroll-lock-status').textContent).toContain('Đã khóa');
   });
 
+  it('mở khóa kỳ: chỉ hiện khi kỳ đã khóa; bấm → hỏi xác nhận; Hủy thì không gọi, Đồng ý thì gọi hàm', () => {
+    // Chưa khóa → không có nút Mở khóa
+    const first = setup({ handleUnlockPayrollPeriod: vi.fn() });
+    expect(screen.queryByTestId('payroll-unlock')).toBeNull();
+    first.unmount();
+    // Đã khóa → có nút; Hủy xác nhận thì không mở
+    const unlock = vi.fn();
+    setup({ payroll: PAYROLL.map(p => ({ ...p, locked: true })), handleUnlockPayrollPeriod: unlock });
+    const spy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.click(screen.getByTestId('payroll-unlock'));
+    expect(unlock).not.toHaveBeenCalled();
+    spy.mockReturnValue(true);
+    fireEvent.click(screen.getByTestId('payroll-unlock'));
+    expect(unlock).toHaveBeenCalledTimes(1);
+  });
+
   it('kỳ chưa có dữ liệu → thông báo trống; tìm tên không dấu lọc đúng', () => {
     const { unmount } = setup({ payrollMonth: '09' });
     expect(screen.getAllByTestId('payroll-empty').length).toBeGreaterThan(0);

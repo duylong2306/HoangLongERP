@@ -4058,6 +4058,25 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     addToast({ title: '🔒 Đã khóa kỳ lương', message: `Đã khóa kỳ ${period} và chốt phiếu lương cho ${lockedItems.length} nhân viên.`, type: 'success' });
   };
 
+  // "Mở khóa kỳ" — gỡ cờ locked/lockedAt của TOÀN BỘ dòng lương trong kỳ đang chọn để
+  // được tính lại / sửa. Chỉ người có quyền "Sửa" Nhân sự; chỉ đụng đúng kỳ này.
+  const handleUnlockPayrollPeriod = async () => {
+    if (!hasModulePermission(currentUser?.id, 'employees', 'edit')) {
+      addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền "Sửa" ở phân hệ Hệ Thống Nhân Sự.', type: 'warning' });
+      return;
+    }
+    const period = `${payrollMonth}/${payrollYear}`;
+    const lockedItems = payroll.filter(p => p.month === period && p.locked);
+    if (lockedItems.length === 0) {
+      addToast({ title: 'ℹ️ Thông báo', message: 'Kỳ này chưa bị khóa.', type: 'info' });
+      return;
+    }
+    const unlocked = lockedItems.map(p => ({ ...p, locked: false, lockedAt: undefined }));
+    setPayroll(payroll.map(p => unlocked.find(u => u.id === p.id) || p));
+    await Promise.all(unlocked.map(p => dbService.hrmPayrollRecords.save(p).catch(() => {})));
+    addToast({ title: '🔓 Đã mở khóa kỳ lương', message: `Kỳ ${period} đã mở (${unlocked.length} dòng). Cập nhật xong nhớ "Khóa kỳ & phát phiếu lương" lại.`, type: 'success' });
+  };
+
   // Tải toàn bộ phiếu lương của kỳ đang chọn, nén chung 1 file .zip — chỉ dùng
   // sau khi đã "Khóa kỳ & Phát phiếu lương". Tên từng file: TenNhanVienKhongDau_
   // ThangMM_NamYYYY.pdf (viết liền không dấu theo đúng yêu cầu).
@@ -4313,6 +4332,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 handleOpenEditPayroll={handleOpenEditPayroll}
                 triggerDownloadPayslip={triggerDownloadPayslip}
                 handleLockPayrollPeriod={handleLockPayrollPeriod}
+                handleUnlockPayrollPeriod={handleUnlockPayrollPeriod}
                 handleDownloadAllPayslips={handleDownloadAllPayslips}
                 addToast={addToast}
               />

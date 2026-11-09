@@ -23,6 +23,8 @@ interface PayrollTabProps {
   handleOpenEditPayroll: (pay: PayrollItem) => void;
   triggerDownloadPayslip: (pay: PayrollItem) => void;
   handleLockPayrollPeriod: () => void;
+  // Mở khóa kỳ lương (chỉ người có quyền Sửa Nhân sự) — tùy chọn để các nơi dùng cũ không bị vỡ
+  handleUnlockPayrollPeriod?: () => void;
   handleDownloadAllPayslips: () => void;
   addToast: (msg: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => void;
 }
@@ -47,6 +49,7 @@ export default function PayrollTab({
   handleOpenEditPayroll,
   triggerDownloadPayslip,
   handleLockPayrollPeriod,
+  handleUnlockPayrollPeriod,
   handleDownloadAllPayslips,
   addToast,
 }: PayrollTabProps) {
@@ -439,6 +442,17 @@ export default function PayrollTab({
           className={`h-9 px-4 rounded-xl text-[13px] font-bold flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed ${periodLocked ? 'bg-slate-100 text-slate-400 border border-slate-200' : ''}`}>
           <Lock className="w-4 h-4" />{periodLocked ? 'Đã khóa kỳ' : 'Khóa kỳ & phát phiếu lương'}
         </button>
+        {/* Mở khóa kỳ: chỉ hiện khi kỳ đang khóa. Có hộp xác nhận nêu rõ hậu quả (phiếu đã phát có thể thay đổi). */}
+        {periodLocked && handleUnlockPayrollPeriod && (
+          <button type="button" data-testid="payroll-unlock"
+            onClick={() => {
+              if (!confirm(`Mở khóa kỳ lương ${payrollMonth}/${payrollYear}?\n\nSau khi mở, có thể tính lại / sửa lương của kỳ này. Phiếu lương đã phát cho nhân viên có thể khác số mới — chỉ mở khi thật sự cần, và nhớ khóa lại sau khi cập nhật xong.`)) return;
+              handleUnlockPayrollPeriod();
+            }}
+            className="h-9 px-4 rounded-xl text-[13px] font-bold flex items-center gap-1.5 bg-white border border-amber-300 text-amber-700 hover:bg-amber-50 cursor-pointer">
+            <Lock className="w-4 h-4" /> Mở khóa kỳ
+          </button>
+        )}
         <button type="button" onClick={handleDownloadAllPayslips} disabled={!periodLocked} data-testid="payroll-download-all"
           title={periodLocked ? 'Tải toàn bộ phiếu lương của kỳ này (.zip)' : 'Cần khóa kỳ trước khi tải toàn bộ'}
           className="h-9 px-4 rounded-xl text-[13px] font-bold flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
