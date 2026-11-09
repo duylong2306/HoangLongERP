@@ -731,3 +731,23 @@ export function pickMonthStandardWorkDays(rows: Array<{ baseSalary?: number; kpi
 export function countStandardMismatch(rows: Array<{ baseSalary?: number; kpiBonus?: number; salaryPerDay?: number }>, std: number): number {
   return rows.filter(r => { const n = inferStandardWorkDays(r); return n !== null && n !== std; }).length;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TÍNH LƯƠNG TỰ ĐỘNG AN TOÀN: gộp kết quả tính lại vào danh sách lương hiện có
+// Trước đây "Tính lương tự động" thay TOÀN BỘ danh sách lương trong màn hình bằng các dòng vừa tính: dòng các tháng
+// khác biến mất khỏi màn hình, dòng đã khóa kỳ bị ghi đè (mất cờ khóa), khoản sửa tay bị đặt về 0.
+// Nay: (1) dòng của tháng khác giữ nguyên; (2) dòng ĐÃ KHÓA của kỳ giữ nguyên, không tính lại;
+// (3) dòng của kỳ thuộc nhân viên không nằm trong lần tính (vd. đã nghỉ) cũng giữ nguyên;
+// (4) các dòng còn lại được thay bằng kết quả mới (các khoản sửa tay đã được mang sang ở bước dựng dòng).
+// ─────────────────────────────────────────────────────────────────────────────
+export function mergePayrollPeriod<T extends { id: string; empId: string; month: string; locked?: boolean }>(
+  all: T[], period: string, recalculated: T[],
+): T[] {
+  const recalcEmpIds = new Set(recalculated.map(r => r.empId));
+  const lockedByEmp = new Map<string, T>();
+  all.forEach(p => { if (p.month === period && p.locked) lockedByEmp.set(p.empId, p); });
+  const otherMonths = all.filter(p => p.month !== period);
+  const periodNotRecalculated = all.filter(p => p.month === period && !recalcEmpIds.has(p.empId));
+  const rows = recalculated.map(r => lockedByEmp.get(r.empId) ?? r);
+  return [...otherMonths, ...periodNotRecalculated, ...rows];
+}

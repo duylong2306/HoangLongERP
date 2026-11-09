@@ -32,7 +32,7 @@ import * as XLSX from 'xlsx';
 
 import { Role, HRMProps, TravelAllowanceNorm, EmployeeProfile, Holiday, LeaveCoefficient, PerformanceCriterion, DepartmentCriteria, AttendanceLog, LeaveRequest, PayrollItem, KpiMetric, BusinessTrip, SOPDocument, EmployeeErrorLog, ERP_MODULE_CODES } from './hr/hrTypes';
 import { INITIAL_ROLES, DEFAULT_DEPARTMENT_CRITERIA } from './hr/hrInitialData';
-import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses, defaultStandardWorkDays, pickMonthStandardWorkDays } from './hr/hrCalculations';
+import { getLocalYYYYMMDD, minutesDiff, readHrmConfigFromStorage, getAttendanceStatusText, removeVietnameseTones, getDeduplicatedCriteria, computeDailyWorkday, calculateSingleEmployeePayroll, calculateScoreFromErrorCount, sumApprovedTravelExpenses, defaultStandardWorkDays, pickMonthStandardWorkDays, mergePayrollPeriod } from './hr/hrCalculations';
 import { saveProjectPermissions } from './hr/hrProjectPermissions';
 import TripsTab from './hr/tabs/TripsTab';
 import SearchableSelect from './SearchableSelect';
@@ -2655,6 +2655,20 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
     }
     const monthStr = `${payrollMonth}/${payrollYear}`;
 
+    // AN TOÀN: kỳ đã "Khóa kỳ & phát phiếu lương" thì KHÔNG tính lại (trước đây vẫn tính và làm mất cờ khóa).
+    // Muốn tính lại phải mở khóa trước. Kỳ khóa MỘT PHẦN (hiếm) thì dòng đã khóa được giữ nguyên ở bước gộp cuối hàm.
+    const periodRowsBefore = payroll.filter(p => p.month === monthStr);
+    if (periodRowsBefore.length > 0 && periodRowsBefore.every(p => p.locked)) {
+      addToast({ title: '🔒 Kỳ lương đã khóa', message: `Kỳ ${monthStr} đã khóa và phát phiếu lương nên không thể tính lại tự động. Mở khóa kỳ trước nếu cần tính lại.`, type: 'warning' });
+      return;
+    }
+    // Dòng lương hiện có của kỳ theo nhân viên (ưu tiên dòng mã chuẩn PL-<mã NV>-<MMYYYY>) — để mang sang các khoản nhập tay
+    const existingByEmp = new Map<string, any>();
+    periodRowsBefore.forEach(p => {
+      const cur = existingByEmp.get(p.empId);
+      if (!cur || p.id === `PL-${p.empId}-${payrollMonth}${payrollYear}`) existingByEmp.set(p.empId, p);
+    });
+
     // Tải đúng công của KỲ LƯƠNG (payrollMonth/payrollYear) thay vì state `attendance`
     // (chỉ chứa 1 tháng theo bộ lọc tab Chấm công ngày). Nếu hai bộ lọc khác tháng,
     // payroll cũ rơi về mặc định standardWorkDays, không phản ánh "công đã chốt" thực tế.
@@ -2817,9 +2831,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
       // Logic thuần (đã kiểm thử) nằm ở sumApprovedTravelExpenses (hrCalculations.ts).
       inputs.expenses = sumApprovedTravelExpenses(travelExpensesSummary, emp, payrollMonth, payrollYear);
 
-      inputs.bonusHoliday = 0;
-      inputs.bonusCreative = 0;
-      inputs.otherDeductions = 0;
+      // Các khoản NHẬP TAY (không suy ra được từ chấm công) được GIỮ từ dòng lương cũ của kỳ, không đặt lại về 0:
+      // Thưởng lễ, Thưởng sáng tạo, Giảm trừ khác. (Công, tăng ca, tạm ứng, công tác phí vẫn tính lại từ dữ liệu gốc.)
+      const prevRow = existingByEmp.get(emp.id);
+      inputs.bonusHoliday = Number(prevRow?.bonusHoliday) || 0;
+      inputs.bonusCreative = Number(prevRow?.bonusCreative) || 0;
+      inputs.otherDeductions = Number(prevRow?.otherDeductions) || 0;
       // Đồng bộ Tạm ứng từ phiếu chi "Ứng Lương Nhân Sự" (salary_advance) của kỳ lương.
       inputs.advances = sumAdvancesForEmp(emp);
 
@@ -2830,13 +2847,24 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         empId: emp.id,
         empName: emp.name,
         month: monthStr,
-        status: 'unpaid' as any,
+        // Giữ trạng thái đã trả lương và ghi chú từng dòng của dòng cũ (trước đây bị đặt lại 'unpaid' và mất ghi chú)
+        status: (existingByEmp.get(emp.id)?.status || 'unpaid') as any,
+        ...(existingByEmp.get(emp.id)?.lineNotes ? { lineNotes: existingByEmp.get(emp.id).lineNotes } : {}),
         ...calculated
       };
     });
 
-    setPayroll(newPayrollItems as PayrollItem[]);
-    addToast({ title: '✅ Thành công', message: `⚡ Đã tự động tính lương thành công cho ${newPayrollItems.length} nhân viên tháng ${payrollMonth}/${payrollYear}.`, type: 'success' });
+    // Gộp vào danh sách hiện có (không thay toàn bộ): giữ dòng tháng khác + dòng đã khóa của kỳ này
+    const lockedKept = periodRowsBefore.filter(p => p.locked).length;
+    const manualKept = (newPayrollItems as any[]).filter(i => (i.bonusHoliday || 0) + (i.bonusCreative || 0) + (i.otherDeductions || 0) > 0).length;
+    setPayroll(prev => mergePayrollPeriod(prev as any[], monthStr, newPayrollItems as any[]) as PayrollItem[]);
+    addToast({
+      title: '✅ Thành công',
+      message: `⚡ Đã tự động tính lương cho ${newPayrollItems.length} nhân viên tháng ${monthStr}.`
+        + (manualKept > 0 ? ` Giữ nguyên các khoản nhập tay của ${manualKept} người.` : '')
+        + (lockedKept > 0 ? ` Giữ nguyên ${lockedKept} dòng đã khóa.` : ''),
+      type: 'success',
+    });
   };
 
   const handleOpenEditPayroll = (item: any) => {
