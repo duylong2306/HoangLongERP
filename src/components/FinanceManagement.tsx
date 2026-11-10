@@ -68,6 +68,8 @@ import {
   RefreshCcw,
   Image as ImageIcon,
   Undo2,
+  Truck,
+  ClipboardList,
 } from 'lucide-react';
 import MiniLoader from './MiniLoader';
 
@@ -5717,69 +5719,30 @@ export default function FinanceManagement({
 
             {/* SUB-TABS NAVIGATION FOR DỮ LIỆU KẾ TOÁN (ALWAYS AT THE TOP IF ACTIVE) */}
             {activeSubTab === 'du_lieu_ke_toan' && (
-              <div className="flex border-b border-slate-200 bg-white rounded-t-lg px-4 pb-0 shrink-0 gap-6 mb-4 overflow-x-auto scrollbar-none" id="accounting_data_tabs">
-                <button
-                  type="button"
-                  onClick={() => setDuLieuTab('khach_hang')}
-                  className={`pb-3 text-xs font-extrabold uppercase tracking-widest relative transition-all outline-none whitespace-nowrap cursor-pointer ${
-                    duLieuTab === 'khach_hang'
-                      ? 'text-orange-600 font-black'
-                      : 'text-slate-500 hover:text-orange-600'
-                  }`}
-                >
-                  👥 Khách hàng
-                  {duLieuTab === 'khach_hang' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-orange-500 rounded-full" />
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDuLieuTab('danh_muc_san_pham')}
-                  className={`pb-3 text-xs font-extrabold uppercase tracking-widest relative transition-all outline-none whitespace-nowrap cursor-pointer ${
-                    duLieuTab === 'danh_muc_san_pham'
-                      ? 'text-orange-600 font-black'
-                      : 'text-slate-500 hover:text-orange-600'
-                  }`}
-                >
-                  📦 Danh mục sản phẩm
-                  {duLieuTab === 'danh_muc_san_pham' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-orange-500 rounded-full" />
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDuLieuTab('ncc_thau_phu')}
-                  className={`pb-3 text-xs font-extrabold uppercase tracking-widest relative transition-all outline-none whitespace-nowrap cursor-pointer ${
-                    duLieuTab === 'ncc_thau_phu'
-                      ? 'text-orange-600 font-black'
-                      : 'text-slate-500 hover:text-orange-600'
-                  }`}
-                >
-                  📋 DANH SÁCH THẦU PHỤ
-                  {duLieuTab === 'ncc_thau_phu' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-orange-500 rounded-full" />
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setDuLieuTab('nha_cung_cap_vat_tu')}
-                  className={`pb-3 text-xs font-extrabold uppercase tracking-widest relative transition-all outline-none whitespace-nowrap cursor-pointer ${
-                    duLieuTab === 'nha_cung_cap_vat_tu'
-                      ? 'text-orange-600 font-black'
-                      : 'text-slate-500 hover:text-orange-600'
-                  }`}
-                >
-                  🚚 Nhà cung cấp vật tư
-                  {duLieuTab === 'nha_cung_cap_vat_tu' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-orange-500 rounded-full" />
-                  )}
-                </button>
-
-
-              </div>
+              // Dải tab con — CÙNG KIỂU thanh tab Quản lý nhân sự / thanh tab Tài chính phía trên:
+              // nút bo xl, tab chọn tô xanh LoLo chữ trắng, tab thường nền xám nhạt, có đường kẻ dưới.
+              <nav aria-label="Danh mục dữ liệu kế toán" id="accounting_data_tabs" data-testid="fin-data-tabs"
+                className="flex items-center gap-1.5 overflow-x-auto mb-4 pb-4 border-b border-slate-200">
+                {([
+                  ['khach_hang', 'Khách hàng', Users],
+                  ['danh_muc_san_pham', 'Danh mục sản phẩm', Package],
+                  ['ncc_thau_phu', 'Danh sách thầu phụ', ClipboardList],
+                  ['nha_cung_cap_vat_tu', 'Nhà cung cấp vật tư', Truck],
+                ] as [string, string, React.ComponentType<{ className?: string }>][]).map(([id, label, Icon]) => {
+                  const on = duLieuTab === id;
+                  return (
+                    <button key={id} type="button" data-testid={`fin-data-tab-${id}`}
+                      onClick={() => setDuLieuTab(id as any)}
+                      aria-current={on ? 'page' : undefined}
+                      // Nền/chữ đặt inline: index.css ép màu cho text-white / bg-* nên class Tailwind không đủ tin cậy cho nút nền xanh
+                      style={on ? { background: '#0d47c9', color: '#ffffff' } : undefined}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[13px] font-bold whitespace-nowrap cursor-pointer transition-colors ${on ? '' : 'text-slate-600 bg-slate-100 hover:bg-slate-200'}`}>
+                      <Icon className="w-4 h-4" />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
             )}
 
             {/* TAB: ĐƠN HÀNG MUA — gom theo Nhà cung cấp */}
@@ -6394,50 +6357,39 @@ export default function FinanceManagement({
 
               return (
                 <div className="space-y-6">
-                  {/* ⚡ Trung tâm Lập chi & Đề xuất — thanh công cụ tạo nhanh (mở thẳng form, bỏ qua launcher chọn loại) */}
-                  <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/5 border border-amber-500/30 rounded-2xl p-4 space-y-3 shadow-lg">
+                  {/* Trung tâm Lập chi & Đề xuất — thẻ trắng, nút tạo nhanh xanh LoLo (mở thẳng form, bỏ qua launcher chọn loại).
+                      Cùng ngôn ngữ thiết kế với các tab đã làm lại (Nhân sự): nền sáng, nút xanh #0d47c9 chữ trắng đặt inline. */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3" data-testid="proposal-launch">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-400">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#e8efff', color: '#0d47c9' }}>
                         <Zap className="w-5 h-5" />
                       </div>
-                      <div>
-                        <div className="text-sm font-extrabold text-white uppercase tracking-wide">Trung tâm Lập chi &amp; Đề xuất</div>
-                      </div>
+                      <div className="text-sm font-extrabold text-slate-900">Lập đề xuất nhanh</div>
                     </div>
-
                     {/* Nhóm ĐỀ XUẤT (qua xét duyệt) */}
                     <div className="flex items-center gap-2 flex-wrap">
-                    
-                      {QUICK_LAUNCH_ITEMS.filter(i => i.group === 'proposal').map(item => {
-                        const tone =
-                          item.key === 'adv_supplier' ? 'bg-purple-600 hover:bg-purple-500' :
-                          item.key === 'adv_site' ? 'bg-emerald-600 hover:bg-emerald-500' :
-                          item.key === 'adv_sub' ? 'bg-sky-600 hover:bg-sky-500' :
-                          item.key === 'adv_cash_fund' ? 'bg-teal-600 hover:bg-teal-500' :
-                          item.key === 'adv_other' ? 'bg-slate-600 hover:bg-slate-500' :
-                          'bg-pink-600 hover:bg-pink-500';
-                        return (
-                          <button
-                            key={item.key}
-                            type="button"
-                            onClick={() => openProposalForm(item.key)}
-                            className={`${tone} text-white text-[11px] font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow transition-all cursor-pointer`}
-                            title={item.desc}
-                          >
-                            <span>{item.emoji}</span>
-                            {item.label}
-                          </button>
-                        );
-                      })}
+                      {QUICK_LAUNCH_ITEMS.filter(i => i.group === 'proposal').map(item => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          data-testid={`proposal-launch-${item.key}`}
+                          onClick={() => openProposalForm(item.key)}
+                          style={{ background: '#0d47c9', color: '#ffffff' }}
+                          className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                          title={item.desc}
+                        >
+                          <Plus className="w-4 h-4" />
+                          {item.label}
+                        </button>
+                      ))}
                     </div>
-
                   </div>
 
-                  {/* Main List */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-                    <div className="p-4 bg-slate-950 border-b border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  {/* Danh sách chính */}
+                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-testid="proposal-list">
+                    <div className="p-4 border-b border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
                       <div>
-                        <h3 className="font-extrabold text-white text-xs uppercase tracking-wider">
+                        <h3 className="font-extrabold text-slate-900 text-sm">
                           {proposalTypeFilter === 'all' && "Danh sách Đề Xuất Chi & Tạm ứng"}
                           {proposalTypeFilter === 'subcontractor' && "Danh sách Đề xuất Chi Thầu Phụ"}
                           {proposalTypeFilter === 'expense' && "Danh sách Đề xuất Chi phí Công trình"}
@@ -6446,136 +6398,68 @@ export default function FinanceManagement({
                           {proposalTypeFilter === 'cash_fund' && "Danh sách Đề xuất Quỹ Tiền Mặt (Nạp Quỹ)"}
                           {proposalTypeFilter === 'other' && "Danh sách Đề xuất Chi Khác"}
                         </h3>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Xử lý phê duyệt tạm ứng thầu phụ, chi phí phát sinh công trình và kết nối sổ quỹ kế toán chi tiền.</p>
+                        <p className="text-[12px] text-slate-500 mt-0.5">Phê duyệt tạm ứng thầu phụ, chi phí phát sinh công trình và kết nối sổ quỹ kế toán chi tiền.</p>
                       </div>
+                      {/* Thùng rác: Đề Xuất bị Từ Chối (tự xóa sau 30 ngày + khôi phục) */}
+                      <button
+                        type="button"
+                        data-testid="proposal-trash"
+                        onClick={() => setTrashOpen(true)}
+                        className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
+                        title="Thùng rác: Đề Xuất bị Từ Chối (tự động xóa sau 30 ngày)"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Thùng rác</span>
+                        {rejectedProposals.length > 0 && (
+                          <span className="min-w-[20px] h-[20px] px-1.5 rounded-full text-[11px] leading-[20px] text-center font-black" style={{ background: '#ef4444', color: '#ffffff' }}>{rejectedProposals.length}</span>
+                        )}
+                      </button>
+                    </div>
 
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5 bg-slate-900/50 p-1 rounded-xl border border-slate-800">
-                          {/* Thùng rác: Đề Xuất bị Từ Chối (tự xóa sau 30 ngày + khôi phục) */}
-                          <button
-                            type="button"
-                            onClick={() => setTrashOpen(true)}
-                            className="relative bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow transition-all cursor-pointer"
-                            title="Thùng rác: Đề Xuất bị Từ Chối (tự động xóa sau 30 ngày)"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">Thùng rác</span>
-                            {rejectedProposals.length > 0 && (
-                              <span className="ml-0.5 bg-white text-rose-600 text-[9px] font-black px-1.5 rounded-full leading-none">{rejectedProposals.length}</span>
-                            )}
+                    {/* Chip lọc theo loại đề xuất — kèm số lượng (kiểu chip của tab Dữ liệu nhân sự cũ / bộ lọc trạng thái LoLo) */}
+                    <div className="px-4 pt-3 flex items-center gap-1.5 overflow-x-auto" data-testid="proposal-type-chips">
+                      {([
+                        ['all', 'Tất cả', countAll],
+                        ['subcontractor', 'Chi Thầu Phụ', countSub],
+                        ['expense', 'Chi phí Công trình', countExp],
+                        ['supplier', 'Chi Nhà Cung Cấp', countSup],
+                        ['salary', 'Ứng lương', countSal],
+                        ['cash_fund', 'Nạp Quỹ', countCashFund],
+                        ['other', 'Chi Khác', countOther],
+                      ] as [typeof proposalTypeFilter, string, number][]).map(([id, label, n]) => {
+                        const on = proposalTypeFilter === id;
+                        return (
+                          <button key={id} type="button" data-testid={`proposal-chip-${id}`} onClick={() => setProposalTypeFilter(id)}
+                            aria-current={on ? 'page' : undefined}
+                            style={on ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
+                            className={`h-9 pl-3 pr-2 rounded-full text-[13px] font-bold whitespace-nowrap border cursor-pointer inline-flex items-center gap-1.5 ${on ? '' : 'bg-white text-slate-600 border-slate-200'}`}>
+                            {label}
+                            <span className="min-w-[22px] h-[20px] px-1.5 rounded-full text-[11px] leading-[20px] text-center font-black"
+                              style={on ? { background: '#0d47c9', color: '#ffffff' } : { background: '#e2e8f0', color: '#475569' }}>{n}</span>
                           </button>
-                        </div>
-
-                        {/* Filter tabs */}
-                        <div className="flex flex-wrap bg-slate-900 p-1 rounded-xl border border-slate-800">
-                        <button
-                          type="button"
-                          onClick={() => setProposalTypeFilter('all')}
-                          className={`text-[10px] font-extrabold px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                            proposalTypeFilter === 'all'
-                              ? 'bg-amber-50 text-amber-700 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          Tất cả ({countAll})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setProposalTypeFilter('subcontractor')}
-                          className={`text-[10px] font-extrabold px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                            proposalTypeFilter === 'subcontractor'
-                              ? 'bg-sky-50 text-sky-700 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          Chi Thầu Phụ ({countSub})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setProposalTypeFilter('expense')}
-                          className={`text-[10px] font-extrabold px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                            proposalTypeFilter === 'expense'
-                              ? 'bg-emerald-50 text-emerald-700 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          Chi phí Công trình ({countExp})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setProposalTypeFilter('supplier')}
-                          className={`text-[10px] font-extrabold px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                            proposalTypeFilter === 'supplier'
-                              ? 'bg-purple-50 text-purple-700 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          Chi Nhà Cung Cấp ({countSup})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setProposalTypeFilter('salary')}
-                          className={`text-[10px] font-extrabold px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                            proposalTypeFilter === 'salary'
-                              ? 'bg-pink-50 text-pink-700 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          Ứng lương ({countSal})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setProposalTypeFilter('cash_fund')}
-                          className={`text-[10px] font-extrabold px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                            proposalTypeFilter === 'cash_fund'
-                              ? 'bg-teal-50 text-teal-700 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          Nạp Quỹ ({countCashFund})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setProposalTypeFilter('other')}
-                          className={`text-[10px] font-extrabold px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
-                            proposalTypeFilter === 'other'
-                              ? 'bg-slate-100 text-slate-700 font-black'
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          Chi Khác ({countOther})
-                        </button>
-                        </div>
-                      </div>
+                        );
+                      })}
                     </div>
 
                     {/* Bộ lọc: Từ ngày – Đến ngày, Dự án, Trạng thái (lưu localStorage) */}
-                    <div className="p-3 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-end gap-3">
+                    <div className="p-4 border-b border-slate-200 flex flex-wrap items-end gap-3" data-testid="proposal-filters">
                       <div className="flex flex-col gap-1">
-                        <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Từ ngày</label>
-                        <input
-                          type="date"
-                          value={proposalFilters.fromDate}
+                        <label className="text-slate-500 font-bold text-[11px]">Từ ngày</label>
+                        <input type="date" value={proposalFilters.fromDate}
                           onChange={(e) => updateProposalFilter({ fromDate: e.target.value })}
-                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer"
-                        />
+                          className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
                       </div>
                       <div className="flex flex-col gap-1">
-                        <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Đến ngày</label>
-                        <input
-                          type="date"
-                          value={proposalFilters.toDate}
+                        <label className="text-slate-500 font-bold text-[11px]">Đến ngày</label>
+                        <input type="date" value={proposalFilters.toDate}
                           onChange={(e) => updateProposalFilter({ toDate: e.target.value })}
-                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer"
-                        />
+                          className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
                       </div>
                       <div className="flex flex-col gap-1">
-                        <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Dự án</label>
-                        <select
-                          value={proposalFilters.projectId}
+                        <label className="text-slate-500 font-bold text-[11px]">Dự án</label>
+                        <select value={proposalFilters.projectId}
                           onChange={(e) => updateProposalFilter({ projectId: e.target.value })}
-                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer min-w-[160px]"
-                        >
+                          className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer min-w-[160px]">
                           <option value="">Tất cả dự án</option>
                           {projects.map(p => (
                             <option key={p.id} value={p.id}>{p.name}</option>
@@ -6583,12 +6467,10 @@ export default function FinanceManagement({
                         </select>
                       </div>
                       <div className="flex flex-col gap-1">
-                        <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Trạng thái</label>
-                        <select
-                          value={proposalFilters.status}
+                        <label className="text-slate-500 font-bold text-[11px]">Trạng thái</label>
+                        <select value={proposalFilters.status}
                           onChange={(e) => updateProposalFilter({ status: e.target.value })}
-                          className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-orange-500 cursor-pointer min-w-[150px]"
-                        >
+                          className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer min-w-[150px]">
                           <option value="">Tất cả trạng thái</option>
                           <option value="pending_approval">Chờ Duyệt</option>
                           <option value="pending_payment">Chờ Lập Phiếu</option>
@@ -6599,32 +6481,35 @@ export default function FinanceManagement({
                       </div>
                       <button
                         type="button"
+                        data-testid="proposal-filter-reset"
                         onClick={() => {
                           const y = new Date().getFullYear();
                           updateProposalFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, projectId: '', status: '' });
                         }}
-                        className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                        className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
                         title="Xóa bộ lọc"
                       >
-                        <X className="w-3.5 h-3.5" /> Reset
+                        <X className="w-4 h-4" /> Đặt lại
                       </button>
                       <div className="ml-auto flex items-center gap-3 self-center">
                         {(() => {
                           const selRej = subcontractorAdvances.filter(p => finSelectedRows.has(p.id) && p.status === 'rejected').length;
                           return (
                             <>
+                              {/* Thanh xóa hàng loạt: chỉ hiện khi có đề xuất Từ Chối được tick */}
                               {selRej > 0 && (
                                 <button
                                   type="button"
                                   onClick={handleBulkDeleteProposals}
-                                  className="bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-all shadow"
+                                  style={{ background: '#e11d48', color: '#ffffff' }}
+                                  className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 cursor-pointer"
                                   title="Xóa các đề xuất được chọn (chỉ Từ Chối)"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" /> Xóa {selRej} đã chọn
+                                  <Trash2 className="w-4 h-4" /> Xóa {selRej} đã chọn
                                 </button>
                               )}
-                              <div className="text-[10px] text-slate-400 font-semibold">
-                                Kết quả: <span className="text-orange-400 font-black font-mono">{proposalTotal}</span> đề xuất
+                              <div className="text-[13px] text-slate-500 font-semibold" data-testid="proposal-count">
+                                Kết quả: <b className="text-slate-800">{proposalTotal}</b> đề xuất
                               </div>
                             </>
                           );
@@ -6633,7 +6518,7 @@ export default function FinanceManagement({
                     </div>
 
                     {/* KANBAN BOARD: Đề Xuất Chi */}
-                    <div className="p-1">
+                    <div className="p-3">
                       {(() => {
                         // Trạng thái hiệu lực: nếu đề xuất đang "Chờ Lập Phiếu" nhưng đã có phiếu chi
                         // (relatedAdvanceId) được lập thành công → coi như đang ở bước "Cập Nhật Chứng Từ".
