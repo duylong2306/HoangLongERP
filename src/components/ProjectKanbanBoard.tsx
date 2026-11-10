@@ -984,7 +984,9 @@ export default function ProjectKanbanBoard({
           address: editAddress,
           startDate: editStartDate,
           endDate: calculatedEndStr,
-          contractDuration: editDuration || undefined,
+          // KHÔNG gửi contractDuration: bảng projects trên Supabase không có cột contract_duration nên upsert bị từ chối
+          // ("Lưu thất bại") mỗi lần sửa thời hạn. Thời hạn được suy ra từ endDate (= ngày khởi công + số ngày,
+          // hoặc "N ngày" khi chưa có ngày khởi công) — xem resetEditProjectDetails.
           contractValue: editContractValue,
           customerId: editCustomerId,
           cardColor: editCardColor || '',
