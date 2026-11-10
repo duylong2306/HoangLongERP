@@ -3565,25 +3565,39 @@ export default function ProjectKanbanBoard({
                 />
 
                 {/* 1. Basic detail card */}
-                <div className="bg-slate-950 border border-slate-850 p-5 rounded-2xl space-y-4">
-                  <span className="font-extrabold text-[11px] text-emerald-400 flex items-center gap-1 uppercase tracking-wide border-b border-slate-900 pb-2">
-                    <FileText className="w-4 h-4" />
-                    THÔNG TIN DỰ ÁN
-                  </span>
+                <div className="bg-white border border-slate-200 p-4 md:p-5 rounded-2xl shadow-sm space-y-4" data-testid="project-info-card">
+                  {/* Tiêu đề thẻ + nút "Chỉnh sửa" ngay đầu thẻ (trước đây nút nằm tít cuối thẻ, khó thấy nên người dùng tưởng không sửa được) */}
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                    <span className="font-extrabold text-[13px] text-slate-800 flex items-center gap-2 uppercase tracking-wide">
+                      <span className="w-7 h-7 rounded-lg bg-[#e8efff] text-[#0d47c9] inline-flex items-center justify-center"><FileText className="w-4 h-4" /></span>
+                      Thông tin dự án
+                    </span>
+                    {!isEditingDetails ? (
+                      canOn('editProjectInfo', selectedProject) && (
+                        <button type="button" onClick={() => setIsEditingDetails(true)} data-testid="project-info-edit"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12px] font-bold cursor-pointer active:scale-[0.98]"
+                          style={{ background: '#0d47c9', color: '#ffffff' }}>
+                          <Edit2 className="w-3.5 h-3.5" /> Chỉnh sửa
+                        </button>
+                      )
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-bold">Đang chỉnh sửa</span>
+                    )}
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {/* Địa điểm thi công */}
                     <div className="col-span-2">
-                      <span className="text-slate-500 block font-semibold mb-1">Địa điểm thi công:</span>
+                      <span className="text-slate-600 block text-[12px] font-bold mb-1.5">Địa điểm thi công:</span>
                       <input
                         type="text"
                         disabled={!isEditingDetails}
                         value={editAddress}
                         onChange={(e) => setEditAddress(e.target.value)}
-                        className={`outline-none border px-2.5 py-1.5 font-medium text-[11px] w-full transition-all focus:border-emerald-500 rounded ${
+                        className={`outline-none border px-3 py-2.5 text-[14px] md:text-[13px] w-full transition-all rounded-xl ${
                           isEditingDetails
-                            ? 'bg-slate-900 border-slate-800 text-slate-200'
-                            : 'bg-slate-950 border-slate-900 text-slate-400 select-none cursor-not-allowed opacity-75'
+                            ? 'bg-white border-slate-300 text-slate-900 focus:border-[#0d47c9] focus:ring-2 focus:ring-[#0d47c9]/15'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 select-none cursor-not-allowed'
                         }`}
                         placeholder="Nhập địa lý/địa điểm thi công..."
                       />
@@ -3591,23 +3605,23 @@ export default function ProjectKanbanBoard({
 
                     {/* Ngày khởi công */}
                     <div>
-                      <span className="text-slate-500 block font-semibold mb-1">Ngày khởi công:</span>
+                      <span className="text-slate-600 block text-[12px] font-bold mb-1.5">Ngày khởi công:</span>
                       <input
                         type="date"
                         disabled={!isEditingDetails}
                         value={editStartDate}
                         onChange={(e) => setEditStartDate(e.target.value)}
-                        className={`outline-none border px-2.5 py-1.5 font-mono text-[11px] w-full transition-all focus:border-emerald-500 rounded ${
+                        className={`outline-none border px-3 py-2.5 text-[14px] md:text-[13px] w-full transition-all rounded-xl ${
                           isEditingDetails
-                            ? 'bg-slate-900 border-slate-800 text-slate-200'
-                            : 'bg-slate-950 border-slate-900 text-slate-400 select-none cursor-not-allowed opacity-75'
+                            ? 'bg-white border-slate-300 text-slate-900 focus:border-[#0d47c9] focus:ring-2 focus:ring-[#0d47c9]/15'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 select-none cursor-not-allowed'
                         }`}
                       />
                     </div>
 
                     {/* Thời hạn Hợp đồng */}
                     <div>
-                      <span className="text-slate-500 block font-semibold mb-1">Thời hạn Hợp đồng (ngày):</span>
+                      <span className="text-slate-600 block text-[12px] font-bold mb-1.5">Thời hạn Hợp đồng (ngày):</span>
                       <input
                         type="number"
                         min="1"
@@ -3617,17 +3631,17 @@ export default function ProjectKanbanBoard({
                           const val = e.target.value;
                           setEditDuration(val ? Number(val) : '');
                         }}
-                        className={`outline-none border px-2.5 py-1.5 font-mono text-[11px] w-full transition-all focus:border-emerald-500 rounded ${
+                        className={`outline-none border px-3 py-2.5 text-[14px] md:text-[13px] w-full transition-all rounded-xl ${
                           isEditingDetails
-                            ? 'bg-slate-900 border-slate-800 text-slate-200'
-                            : 'bg-slate-950 border-slate-900 text-slate-400 select-none cursor-not-allowed opacity-75'
+                            ? 'bg-white border-slate-300 text-slate-900 focus:border-[#0d47c9] focus:ring-2 focus:ring-[#0d47c9]/15'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 select-none cursor-not-allowed'
                         }`}
                         placeholder="Ví dụ: 90"
                       />
                     </div>
 
                     {/* Diễn giải thời hạn hợp đồng */}
-                    <div className="col-span-2 p-3 bg-slate-900 border border-slate-850 rounded-xl space-y-1.5 text-[11px] text-slate-400">
+                    <div className="col-span-2 p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-[12.5px] text-slate-600">
                       <div className="flex justify-between items-center">
                         <span>📅 Dự kiến ngày hoàn thành:</span>
                         {(() => {
@@ -3637,7 +3651,7 @@ export default function ProjectKanbanBoard({
                           const d = new Date(editStartDate);
                           if (isNaN(d.getTime())) return <span className="text-slate-650 italic">Ngày không hợp lệ</span>;
                           d.setDate(d.getDate() + Number(editDuration));
-                          return <strong className="text-emerald-400 font-mono">{d.toLocaleDateString('vi-VN')}</strong>;
+                          return <strong className="text-slate-900 font-extrabold">{d.toLocaleDateString('vi-VN')}</strong>;
                         })()}
                       </div>
                       <div className="flex justify-between items-center">
@@ -3657,11 +3671,11 @@ export default function ProjectKanbanBoard({
                           const diffDays = Math.ceil(diff / (1000 * 60 * 60 * 24));
                           
                           if (diffDays > 0) {
-                            return <strong className="text-amber-400 font-mono">Còn {diffDays} ngày hữu hiệu</strong>;
+                            return <strong className="text-amber-600 font-extrabold">Còn {diffDays} ngày hữu hiệu</strong>;
                           } else if (diffDays === 0) {
-                            return <strong className="text-rose-400 font-mono">Thời hạn hoàn công hôm nay!</strong>;
+                            return <strong className="text-rose-600 font-extrabold">Thời hạn hoàn công hôm nay!</strong>;
                           } else {
-                            return <strong className="text-rose-500 font-mono">Đã trễ hạn {Math.abs(diffDays)} ngày</strong>;
+                            return <strong className="text-rose-600 font-extrabold">Đã trễ hạn {Math.abs(diffDays)} ngày</strong>;
                           }
                         })()}
                       </div>
@@ -3672,7 +3686,7 @@ export default function ProjectKanbanBoard({
                     {canOn('viewProjectFinance', selectedProject) && (<>
                     {/* Vốn trị hợp đồng VNĐ */}
                     <div className="col-span-2">
-                      <span className="text-slate-400 block font-bold text-[10.5px] uppercase tracking-wider mb-2">
+                      <span className="text-slate-800 block font-extrabold text-[13px] uppercase tracking-wide mb-2.5">
                         💰 Giá trị Hợp đồng (VNĐ)
                       </span>
                       {(() => {
@@ -3688,7 +3702,7 @@ export default function ProjectKanbanBoard({
                         const remainingValue = Math.max(0, grandTotal - totalReceived);
 
                         return (
-                          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-center text-slate-800">
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col justify-center text-slate-800">
                             {approvedProjectContracts.length > 0 ? (
                               <>
                                 <div className="flex items-center justify-between mb-1.5">
@@ -3742,7 +3756,7 @@ export default function ProjectKanbanBoard({
                             )}
 
                             {/* Remaining status metrics */}
-                            <div className="text-[10px] text-slate-500 mt-2.5 flex flex-col gap-1 border-t border-dashed border-slate-200 pt-2 bg-slate-50 p-2 rounded-lg">
+                            <div className="text-[12px] text-slate-600 mt-3 flex flex-col gap-1.5 bg-slate-50 border border-slate-200 p-3 rounded-xl">
                               <div className="flex justify-between">
                                 <span className="text-slate-450 font-medium">Thực tế đã thu:</span>
                                 <span className="font-mono text-emerald-600 font-bold">{totalReceived.toLocaleString('vi-VN')} đ</span>
@@ -3759,19 +3773,20 @@ export default function ProjectKanbanBoard({
                               <button
                                 type="button"
                                 onClick={() => handleCreateReceipt(false)}
-                                className="bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-700 font-bold text-[10px] py-1.5 px-1.5 rounded-lg border border-emerald-200/60 transition-all cursor-pointer flex items-center justify-center gap-1 shadow-sm"
+                                className="bg-white hover:bg-[#f3f7ff] text-[#0d47c9] font-bold text-[12px] py-2.5 px-2 rounded-xl border border-[#bcd0ff] transition-all cursor-pointer flex items-center justify-center gap-1.5"
                                 title="Tạm ứng 50% số tiền chưa thu còn lại"
                               >
-                                <Plus className="w-3 h-3 text-emerald-600 animate-pulse" />
+                                <Plus className="w-3.5 h-3.5" />
                                 Lập Phiếu Tạm Ứng
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleCreateReceipt(true)}
-                                className="bg-sky-50 hover:bg-sky-100 active:bg-sky-200 text-sky-700 font-bold text-[10px] py-1.5 px-1.5 rounded-lg border border-sky-200/60 transition-all cursor-pointer flex items-center justify-center gap-1 shadow-sm"
+                                className="font-bold text-[12px] py-2.5 px-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                                style={{ background: '#0d47c9', color: '#ffffff' }}
                                 title="Quyết toán toàn bộ số tiền chưa thu còn lại"
                               >
-                                <Check className="w-3 h-3 text-sky-600" />
+                                <Check className="w-3.5 h-3.5" />
                                 Lập Phiếu Quyết Toán
                               </button>
                             </div>
@@ -3782,8 +3797,8 @@ export default function ProjectKanbanBoard({
                     </div>
 
                     {/* Tổng giá trị HĐ Thầu Phụ + danh sách chi tiết từng thầu phụ của dự án này */}
-                    <div className="col-span-2 bg-slate-900/40 border border-slate-850/60 p-4 rounded-xl space-y-3">
-                      <span className="text-slate-400 font-bold block text-[10.5px] uppercase tracking-wider">
+                    <div className="col-span-2 border-t border-slate-100 pt-4 space-y-3">
+                      <span className="text-slate-800 font-extrabold block text-[13px] uppercase tracking-wide">
                         🤝 Tổng giá trị HĐ Thầu Phụ
                       </span>
                       {(() => {
@@ -3797,7 +3812,7 @@ export default function ProjectKanbanBoard({
 
                         if (latestBySub.length === 0) {
                           return (
-                            <div className="text-[10.5px] text-slate-500 italic bg-slate-950/60 border border-dashed border-slate-800 rounded-lg p-3 text-center">
+                            <div className="text-[12px] text-slate-500 italic bg-slate-50 border border-dashed border-slate-300 rounded-xl p-3 text-center">
                               Dự án này chưa có Hợp Đồng Thầu Phụ nào.
                             </div>
                           );
@@ -3806,7 +3821,7 @@ export default function ProjectKanbanBoard({
                         return (
                           <>
                             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-slate-800">
-                              <div className="text-[9.5px] text-orange-700 bg-orange-50 border border-orange-200/60 font-extrabold tracking-widest uppercase px-2 py-0.5 rounded w-fit mb-1.5">
+                              <div className="text-[11px] text-orange-700 bg-orange-50 border border-orange-200 font-bold px-2.5 py-0.5 rounded-full w-fit mb-1.5">
                                 {latestBySub.length} thầu phụ
                               </div>
                               <div className="text-orange-700 font-mono text-2xl font-black tracking-tight">
@@ -3819,14 +3834,14 @@ export default function ProjectKanbanBoard({
                                 const statusNormalized = (q.status || '').trim().toLowerCase();
                                 const isApproved = q.isApproved === true || statusNormalized === 'hoàn thành';
                                 return (
-                                  <div key={q.id} className="flex items-center justify-between bg-slate-950/60 border border-slate-850 rounded-lg px-3 py-2">
+                                  <div key={q.id} className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
                                     <div className="min-w-0">
-                                      <div className="text-[11px] text-slate-200 font-bold truncate">{q.subcontractorName || 'Thầu phụ vãng lai'}</div>
-                                      <div className={`text-[9px] font-bold mt-0.5 ${isApproved ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                      <div className="text-[13px] text-slate-900 font-bold truncate">{q.subcontractorName || 'Thầu phụ vãng lai'}</div>
+                                      <div className={`text-[9px] font-bold mt-0.5 ${isApproved ? 'text-emerald-600' : 'text-amber-600'}`}>
                                         {isApproved ? 'Đã Duyệt' : 'Chưa Duyệt'}
                                       </div>
                                     </div>
-                                    <div className="text-[11px] font-mono font-black text-orange-300 shrink-0 ml-2">
+                                    <div className="text-[13px] font-mono font-black text-orange-600 shrink-0 ml-2">
                                       {(q.contractValue || q.totalAmount || 0).toLocaleString('vi-VN')} đ
                                     </div>
                                   </div>
@@ -3841,8 +3856,8 @@ export default function ProjectKanbanBoard({
                     </>)}
 
                     {/* Tùy chọn màu sắc thẻ Dự án */}
-                    <div className="col-span-2 bg-slate-900/40 border border-slate-850/60 p-4 rounded-xl space-y-3">
-                      <span className="text-slate-400 font-bold block text-[10.5px] uppercase tracking-wider">
+                    <div className="col-span-2 border-t border-slate-100 pt-4 space-y-3">
+                      <span className="text-slate-800 font-extrabold block text-[13px] uppercase tracking-wide">
                         🎨 Màu sắc thẻ dự án (Đường dọc bên trái)
                       </span>
                       <div className="flex flex-wrap items-center gap-2">
@@ -3851,10 +3866,10 @@ export default function ProjectKanbanBoard({
                           type="button"
                           disabled={!isEditingDetails}
                           onClick={() => setEditCardColor('')}
-                          className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all ${
+                          className={`px-3.5 py-2 rounded-xl text-[12px] font-bold border transition-all ${
                             !editCardColor
-                              ? 'bg-slate-950 text-emerald-400 border-emerald-500/50 shadow-md'
-                              : 'bg-slate-950 text-slate-400 border-slate-850 hover:text-white'
+                              ? 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                           } ${!isEditingDetails ? 'opacity-80 cursor-not-allowed' : 'cursor-pointer'}`}
                         >
                           Mặc định (Theo Trạng thái)
@@ -3869,9 +3884,9 @@ export default function ProjectKanbanBoard({
                               type="button"
                               disabled={!isEditingDetails}
                               onClick={() => setEditCardColor(color.className)}
-                              className={`group relative w-7 h-7 rounded-full flex items-center justify-center transition-all ${color.className} ${
+                              className={`group relative w-8 h-8 rounded-full flex items-center justify-center transition-all ${color.className} ${
                                 isSelected
-                                  ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-950 scale-110 shadow-lg'
+                                  ? 'ring-2 ring-[#0d47c9] ring-offset-2 ring-offset-white scale-110 shadow-md'
                                   : 'hover:scale-105 opacity-80 hover:opacity-100'
                               } ${!isEditingDetails ? 'opacity-95 cursor-not-allowed' : 'cursor-pointer'}`}
                               title={color.name}
@@ -3883,59 +3898,48 @@ export default function ProjectKanbanBoard({
                           );
                         })}
                       </div>
-                      <p className="text-[10px] text-slate-500">
+                      <p className="text-[12px] text-slate-500">
                         Chọn màu sắc nổi bật riêng biệt cho thẻ dự án này để dễ dàng theo dõi và nhận diện nhanh trên bảng phân đoạn Kanban.
                       </p>
                     </div>
 
-                    {/* Button action toggles */}
-                    <div className="col-span-2 pt-2 border-t border-slate-900 flex justify-end gap-3.5">
-                      {!isEditingDetails ? (
-                        canOn('editProjectInfo', selectedProject) && (
-                          <button
-                            type="button"
-                            onClick={() => setIsEditingDetails(true)}
-                            className="bg-indigo-650 hover:bg-indigo-600 text-white font-extrabold px-4.5 py-2.2 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-[0.98] cursor-pointer text-xs"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                            Chỉnh sửa thông tin
-                          </button>
-                        )
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              resetEditProjectDetails();
-                              setIsEditingDetails(false);
-                            }}
-                            className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold px-4 py-2.2 rounded-xl flex items-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer text-xs shadow-md border border-slate-700/30"
-                          >
-                            <RotateCcw className="w-4 h-4" />
-                            Hoàn tác
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleSaveProjectDetails}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold px-4.5 py-2.2 rounded-xl flex items-center gap-1.5 transition-all shadow-md active:scale-[0.98] cursor-pointer text-xs"
-                          >
-                            <Save className="w-4 h-4" />
-                            Cập nhật & Lưu thông tin
-                          </button>
-                        </>
-                      )}
-                    </div>
+                    {/* Thanh Hoàn tác / Lưu: chỉ hiện khi đang chỉnh sửa; nút "Chỉnh sửa" nay nằm ở đầu thẻ. Trên điện thoại dính đáy để luôn thấy nút Lưu. */}
+                    {isEditingDetails && (
+                      <div className="col-span-2 sticky bottom-0 z-10 -mx-4 md:mx-0 px-4 md:px-0 py-3 bg-white/95 backdrop-blur border-t border-slate-200 flex justify-end gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            resetEditProjectDetails();
+                            setIsEditingDetails(false);
+                          }}
+                          className="bg-white hover:bg-slate-50 text-slate-700 font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer text-[13px] border border-slate-300 flex-1 md:flex-none justify-center"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Hoàn tác
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveProjectDetails}
+                          data-testid="project-info-save"
+                          className="font-bold px-5 py-2.5 rounded-xl flex items-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer text-[13px] flex-1 md:flex-none justify-center"
+                          style={{ background: '#0d47c9', color: '#ffffff' }}
+                        >
+                          <Save className="w-4 h-4" />
+                          Lưu thông tin
+                        </button>
+                      </div>
+                    )}
 
 
                     {/* KHU VỰC NHÂN SỰ BẬC CAO: TRƯỞNG DỰ ÁN VÀ LIÊN QUAN */}
-                    <div className="col-span-2 border-t border-slate-900 pt-3.5 space-y-3">
-                      <span className="text-slate-400 block font-extrabold text-[10.5px] uppercase tracking-wider">
+                    <div className="col-span-2 border-t border-slate-100 pt-4 space-y-3">
+                      <span className="text-slate-800 block font-extrabold text-[13px] uppercase tracking-wide">
                         👥 NHÂN SỰ DỰ ÁN
                       </span>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                         {/* 1. TRƯỞNG DỰ ÁN CHUYÊN TRÁCH */}
-                        <div className="bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex items-center gap-3 relative group hover:border-slate-800 transition-colors">
+                        <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center gap-3 relative group hover:border-[#bcd0ff] transition-colors">
                           {(() => {
                             const pm = employees.find(e => e.id === selectedProject.pmId);
                             return (
@@ -4008,10 +4012,10 @@ export default function ProjectKanbanBoard({
                           onClick={handleSyncProjectMembersToChat}
                           disabled={isSyncingChatMembers || !canOn('editProjectInfo', selectedProject)}
                           title="Thêm toàn bộ nhân sự trong công việc và nhiệm vụ của dự án vào nhóm chat (mỗi người 1 lần)"
-                          className={`bg-slate-900/50 border border-slate-850 p-3 rounded-xl flex items-center gap-3 relative transition-colors text-left ${
+                          className={`bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center gap-3 relative transition-colors text-left ${
                             (isSyncingChatMembers || !canOn('editProjectInfo', selectedProject))
                               ? 'opacity-60 cursor-not-allowed'
-                              : 'hover:border-sky-500/40 hover:bg-slate-900 cursor-pointer group'
+                              : 'hover:border-[#bcd0ff] hover:bg-[#f3f7ff] cursor-pointer group'
                           }`}
                         >
                           <div className="relative shrink-0 w-11 h-11">
@@ -4044,7 +4048,7 @@ export default function ProjectKanbanBoard({
               </div>
 
               {/* Right utility rail panels - REPLACED WITH SUBTASK LIST & CREATION */}
-              <div className={`w-full lg:w-[640px] bg-slate-950 p-4 md:p-5 space-y-4 flex flex-col shrink-0 h-full overflow-hidden border-t lg:border-t-0 lg:border-l border-slate-800 ${mobileTab === 'tasks' ? '' : 'max-lg:hidden'}`} id="drawer_right_pane">
+              <div className={`w-full lg:w-[640px] bg-slate-50 p-3 md:p-5 space-y-4 flex flex-col shrink-0 h-full overflow-hidden border-t lg:border-t-0 lg:border-l border-slate-800 ${mobileTab === 'tasks' ? '' : 'max-lg:hidden'}`} id="drawer_right_pane">
                 <div className="flex-1 flex flex-col min-h-0">
                   
                   {/* ===========================================================================
@@ -4053,12 +4057,12 @@ export default function ProjectKanbanBoard({
                     Các công tắc (Approval/Cost/Material/Doc/Subcontractor), Checklist
                     =========================================================================== */}
                   {/* 2. CHƯƠNG TRÌNH KÍCH HOẠT QUY TẮC CÔNG VIỆC CON TRỰC BIÊN (Sub-tasks Section) */}
-                  <div className="bg-slate-900 border border-slate-850 rounded-2xl p-4 md:p-4.5 space-y-4 shadow-xl text-left flex-1 flex flex-col min-h-0">
-                    <div className="flex justify-between items-center border-b border-slate-800 pb-2.5 shrink-0">
-                      <div className="flex items-center gap-1.5">
-                        <CheckSquare className="w-5 h-5 text-emerald-400" />
-                        <span className="font-extrabold text-[11px] uppercase tracking-wider text-slate-100">
-                          DANH SÁCH CÔNG VIỆC
+                  <div className="bg-white border border-slate-200 rounded-2xl p-4 md:p-5 space-y-4 shadow-sm text-left flex-1 flex flex-col min-h-0">
+                    <div className="flex justify-between items-center gap-3 border-b border-slate-100 pb-3 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="w-7 h-7 rounded-lg bg-[#e8efff] text-[#0d47c9] inline-flex items-center justify-center"><CheckSquare className="w-4 h-4" /></span>
+                        <span className="font-extrabold text-[13px] uppercase tracking-wide text-slate-800">
+                          Danh sách công việc
                         </span>
                       </div>
 
@@ -4072,7 +4076,8 @@ export default function ProjectKanbanBoard({
                           }
                           setShowSubtaskForm(!showSubtaskForm);
                         }}
-                        className={canOn('createTask', selectedProject) ? "bg-emerald-600 hover:bg-emerald-500 text-white font-black px-3 py-1 rounded-lg text-[10px] flex items-center gap-1 cursor-pointer transition-colors" : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed font-black px-3 py-1 rounded-lg text-[10px] flex items-center gap-1"}
+                        style={canOn('createTask', selectedProject) ? { background: '#0d47c9', color: '#ffffff' } : undefined}
+                        className={canOn('createTask', selectedProject) ? "font-bold px-3.5 py-2 rounded-xl text-[12px] flex items-center gap-1.5 cursor-pointer transition-colors active:scale-[0.98]" : "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed font-bold px-3.5 py-2 rounded-xl text-[12px] flex items-center gap-1.5"}
                       >
                         <Plus className="w-3.5 h-3.5" />
                         Tạo Việc Con

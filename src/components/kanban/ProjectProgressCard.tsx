@@ -24,34 +24,45 @@ export default function ProjectProgressCard({ progress, canEdit, onSave }: {
   const n = Number(draft);
   const valid = draft.trim() !== '' && Number.isFinite(n) && n >= 0 && n <= 100;
 
+  // Giao diện LoLo: thẻ trắng bo tròn, thanh tiến độ lớn, số % nổi bật, các dòng giải thích dạng lưới 2 cột (xuống 1 cột trên điện thoại).
+  const stat = (label: string, val: React.ReactNode) => (
+    <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 min-w-0">
+      <div className="text-[11px] text-slate-500 font-semibold">{label}</div>
+      <div className="text-[13px] text-slate-900 font-extrabold mt-0.5 break-words">{val}</div>
+    </div>
+  );
+  const tone = progressTone(value);
+  const pctColor = tone === 'ok' ? '#059669' : tone === 'bad' ? '#e11d48' : tone === 'warn' ? '#d97706' : '#0d47c9';
   return (
-    <div className="bg-slate-950 border border-slate-850 p-5 rounded-2xl space-y-3" data-testid="project-progress-card">
-      <span className="font-extrabold text-[11px] text-emerald-400 flex items-center justify-between uppercase tracking-wide border-b border-slate-900 pb-2">
-        <span>TIẾN ĐỘ DỰ ÁN</span>
-        <span className="text-slate-100 text-[15px] font-black" data-testid="progress-value">{value}%</span>
-      </span>
-      <div className="h-2 rounded-full bg-slate-800 overflow-hidden"><div className={`h-full ${BAR[progressTone(value)]}`} data-testid="progress-bar" data-tone={progressTone(value)} style={{ width: `${value}%` }} /></div>
-      <div className="text-[11px] text-slate-400 space-y-1" data-testid="progress-explain">
-        <div className="flex justify-between gap-3"><span>Giai đoạn hiện tại</span><b className="text-slate-200 text-right">{stage.name} (bước {stage.index + 1}/{stage.total})</b></div>
-        <div className="flex justify-between gap-3"><span>Khoảng tiến độ của giai đoạn</span><b className="text-slate-200">{stage.from}% → {stage.to}%</b></div>
-        <div className="flex justify-between gap-3"><span>Việc con đã xong</span><b className="text-slate-200">{done}/{total}</b></div>
-        {source === 'completed' && <div className="text-emerald-400 font-bold">Dự án đã hoàn thành (100%).</div>}
-        {source === 'manual' && <div className="text-amber-400 font-bold" data-testid="progress-manual-note">PM đang nhập tay {value}%. Số tự tính theo cột và việc con: {auto}%.</div>}
-        {source === 'auto' && <div className="text-slate-500">Tự tính từ giai đoạn (cột kanban) và số việc con đã xong.</div>}
+    <div className="bg-white border border-slate-200 p-4 md:p-5 rounded-2xl shadow-sm space-y-3.5" data-testid="project-progress-card">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-extrabold text-[13px] text-slate-800 uppercase tracking-wide">Tiến độ dự án</span>
+        <span className="text-[26px] leading-none font-black" style={{ color: pctColor }} data-testid="progress-value">{value}%</span>
+      </div>
+      <div className="h-3 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full rounded-full ${BAR[tone]}`} data-testid="progress-bar" data-tone={tone} style={{ width: `${value}%` }} /></div>
+      <div className="space-y-3" data-testid="progress-explain">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {stat('Giai đoạn hiện tại', <>{stage.name} <span className="text-slate-500 font-semibold">(bước {stage.index + 1}/{stage.total})</span></>)}
+        {stat('Khoảng tiến độ của giai đoạn', <>{stage.from}% → {stage.to}%</>)}
+        {stat('Việc con đã xong', <>{done}/{total}</>)}
+      </div>
+      {source === 'completed' && <div className="text-emerald-600 text-[12px] font-bold">Dự án đã hoàn thành (100%).</div>}
+      {source === 'manual' && <div className="text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[12px] font-bold" data-testid="progress-manual-note">PM đang nhập tay {value}%. Số tự tính theo cột và việc con: {auto}%.</div>}
+      {source === 'auto' && <div className="text-slate-500 text-[12px]">Tự tính từ giai đoạn (cột kanban) và số việc con đã xong.</div>}
       </div>
       {canEdit && source !== 'completed' && (editing || source === 'manual' ? (
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <input type="number" min={0} max={100} inputMode="numeric" value={draft} onChange={e => setDraft(e.target.value)} aria-label="Tiến độ ghi đè (%)" data-testid="progress-input"
-            className="w-20 bg-slate-900 border border-slate-800 text-slate-200 rounded px-2 py-1.5 text-[11px] font-mono outline-none focus:border-emerald-500" placeholder="0–100" />
+            className="w-24 bg-white border border-slate-300 text-slate-900 rounded-xl px-3 py-2 text-[13px] font-mono outline-none focus:border-[#0d47c9]" placeholder="0–100" />
           <button type="button" disabled={!valid || busy} onClick={() => run(Math.round(n))} data-testid="progress-save"
-            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-[10.5px] font-black px-3 py-1.5 rounded-lg cursor-pointer" style={{ color: '#ffffff' }}>Lưu ghi đè</button>
+            className="disabled:opacity-50 text-[12px] font-bold px-4 py-2 rounded-xl cursor-pointer" style={{ background: '#0d47c9', color: '#ffffff' }}>Lưu ghi đè</button>
           {source === 'manual' && <button type="button" disabled={busy} onClick={() => run(null)} data-testid="progress-auto"
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10.5px] font-bold px-3 py-1.5 rounded-lg cursor-pointer">Về tự động</button>}
-          {source !== 'manual' && <button type="button" onClick={() => setEditing(false)} className="text-slate-400 text-[10.5px] font-bold px-2 py-1.5 cursor-pointer">Hủy</button>}
+            className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-[12px] font-bold px-4 py-2 rounded-xl cursor-pointer">Về tự động</button>}
+          {source !== 'manual' && <button type="button" onClick={() => setEditing(false)} className="text-slate-500 text-[12px] font-bold px-2 py-2 cursor-pointer">Hủy</button>}
         </div>
       ) : (
         <button type="button" onClick={() => setEditing(true)} data-testid="progress-edit"
-          className="text-[10.5px] font-bold text-sky-400 hover:text-sky-300 cursor-pointer">Ghi đè tiến độ…</button>
+          className="text-[12px] font-bold text-[#0d47c9] hover:underline cursor-pointer">Ghi đè tiến độ…</button>
       ))}
     </div>
   );
