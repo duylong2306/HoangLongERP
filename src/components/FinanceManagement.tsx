@@ -5676,7 +5676,10 @@ export default function FinanceManagement({
               </nav>
             )}
 
-            {/* Header / Sub-tab Title */}
+            {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi (tab đã làm lại: tên tab đã có trên thanh tab,
+                ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
+            {activeSubTab !== 'de_xuat_thu_chi' && (
+              <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
                 <h2 className="text-lg font-extrabold text-white flex items-center gap-2">
@@ -5714,6 +5717,8 @@ export default function FinanceManagement({
                 </div>
               </div>
             </div>
+              </>
+            )}
 
             {/* MAIN PORT FOR ACTIVE SUBTAB */}
 
@@ -6444,6 +6449,15 @@ export default function FinanceManagement({
                     {/* Bộ lọc: Từ ngày – Đến ngày, Dự án, Trạng thái (lưu localStorage) */}
                     <div className="p-4 border-b border-slate-200 flex flex-wrap items-end gap-3" data-testid="proposal-filters">
                       <div className="flex flex-col gap-1">
+                        <label className="text-slate-500 font-bold text-[11px]">Tìm kiếm</label>
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input type="text" data-testid="proposal-search" placeholder="Mã, tên, dự án, công việc…" value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="h-9 w-56 bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1">
                         <label className="text-slate-500 font-bold text-[11px]">Từ ngày</label>
                         <input type="date" value={proposalFilters.fromDate}
                           onChange={(e) => updateProposalFilter({ fromDate: e.target.value })}
@@ -6539,61 +6553,47 @@ export default function FinanceManagement({
                           const voucher = payments.find(p => p.id === adv.paymentId)
                             || payments.find(p => p.relatedAdvanceId === adv.id);
                           const isExpense = adv.type === 'project_expense_proposal';
+                          // Nhãn riêng từng loại để hiện dòng phụ dưới tên đối tượng
+                          const sub = adv.type === 'supplier_payment_proposal' ? 'Chi Nhà Cung Cấp' : adv.type === 'salary_advance' ? 'Ứng Lương' : adv.type === 'cash_fund_deposit' ? 'Nạp Quỹ Tiền Mặt' : adv.type === 'other_expense_proposal' ? 'Chi Khác' : isExpense ? 'Đề Xuất Chi' : 'Chi Thầu Phụ';
                           return (
-                            <div key={adv.id} onClick={() => setViewingProposalDetail(adv)} className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-1.5 relative group hover:border-amber-400/60 hover:bg-amber-50/40 transition-all duration-200 cursor-pointer">
-                              {/* Hàng 1: Loại Đề Xuất (màu theo type) + Số tiền */}
-                              <div className="flex items-center justify-between gap-2 text-[9px]">
-                                <span className={`font-extrabold px-1.5 py-0.5 rounded border truncate max-w-[150px] ${PROPOSAL_TYPE_BADGE[adv.type || ''] || 'bg-white text-slate-600 border-slate-400'}`} title={`${adv.id} · ${proposalTypeLabel(adv.type)}`}>
+                            <div key={adv.id} data-testid={`proposal-card-${adv.id}`} onClick={() => setViewingProposalDetail(adv)}
+                              className="bg-white border border-slate-200 rounded-xl p-3 space-y-2 hover:border-[#bcd0ff] hover:bg-[#f5f8ff] transition-colors cursor-pointer">
+                              {/* Hàng 1: loại đề xuất (nhãn pill) + số tiền xanh LoLo */}
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold truncate max-w-[150px] ${PROPOSAL_TYPE_BADGE[adv.type || ''] || 'bg-white text-slate-600 border-slate-300'}`} title={`${adv.id} · ${proposalTypeLabel(adv.type)}`}>
                                   {proposalTypeLabel(adv.type)}
                                 </span>
-                                <span className="font-mono font-black text-orange-600 text-[10px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                                <span className="font-mono font-black text-[13px] whitespace-nowrap" style={{ color: '#0d47c9' }}>
                                   {adv.amount.toLocaleString('vi-VN')} đ
                                 </span>
                               </div>
 
-                              {/* Tiêu đề + meta */}
+                              {/* Tên đối tượng + người lập */}
                               <div>
-                                <h4 className={`font-extrabold text-[12px] leading-snug transition-colors ${
-                                  adv.type === 'supplier_payment_proposal' ? 'text-purple-700 group-hover:text-purple-800'
-                                  : adv.type === 'salary_advance' ? 'text-pink-700 group-hover:text-pink-800'
-                                  : adv.type === 'cash_fund_deposit' ? 'text-teal-700 group-hover:text-teal-800'
-                                  : adv.type === 'other_expense_proposal' ? 'text-slate-700 group-hover:text-slate-800'
-                                  : isExpense ? 'text-emerald-700 group-hover:text-emerald-800'
-                                  : 'text-sky-700 group-hover:text-sky-800'
-                                }`}>
-                                  {adv.subcontractorName}
-                                </h4>
-                                <p className="text-[8.5px] text-slate-500 mt-0.5 truncate">
-                                  {adv.type === 'supplier_payment_proposal' ? 'Chi Nhà Cung Cấp' : adv.type === 'salary_advance' ? 'Ứng Lương' : adv.type === 'cash_fund_deposit' ? 'Nạp Quỹ Tiền Mặt' : adv.type === 'other_expense_proposal' ? 'Chi Khác' : isExpense ? 'Đề Xuất Chi' : 'Chi Thầu Phụ'} · {adv.creatorName || '—'}
-                                </p>
+                                <h4 className="font-bold text-[13px] leading-snug text-slate-900">{adv.subcontractorName}</h4>
+                                <p className="text-[11px] text-slate-500 mt-0.5 truncate">{sub} · {adv.creatorName || '—'}</p>
                               </div>
 
                               {/* Dự án · Công việc */}
-                              <div className="text-[10px] text-slate-600">
-                                <span className="text-slate-700 font-semibold">{adv.projectName}</span>
-                                {adv.taskName ? <span className="text-slate-500"> · {adv.taskName}</span> : null}
-                              </div>
+                              {(adv.projectName || adv.taskName) && (
+                                <div className="text-[12px] text-slate-700">
+                                  <span className="font-semibold">{adv.projectName}</span>
+                                  {adv.taskName ? <span className="text-slate-500"> · {adv.taskName}</span> : null}
+                                </div>
+                              )}
 
-                              {/* Sao kê đã upload lên phiếu chi — thumbnail lazy-load qua
-                                  VoucherThumbnails, đếm số lượng dùng imageCount (có sẵn
-                                  từ payments.list(), không cần chờ tải ảnh). */}
+                              {/* Sao kê đã upload lên phiếu chi — thumbnail lazy-load qua VoucherThumbnails,
+                                  đếm số lượng dùng imageCount (có sẵn từ payments.list(), không cần chờ tải ảnh). */}
                               {voucher && getPaymentImageCount(voucher) > 0 ? (
                                 <VoucherThumbnails paymentId={voucher.id} imageCount={getPaymentImageCount(voucher)} />
                               ) : null}
 
-                              {/* Chân: ngày + số sao kê */}
-                              <div className="flex items-center justify-between text-[9px] text-slate-500 pt-0.5">
-                                <span className="font-mono text-slate-500">{adv.date || adv.proposalDate || ''}</span>
+                              {/* Chân thẻ: mã + ngày + số sao kê */}
+                              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-200">
+                                <span className="font-mono">{adv.date || adv.proposalDate || ''}</span>
                                 {voucher && getPaymentImageCount(voucher) > 0 ? (
-                                  <span className="text-violet-600 font-semibold">📎 {getPaymentImageCount(voucher)} sao kê</span>
-                                ) : null}
-                              </div>
-
-                              {/* Gợi ý: nhấn vào thẻ để mở cửa sổ chi tiết & thao tác */}
-                              <div className="flex items-center justify-end pt-1.5 border-t border-slate-200">
-                                <span className="text-[8.5px] text-slate-400 font-medium group-hover:text-amber-600 transition-colors flex items-center gap-0.5">
-                                  <Eye className="w-3 h-3" /> Nhấn để xem chi tiết
-                                </span>
+                                  <span className="font-semibold" style={{ color: '#534AB7' }}>{getPaymentImageCount(voucher)} sao kê</span>
+                                ) : <span className="font-mono">{adv.id}</span>}
                               </div>
                             </div>
                           );
@@ -6692,45 +6692,45 @@ export default function FinanceManagement({
 
             {/* Modal: Tạo Đề Xuất nhanh (Tạm ứng Thầu Phụ / Chi phí Dự Án) */}
             {showQuickProposalModal && (
-              <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowQuickProposalModal(false)}>
+              <div className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowQuickProposalModal(false)}>
                 <form
                   onSubmit={handleQuickProposalSubmit}
                   onClick={(e) => e.stopPropagation()}
-                  className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-5 space-y-3 text-[10.5px] shadow-2xl max-h-[92vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
+                  className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl p-5 space-y-3 text-[13px] shadow-2xl max-h-[92vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
                 >
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-1">
-                    <h3 className="font-extrabold text-sm uppercase tracking-wide text-amber-400 flex items-center gap-2">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-1">
+                    <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
                       <Plus className="w-4 h-4" />
                       Trung tâm Lập chi &amp; Đề xuất
                     </h3>
-                    <button type="button" onClick={() => setShowQuickProposalModal(false)} className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 p-1.5 rounded-lg">
+                    <button type="button" onClick={() => setShowQuickProposalModal(false)} className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
 
                   {/* Form Đề xuất — luôn hiển thị (đã bỏ giao diện chọn loại / launcher) */}
                   <div className="space-y-3">
-                      <div className="text-[12px] font-extrabold text-white flex items-center gap-1.5">
+                      <div className="text-[12px] font-extrabold text-slate-900 flex items-center gap-1.5">
                         <span>{quickLaunchItem?.emoji}</span> {quickLaunchItem?.label}
-                        <span className="text-[9px] font-bold text-amber-400/90">(Đề xuất → Phiếu chi: {proposalTargetCatLabel({ type: quickProposalType, taskName: quickLaunchItem?.key === 'adv_salary' ? 'Ứng lương' : '' })})</span>
+                        <span className="text-[11px] font-bold text-[#0d47c9]">(Đề xuất → Phiếu chi: {proposalTargetCatLabel({ type: quickProposalType, taskName: quickLaunchItem?.key === 'adv_salary' ? 'Ứng lương' : '' })})</span>
                       </div>
 
                       {/* Toggle 2 hình thức cho "Chi Thầu Phụ" (Tạm ứng / Thanh toán công nợ) */}
                       {quickProposalType === 'subcontractor_advance' && (
-                        <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-2">
-                          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">Hình thức</div>
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2">
+                          <div className="text-[11px] text-slate-400 font-bold  mb-1.5">Hình thức</div>
                           <div className="grid grid-cols-2 gap-2">
                             <button
                               type="button"
                               onClick={() => { setQuickProposalSubMode('advance'); setQuickProposalProjId(projects[0]?.id || ''); setQuickProposalSubId(''); setQuickProposalTaskId(''); setQuickProposalTaskName(''); }}
-                              className={`text-[11px] font-extrabold px-3 py-2 rounded-lg border transition-all cursor-pointer ${quickProposalSubMode === 'advance' ? 'bg-sky-600 text-white border-sky-500' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-sky-500/50'}`}
+                              className={`text-[11px] font-extrabold px-3 py-2 rounded-lg border transition-all cursor-pointer ${quickProposalSubMode === 'advance' ? 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]' : 'bg-white text-slate-700 border-slate-200 hover:border-sky-500/50'}`}
                             >
                               💰 Tạm ứng Thầu Phụ
                             </button>
                             <button
                               type="button"
                               onClick={() => { setQuickProposalSubMode('debt'); setQuickProposalProjId(''); setQuickProposalSubId(''); setQuickProposalTaskId(''); setQuickProposalTaskName(''); }}
-                              className={`text-[11px] font-extrabold px-3 py-2 rounded-lg border transition-all cursor-pointer ${quickProposalSubMode === 'debt' ? 'bg-orange-600 text-white border-orange-500' : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-orange-500/50'}`}
+                              className={`text-[11px] font-extrabold px-3 py-2 rounded-lg border transition-all cursor-pointer ${quickProposalSubMode === 'debt' ? 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]' : 'bg-white text-slate-700 border-slate-200 hover:border-orange-500/50'}`}
                             >
                               🧾 Thanh Toán Công Nợ
                             </button>
@@ -6742,20 +6742,20 @@ export default function FinanceManagement({
                       {quickProposalType === 'salary_advance' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal' ? null : (
                         quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'debt' ? (
                           <div>
-                            <label className="block text-slate-400 font-semibold mb-1">Dự án / Công trình:</label>
+                            <label className="block text-slate-600 font-bold text-[12px] mb-1">Dự án / Công trình:</label>
                             <input
                               type="text"
                               value="Thanh Toán Công Nợ"
                               disabled
-                              className="w-full bg-slate-950/60 border border-slate-800 rounded p-1 text-slate-400 font-bold cursor-not-allowed"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-400 font-bold cursor-not-allowed"
                             />
-                            <div className="text-[9px] text-orange-300/80 flex items-center gap-1 mt-1">
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
                               <CheckCircle2 className="w-3 h-3" /> Hình thức thanh toán công nợ thầu phụ — không gắn dự án cụ thể.
                             </div>
                           </div>
                         ) : (
                           <div>
-                            <label className="block text-slate-400 font-semibold mb-1">
+                            <label className="block text-slate-600 font-bold text-[12px] mb-1">
                               Dự án / Công trình {quickProposalType === 'subcontractor_advance' ? <span className="text-rose-500">*</span> : null}:
                             </label>
                             <SearchableSelect
@@ -6781,12 +6781,12 @@ export default function FinanceManagement({
                               required={quickProposalType === 'subcontractor_advance'}
                             />
                             {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance' && (
-                              <div className="text-[9px] text-sky-300/80 flex items-center gap-1 mt-1">
+                              <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
                                 <CheckCircle2 className="w-3 h-3" /> Bắt buộc chọn dự án — thầu phụ được tự động lọc theo danh sách đã liên kết trong dự án này.
                               </div>
                             )}
                             {quickProposalType === 'project_expense_proposal' && (
-                              <div className="text-[9px] text-slate-500 flex items-center gap-1 mt-1">
+                              <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
                                 <CheckCircle2 className="w-3 h-3" /> Không bắt buộc — chỉ dùng để điền sẵn công trình khi bấm "+ Thêm dòng chi mới" bên dưới. Mỗi dòng chi tiêu chọn công trình riêng.
                               </div>
                             )}
@@ -6806,7 +6806,7 @@ export default function FinanceManagement({
                         const projectTasksWithSub = tasksProp.filter(t => t.projectId === quickProposalProjId && !!t.subcontractorId);
                         return (
                           <div>
-                            <label className="block text-slate-400 font-semibold mb-1">
+                            <label className="block text-slate-600 font-bold text-[12px] mb-1">
                               Công việc <span className="text-rose-500">*</span>:
                             </label>
                             <select
@@ -6820,7 +6820,7 @@ export default function FinanceManagement({
                                 // Tự động điền Thầu phụ liên kết với công việc — mỗi công việc chỉ gắn 1 thầu phụ.
                                 setQuickProposalSubId(task?.subcontractorId || '');
                               }}
-                              className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold disabled:cursor-not-allowed disabled:text-slate-500"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer font-bold disabled:cursor-not-allowed disabled:text-slate-500"
                               required
                             >
                               <option value="">{quickProposalProjId ? '— Chọn công việc —' : '— Chọn dự án trước —'}</option>
@@ -6829,7 +6829,7 @@ export default function FinanceManagement({
                               ))}
                             </select>
                             {quickProposalProjId && projectTasksWithSub.length === 0 && (
-                              <div className="text-[9px] text-amber-400/90 flex items-center gap-1 mt-1">
+                              <div className="text-[11px] text-[#0d47c9] flex items-center gap-1 mt-1">
                                 <CheckCircle2 className="w-3 h-3" /> Dự án này chưa có công việc nào liên kết thầu phụ — vào "Việc của tôi" / Kanban dự án để gắn thầu phụ cho công việc trước.
                               </div>
                             )}
@@ -6893,7 +6893,7 @@ export default function FinanceManagement({
                         return (
                           <div className="space-y-2">
                             <div>
-                              <label className="block text-slate-400 font-semibold mb-1">
+                              <label className="block text-slate-600 font-bold text-[12px] mb-1">
                                 {quickProposalType === 'supplier_payment_proposal' ? 'Nhà cung cấp' : 'Thầu phụ / Nhà thầu'} <span className="text-rose-500">*</span>:
                               </label>
                               {quickProposalType === 'supplier_payment_proposal' ? (
@@ -6915,7 +6915,7 @@ export default function FinanceManagement({
                                 <select
                                   value={quickProposalSubId}
                                   onChange={(e) => setQuickProposalSubId(e.target.value)}
-                                  className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
+                                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer font-bold"
                                 >
                                   <option value="">— Chọn thầu phụ —</option>
                                   {subList.map((s: any) => (
@@ -6926,7 +6926,7 @@ export default function FinanceManagement({
                                 </select>
                               )}
                               {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance' && quickProposalProjId && subList.length === 0 && (
-                                <div className="text-[9px] text-amber-400/90 flex items-center gap-1 mt-1">
+                                <div className="text-[11px] text-[#0d47c9] flex items-center gap-1 mt-1">
                                   <CheckCircle2 className="w-3 h-3" /> Dự án này chưa có Hợp Đồng Thầu Phụ nào — vào "Hồ Sơ Thầu Phụ" để lập hợp đồng trước.
                                 </div>
                               )}
@@ -6939,7 +6939,7 @@ export default function FinanceManagement({
                                     setDuLieuTab('nha_cung_cap_vat_tu');
                                     setAddSupplierSignal((n) => n + 1);
                                   }}
-                                  className="text-[10px] text-sky-400 hover:text-sky-300 underline cursor-pointer mt-1"
+                                  className="text-[12px] text-[#0d47c9] hover:underline cursor-pointer mt-1"
                                 >
                                   + Thêm Nhà Cung Cấp nhanh
                                 </button>
@@ -6948,28 +6948,28 @@ export default function FinanceManagement({
 
                             {/* Thông tin công nợ / hợp đồng của đối tượng được chọn */}
                             {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'advance' && selSub && subLiab && (
-                              <div className="bg-sky-50 border border-sky-200 rounded-xl p-2.5 text-[10px]">
-                                <div className="text-sky-700 font-bold uppercase tracking-wide mb-0.5">Giá trị Hợp Đồng thầu phụ</div>
+                              <div className="bg-sky-50 border border-sky-200 rounded-xl p-2.5 text-[12px]">
+                                <div className="text-sky-700 font-bold mb-0.5">Giá trị Hợp Đồng thầu phụ</div>
                                 <div className="text-slate-900 font-mono font-black text-sm">{(subLiab.tongGiaTri ?? 0).toLocaleString('vi-VN')} đ</div>
                                 <div className="text-slate-500 mt-0.5">Còn lại công nợ: <b className="text-sky-700">{(subLiab.remaining ?? 0).toLocaleString('vi-VN')} đ</b></div>
                               </div>
                             )}
                             {quickProposalType === 'subcontractor_advance' && quickProposalSubMode === 'debt' && selSub && debtSubItems.length > 0 && (
-                              <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 text-[10px]">
-                                <div className="text-orange-700 font-bold uppercase tracking-wide mb-0.5">Còn lại Công Nợ Thầu Phụ (Công nợ Trả)</div>
+                              <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 text-[12px]">
+                                <div className="text-orange-700 font-bold mb-0.5">Còn lại Công Nợ Thầu Phụ (Công nợ Trả)</div>
                                 <div className="text-slate-900 font-mono font-black text-sm">{debtTotals.remaining.toLocaleString('vi-VN')} đ</div>
                                 <div className="text-slate-500 mt-0.5">Tổng giá trị hợp đồng ({debtSubItems.length} công việc): <b className="text-orange-700">{debtTotals.tongGiaTri.toLocaleString('vi-VN')} đ</b></div>
                               </div>
                             )}
                             {quickProposalType === 'supplier_payment_proposal' && selSub && subLiab && (
-                              <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-[10px]">
-                                <div className="text-amber-700 font-bold uppercase tracking-wide mb-0.5">Tổng giá trị Công Nợ hiện tại (NCC)</div>
+                              <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-[12px]">
+                                <div className="text-amber-700 font-bold mb-0.5">Tổng giá trị Công Nợ hiện tại (NCC)</div>
                                 <div className="text-slate-900 font-mono font-black text-sm">{(subLiab.tongGiaTri ?? 0).toLocaleString('vi-VN')} đ</div>
                                 <div className="text-slate-500 mt-0.5">Còn lại phải trả: <b className="text-amber-700">{(subLiab.remaining ?? 0).toLocaleString('vi-VN')} đ</b></div>
                               </div>
                             )}
                             {selSub && !subLiab && (
-                              <div className="text-[9px] text-slate-500 italic">Chưa có thông tin công nợ của đối tượng này trong Công nợ Trả.</div>
+                              <div className="text-[11px] text-slate-500 italic">Chưa có thông tin công nợ của đối tượng này trong Công nợ Trả.</div>
                             )}
 
                             {/* Chi Nhà Cung Cấp: chọn các Đơn Mua Hàng mà khoản chi này thanh toán.
@@ -6980,7 +6980,7 @@ export default function FinanceManagement({
                                 .filter(po => po.supplierId === selSub.id && isPoRecorded(po.id) && getPoPayableRemaining(po) > 0)
                                 .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
                               if (supplierPos.length === 0) {
-                                return <div className="text-[9px] text-slate-500 italic">Nhà cung cấp này chưa có đơn hàng nào còn phải trả (đã ghi nhận công nợ).</div>;
+                                return <div className="text-[11px] text-slate-500 italic">Nhà cung cấp này chưa có đơn hàng nào còn phải trả (đã ghi nhận công nợ).</div>;
                               }
                               // Đổi lựa chọn → tự cập nhật "Số tiền đề xuất" = tổng các đơn đã chọn (vẫn sửa tay được).
                               const applyAlloc = (next: Record<string, string>) => {
@@ -6990,9 +6990,9 @@ export default function FinanceManagement({
                               };
                               const pickedTotal = Object.values(quickProposalPoAlloc).reduce((sum, v) => sum + (Number(v) || 0), 0);
                               return (
-                                <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-[10px] space-y-1.5">
+                                <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-[12px] space-y-1.5">
                                   <div className="flex items-center justify-between gap-2">
-                                    <div className="text-slate-700 font-bold uppercase tracking-wide">Chọn đơn hàng thanh toán (không bắt buộc)</div>
+                                    <div className="text-slate-700 font-bold">Chọn đơn hàng thanh toán (không bắt buộc)</div>
                                     <div className="text-slate-500">Đã chọn: <b className="text-blue-700 font-mono">{pickedTotal.toLocaleString('vi-VN')} đ</b></div>
                                   </div>
                                   <div className="bg-amber-50 border border-amber-300 rounded-lg px-2 py-1.5 text-amber-800">
@@ -7024,7 +7024,7 @@ export default function FinanceManagement({
                                               type="number"
                                               value={quickProposalPoAlloc[po.id]}
                                               onChange={(e) => applyAlloc({ ...quickProposalPoAlloc, [po.id]: e.target.value })}
-                                              className="w-28 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-white font-mono font-bold text-right"
+                                              className="w-28 bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-900 font-mono font-bold text-right"
                                             />
                                           )}
                                         </div>
@@ -7042,11 +7042,11 @@ export default function FinanceManagement({
                           cash_fund_deposit có đối tượng chi cố định = người lập đề xuất, xem info box bên dưới) */}
                       {quickProposalRecipientKind === 'employee' && quickProposalType !== 'project_expense_proposal' && quickProposalType !== 'cash_fund_deposit' && (
                         <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Nhân viên <span className="text-rose-500">*</span>:</label>
+                          <label className="block text-slate-600 font-bold text-[12px] mb-1">Nhân viên <span className="text-rose-500">*</span>:</label>
                           <select
                             value={quickProposalSubId}
                             onChange={(e) => setQuickProposalSubId(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer font-bold"
                           >
                             <option value="">— Chọn nhân viên —</option>
                             {employees.map(emp => (
@@ -7058,8 +7058,8 @@ export default function FinanceManagement({
 
                       {/* Đối tượng = Công trình (không cần chọn thêm) */}
                       {quickProposalRecipientKind === 'project' && (
-                        <div className="text-[10px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded p-2">
-                          Đối tượng nhận: <b className="text-slate-200">Công trình / Dự án</b> (lấy từ dự án đã chọn ở trên).
+                        <div className="text-[12px] text-slate-400 bg-white border border-slate-200 rounded p-2">
+                          Đối tượng nhận: <b className="text-slate-900">Công trình / Dự án</b> (lấy từ dự án đã chọn ở trên).
                         </div>
                       )}
 
@@ -7067,33 +7067,33 @@ export default function FinanceManagement({
                           không cho chọn tay, để "Nhập Chi"/"Công Nợ Trả" nhóm đúng theo người
                           chịu trách nhiệm. Công trình cụ thể xem ở cột "Công trình" từng dòng bên dưới. */}
                       {quickProposalType === 'project_expense_proposal' && (
-                        <div className="text-[10px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded p-2">
-                          Đối tượng nhận: <b className="text-slate-200">{(currentUser as any)?.name || 'Bạn'}</b> (người lập đề xuất này).
+                        <div className="text-[12px] text-slate-400 bg-white border border-slate-200 rounded p-2">
+                          Đối tượng nhận: <b className="text-slate-900">{(currentUser as any)?.name || 'Bạn'}</b> (người lập đề xuất này).
                         </div>
                       )}
 
                       {/* Nạp Quỹ Tiền Mặt: cũng không cho chọn tay đối tượng nhận — người chịu
                           trách nhiệm nạp quỹ luôn là người lập đề xuất, không gắn dự án. */}
                       {quickProposalType === 'cash_fund_deposit' && (
-                        <div className="text-[10px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded p-2">
-                          Đối tượng: <b className="text-slate-200">Quỹ Tiền Mặt công ty</b> · Người chịu trách nhiệm nạp quỹ: <b className="text-slate-200">{(currentUser as any)?.name || 'Bạn'}</b> (người lập đề xuất này).
+                        <div className="text-[12px] text-slate-400 bg-white border border-slate-200 rounded p-2">
+                          Đối tượng: <b className="text-slate-900">Quỹ Tiền Mặt công ty</b> · Người chịu trách nhiệm nạp quỹ: <b className="text-slate-900">{(currentUser as any)?.name || 'Bạn'}</b> (người lập đề xuất này).
                         </div>
                       )}
 
                       {quickProposalType === 'project_expense_proposal' ? (
                         /* Bảng hạng mục chi tiêu — danh sách chi phí cần đề xuất (tương thích nút Công Việc) */
                         <div className="space-y-3">
-                          <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2">
-                            <div className="flex justify-between items-center border-b border-slate-800 pb-1.5">
-                              <h4 className="font-extrabold text-white text-[11px] uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                          <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
+                            <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
+                              <h4 className="font-extrabold text-[12px] text-emerald-700 flex items-center gap-1.5">
                                 <FileText className="w-3.5 h-3.5" /> Bảng hạng mục chi tiêu mua sắm lẻ
                               </h4>
-                              <span className="text-[10px] text-slate-400">Thêm, sửa, xóa nhiều dòng</span>
+                              <span className="text-[12px] text-slate-400">Thêm, sửa, xóa nhiều dòng</span>
                             </div>
                             <div className="overflow-x-auto">
                               <table className="w-full text-left border-collapse">
                                 <thead>
-                                  <tr className="border-b border-slate-800 text-slate-400 text-[9.5px] uppercase font-black tracking-wider">
+                                  <tr className="border-b border-slate-200 text-slate-400 text-[9.5px] uppercase font-black tracking-wider">
                                     <th className="p-1.5 w-8 text-center">STT</th>
                                     <th className="p-1.5">Hạng mục chi tiêu</th>
                                     <th className="p-1.5 w-40">Công trình</th>
@@ -7104,7 +7104,7 @@ export default function FinanceManagement({
                                 </thead>
                                 <tbody>
                                   {quickProposalExpenseItems.map((row, idx) => (
-                                    <tr key={row.id} className="border-b border-slate-850 hover:bg-slate-900/40">
+                                    <tr key={row.id} className="border-b border-slate-200 hover:bg-slate-50">
                                       <td className="p-1 text-center font-mono text-slate-400">{idx + 1}</td>
                                       <td className="p-1">
                                         <input
@@ -7115,7 +7115,7 @@ export default function FinanceManagement({
                                             next[idx].item = e.target.value;
                                             setQuickProposalExpenseItems(next);
                                           }}
-                                          className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none text-[10.5px] focus:border-emerald-500"
+                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none text-[13px] focus:border-[#0d47c9]"
                                           placeholder="Nhập hạng mục..."
                                         />
                                       </td>
@@ -7129,7 +7129,7 @@ export default function FinanceManagement({
                                             next[idx].projectName = p?.name;
                                             setQuickProposalExpenseItems(next);
                                           }}
-                                          className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none text-[10.5px] cursor-pointer focus:border-emerald-500"
+                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none text-[13px] cursor-pointer focus:border-[#0d47c9]"
                                         >
                                           <option value="">— Chọn công trình —</option>
                                           {projects.map(p => (
@@ -7146,7 +7146,7 @@ export default function FinanceManagement({
                                             next[idx].amount = Number(e.target.value) || 0;
                                             setQuickProposalExpenseItems(next);
                                           }}
-                                          className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none text-[10.5px] text-right font-mono text-emerald-400 focus:border-emerald-500"
+                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none text-[13px] text-right font-mono text-emerald-700 focus:border-[#0d47c9]"
                                         />
                                       </td>
                                       <td className="p-1">
@@ -7158,7 +7158,7 @@ export default function FinanceManagement({
                                             next[idx].note = e.target.value;
                                             setQuickProposalExpenseItems(next);
                                           }}
-                                          className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none text-[10.5px] focus:border-emerald-500"
+                                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none text-[13px] focus:border-[#0d47c9]"
                                           placeholder="Ghi chú..."
                                         />
                                       </td>
@@ -7166,7 +7166,7 @@ export default function FinanceManagement({
                                         <button
                                           type="button"
                                           onClick={() => setQuickProposalExpenseItems(quickProposalExpenseItems.filter(r => r.id !== row.id))}
-                                          className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded cursor-pointer"
+                                          className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-red-500/10 rounded cursor-pointer"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -7192,13 +7192,13 @@ export default function FinanceManagement({
                                   const defaultProj = projects.find(p => p.id === quickProposalProjId);
                                   setQuickProposalExpenseItems([...quickProposalExpenseItems, { id: `row_${Date.now()}`, item: '', amount: 0, note: '', projectId: defaultProj?.id, projectName: defaultProj?.name }]);
                                 }}
-                                className="bg-slate-900 border border-dashed border-slate-750 text-indigo-400 font-extrabold hover:bg-slate-850 px-3 py-1.5 rounded-lg text-[10px] cursor-pointer"
+                                className="bg-white border border-dashed border-slate-300 text-[#0d47c9] font-extrabold hover:bg-slate-50 px-3 py-1.5 rounded-lg text-[12px] cursor-pointer"
                               >
                                 + Thêm dòng chi mới
                               </button>
                               <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2 rounded-xl text-right shadow border border-emerald-500/20">
-                                <span className="text-[9px] text-emerald-100/90 block font-bold uppercase tracking-wider">Tổng số tiền:</span>
-                                <strong className="text-white text-sm font-black font-mono">
+                                <span className="text-[11px] text-slate-700 block font-bold ">Tổng số tiền:</span>
+                                <strong className="text-slate-900 text-sm font-black font-mono">
                                   {quickProposalExpenseItems.reduce((s, r) => s + (Number(r.amount) || 0), 0).toLocaleString('vi-VN')} đ
                                 </strong>
                               </div>
@@ -7209,15 +7209,15 @@ export default function FinanceManagement({
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-slate-400 font-semibold mb-1">Số tiền đề xuất (VND) <span className="text-rose-500">*</span>:</label>
+                            <label className="block text-slate-600 font-bold text-[12px] mb-1">Số tiền đề xuất (VND) <span className="text-rose-500">*</span>:</label>
                             <input
                               type="number"
                               required
                               value={quickProposalAmount}
                               onChange={(e) => setQuickProposalAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                              className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white font-mono font-bold"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono font-bold"
                             />
-                            <p className="text-[10px] text-slate-400 font-mono mt-1">
+                            <p className="text-[12px] text-slate-400 font-mono mt-1">
                               {quickProposalAmount !== '' && Number(quickProposalAmount) > 0
                                 ? `${Number(quickProposalAmount).toLocaleString('vi-VN')} đồng`
                                 : 'Nhập số tiền, ví dụ: 1500000 = 1.500.000 đ'}
@@ -7227,39 +7227,39 @@ export default function FinanceManagement({
                       )}
 
                       <div>
-                        <label className="block text-slate-400 font-semibold mb-1">Diễn giải:</label>
+                        <label className="block text-slate-600 font-bold text-[12px] mb-1">Diễn giải:</label>
                         <textarea
                           value={quickProposalReason}
                           onChange={(e) => setQuickProposalReason(e.target.value)}
                           rows={2}
                           placeholder="Nhập lý do / diễn giải cho đề xuất..."
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white font-medium"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-medium"
                         />
                       </div>
 
                       {/* Người xét duyệt & Người quyết toán — chỉ đọc, được cấu hình trong Quyền Phê Duyệt (đưa xuống dưới Diễn giải) */}
-                      <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2">
-                        <div className="text-[10px] font-black uppercase tracking-wider text-sky-400 bg-sky-500/10 border border-sky-500/30 px-2 py-0.5 rounded w-fit">Phê Duyệt &amp; Quyết Toán (được cấu hình)</div>
+                      <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
+                        <div className="text-[12px] font-black  text-sky-400 bg-sky-500/10 border border-sky-500/30 px-2 py-0.5 rounded w-fit">Phê Duyệt &amp; Quyết Toán (được cấu hình)</div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
-                            <span className="text-[9px] text-slate-400 block mb-0.5">Người xét duyệt</span>
-                            <div className="text-[11px] font-bold text-white">
-                              {getConfiguredApprovers(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance').map(a => a.name).join(', ') || <span className="text-amber-400">Chưa cấu hình</span>}
+                            <span className="text-[11px] text-slate-400 block mb-0.5">Người xét duyệt</span>
+                            <div className="text-[11px] font-bold text-slate-900">
+                              {getConfiguredApprovers(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance').map(a => a.name).join(', ') || <span className="text-[#0d47c9]">Chưa cấu hình</span>}
                             </div>
                           </div>
                           <div>
-                            <span className="text-[9px] text-slate-400 block mb-0.5">Người quyết toán</span>
-                            <div className="text-[11px] font-bold text-white">
-                              {getConfiguredSettlers(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance').map(a => a.name).join(', ') || <span className="text-amber-400">Chưa cấu hình</span>}
+                            <span className="text-[11px] text-slate-400 block mb-0.5">Người quyết toán</span>
+                            <div className="text-[11px] font-bold text-slate-900">
+                              {getConfiguredSettlers(quickProposalType === 'subcontractor_advance' ? 'finance_advance_proposal' : (quickProposalType === 'project_expense_proposal' || quickProposalType === 'supplier_payment_proposal' || quickProposalType === 'cash_fund_deposit' || quickProposalType === 'other_expense_proposal') ? 'finance_expense_proposal' : 'salary_advance').map(a => a.name).join(', ') || <span className="text-[#0d47c9]">Chưa cấu hình</span>}
                             </div>
                           </div>
                         </div>
-                        <p className="text-[9px] text-slate-500 italic">Hai trường trên được cấu hình trong <b>Phân Quyền &amp; Vai Trò → Quyền Phê Duyệt</b> (nhóm Tài Chính - Kế Toán) và không thể thay đổi tại đây.</p>
+                        <p className="text-[11px] text-slate-500 italic">Hai trường trên được cấu hình trong <b>Phân Quyền &amp; Vai Trò → Quyền Phê Duyệt</b> (nhóm Tài Chính - Kế Toán) và không thể thay đổi tại đây.</p>
                       </div>
 
-                      <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-                        <button type="button" onClick={() => setShowQuickProposalModal(false)} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-slate-300 cursor-pointer">Bỏ qua</button>
-                        <button type="submit" className="bg-amber-600 hover:bg-amber-550 text-white px-3 py-1.5 rounded font-bold cursor-pointer">Gửi Đề Xuất</button>
+                      <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                        <button type="button" onClick={() => setShowQuickProposalModal(false)} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Bỏ qua</button>
+                        <button type="submit" style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">Gửi Đề Xuất</button>
                       </div>
                     </div>
                 </form>
@@ -10197,35 +10197,35 @@ export default function FinanceManagement({
       {/* Custom Modal: Upload sao kê (bước Cập nhật chứng từ) */}
       {((voucherUploadProposal || voucherUploadPay) && (
         <div
-          className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[1000] p-4 text-left animate-fadeIn select-text"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4 text-left animate-fadeIn select-text"
           onClick={() => { setVoucherUploadProposal(null); setVoucherUploadPay(null); setVoucherUploadImages([]); }}
         >
           <div
-            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg text-slate-100 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans flex flex-col max-h-[90vh]"
+            className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg text-slate-800 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans flex flex-col max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40 shrink-0">
-              <span className="font-extrabold text-sm text-violet-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Upload className="w-5 h-5 text-violet-400" />
-                CẬP NHẬT CHỨNG TỪ — UPLOAD SAO KÊ
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
+              <span className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                <Upload className="w-5 h-5 text-[#0d47c9]" />
+                Cập nhật chứng từ — upload sao kê
               </span>
-              <button type="button" onClick={() => { setVoucherUploadProposal(null); setVoucherUploadPay(null); setVoucherUploadImages([]); }} className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 p-1.5 rounded-lg">
+              <button type="button" onClick={() => { setVoucherUploadProposal(null); setVoucherUploadPay(null); setVoucherUploadImages([]); }} className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="p-5 space-y-4 overflow-y-auto">
-              <div className="text-[11px] text-slate-400 bg-slate-950/50 border border-slate-800 rounded-lg p-3">
-                <div className="font-bold text-slate-200">
+              <div className="text-[11px] text-slate-400 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <div className="font-bold text-slate-900">
                   {voucherUploadPay ? 'Phiếu chi' : 'Đề xuất'}:{' '}
-                  <span className="text-amber-400 font-mono">{voucherUploadPay?.code || voucherUploadProposal?.id}</span>
+                  <span className="text-[#0d47c9] font-mono">{voucherUploadPay?.code || voucherUploadProposal?.id}</span>
                 </div>
-                <div className="mt-1">Đối tượng: <span className="text-white font-semibold">{voucherUploadPay?.recipient || voucherUploadProposal?.subcontractorName}</span> · {(voucherUploadPay?.amount ?? voucherUploadProposal?.amount ?? 0).toLocaleString('vi-VN')} đ</div>
-                <div className="mt-1 text-slate-500">Tải ảnh sao kê / biên lai ngân hàng đính kèm vào phiếu chi. Sau khi lưu, phiếu chi chuyển sang <b className="text-emerald-400">Hoàn Thành</b>.</div>
+                <div className="mt-1">Đối tượng: <span className="text-slate-900 font-semibold">{voucherUploadPay?.recipient || voucherUploadProposal?.subcontractorName}</span> · {(voucherUploadPay?.amount ?? voucherUploadProposal?.amount ?? 0).toLocaleString('vi-VN')} đ</div>
+                <div className="mt-1 text-slate-500">Tải ảnh sao kê / biên lai ngân hàng đính kèm vào phiếu chi. Sau khi lưu, phiếu chi chuyển sang <b className="text-emerald-700">Hoàn Thành</b>.</div>
               </div>
 
               <div>
-                <label className="block text-slate-400 font-bold text-[10px] uppercase tracking-wider mb-2">Hình ảnh sao kê (PNG/JPG/WEBP)</label>
+                <label className="block text-slate-400 font-bold text-[10px]  mb-2">Hình ảnh sao kê (PNG/JPG/WEBP)</label>
                 <input
                   type="file"
                   accept="image/*"
@@ -10235,7 +10235,7 @@ export default function FinanceManagement({
                     setVoucherUploadImages(prev => [...prev, ...urls]);
                     e.target.value = '';
                   }}
-                  className="block w-full text-[11px] text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-violet-600 file:text-white file:cursor-pointer hover:file:bg-violet-500 cursor-pointer"
+                  className="block w-full text-[11px] text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-[#0d47c9] file:text-white file:cursor-pointer hover:file:bg-[#0a3aa5] cursor-pointer"
                 />
                 <p className="text-[9px] text-slate-500 mt-1">Ảnh tự động chuyển thành Base64 lưu trữ offline (tương tự các module khác).</p>
               </div>
@@ -10244,11 +10244,11 @@ export default function FinanceManagement({
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {voucherUploadImages.map((img, idx) => (
                     <div key={idx} className="relative group">
-                      <img src={img} alt={`sao ke ${idx + 1}`} className="w-full h-20 object-cover rounded-lg border border-slate-700" />
+                      <img src={img} alt={`sao ke ${idx + 1}`} className="w-full h-20 object-cover rounded-lg border border-slate-200" />
                       <button
                         type="button"
                         onClick={() => setVoucherUploadImages(prev => prev.filter((_, i) => i !== idx))}
-                        className="absolute -top-2 -right-2 bg-rose-600 hover:bg-rose-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[11px] cursor-pointer shadow"
+                        style={{ background: '#e11d48', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                         title="Xóa ảnh"
                       >
                         <X className="w-3 h-3" />
@@ -10259,15 +10259,15 @@ export default function FinanceManagement({
               )}
             </div>
 
-            <div className="px-5 py-4 border-t border-slate-800 flex items-center justify-end gap-2 bg-slate-950/40 shrink-0">
-              <button type="button" onClick={() => { setVoucherUploadProposal(null); setVoucherUploadPay(null); setVoucherUploadImages([]); }} className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold px-4 py-2 rounded-xl cursor-pointer transition-all">
+            <div className="px-5 py-4 border-t border-slate-200 flex items-center justify-end gap-2 bg-white shrink-0">
+              <button type="button" onClick={() => { setVoucherUploadProposal(null); setVoucherUploadPay(null); setVoucherUploadImages([]); }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">
                 Hủy
               </button>
               <button
                 type="button"
                 disabled={voucherUploadImages.length === 0}
                 onClick={handleSaveVoucherImages}
-                className="bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-extrabold px-4 py-2 rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow"
+                style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Upload className="w-4 h-4" />
                 Lưu & Hoàn Thành ({voucherUploadImages.length})
@@ -10310,53 +10310,55 @@ export default function FinanceManagement({
       {/* Custom Modal: Xem chi tiết Đề xuất Tạm ứng / Tạm ứng Thầu phụ */}
       {viewingProposalDetail && (
         <div 
-          className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
           onClick={() => setViewingProposalDetail(null)}
         >
           <div 
-            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl text-slate-100 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans flex flex-col max-h-[90vh]"
+            className="bg-white border border-slate-200 rounded-2xl w-full max-w-xl text-slate-800 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans flex flex-col max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40 shrink-0">
-              <span className="font-extrabold text-sm text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Eye className="w-5 h-5 text-amber-500" />
-                CHI TIẾT ĐỀ XUẤT THU CHI
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50 shrink-0">
+              <span className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                <Eye className="w-5 h-5 text-[#0d47c9]" />
+                Chi tiết đề xuất
               </span>
               <button 
                 type="button"
                 onClick={() => setViewingProposalDetail(null)}
-                className="text-slate-400 hover:text-white transition-colors cursor-pointer bg-slate-800 hover:bg-slate-700 p-1.5 rounded-lg"
+                className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="p-6 space-y-4 overflow-y-auto">
-              <div className="bg-slate-950/60 border border-slate-800 p-5 rounded-2xl space-y-3.5 text-xs">
-                <div className="grid grid-cols-2 gap-4 pb-3 border-b border-slate-800/60">
+              <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl space-y-3.5 text-xs">
+                <div className="grid grid-cols-2 gap-4 pb-3 border-b border-slate-200">
                   <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Loại Đề Xuất</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-md font-extrabold uppercase border ${PROPOSAL_TYPE_BADGE[viewingProposalDetail.type || ''] || 'bg-white text-slate-600 border-slate-400'}`}>
+                    <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Loại Đề Xuất</span>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${PROPOSAL_TYPE_BADGE[viewingProposalDetail.type || ''] || 'bg-white text-slate-600 border-slate-400'}`}>
                       {proposalTypeLabel(viewingProposalDetail.type)}
                     </span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Trạng thái</span>
+                    <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Trạng thái</span>
                     {/* Badge nền pastel sáng (đồng bộ màu với cột Kanban Đề Xuất Chi bên dưới +
                         theo ngôn ngữ thiết kế của Điều phối vật tư), thay cho badge nền tối
                         trong suốt trước đây — tránh 1 trạng thái hiển thị 2 kiểu khác nhau. */}
                     <span>{(() => {
                       switch (viewingProposalDetail.status) {
                         case 'pending_approval':
-                          return <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Chờ Duyệt</span>;
+                          return <span className="bg-amber-50 text-amber-700 border border-amber-200 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold">Chờ Duyệt</span>;
                         case 'pending_payment':
-                          return <span className="bg-orange-50 text-orange-700 border border-orange-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Chờ Lập Phiếu</span>;
+                          return <span className="bg-orange-50 text-orange-700 border border-orange-200 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold">Chờ Lập Phiếu</span>;
+                        case 'awaiting_voucher_update':
+                          return <span className="bg-violet-50 text-violet-700 border border-violet-200 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold">Cập Nhật Chứng Từ</span>;
                         case 'rejected':
-                          return <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Từ Chối</span>;
+                          return <span className="bg-rose-50 text-rose-700 border border-rose-200 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold">Từ Chối</span>;
                         case 'completed':
-                          return <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Hoàn Thành</span>;
+                          return <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold">Hoàn Thành</span>;
                         default:
-                          return <span className="bg-slate-50 text-slate-700 border border-slate-200 text-[10px] px-2 py-0.5 rounded-full font-bold">Không rõ</span>;
+                          return <span className="bg-slate-50 text-slate-700 border border-slate-200 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold">Không rõ</span>;
                       }
                     })()}</span>
                   </div>
@@ -10364,39 +10366,39 @@ export default function FinanceManagement({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Mã đề xuất</span>
-                    <strong className="text-amber-500 font-mono text-sm">{viewingProposalDetail.id}</strong>
+                    <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Mã đề xuất</span>
+                    <strong className="text-[#0d47c9] font-mono text-sm">{viewingProposalDetail.id}</strong>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Ngày đề xuất</span>
-                    <strong className="text-slate-200 font-mono text-sm">{viewingProposalDetail.date || viewingProposalDetail.proposalDate || '—'}</strong>
+                    <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Ngày đề xuất</span>
+                    <strong className="text-slate-900 font-mono text-sm">{viewingProposalDetail.date || viewingProposalDetail.proposalDate || '—'}</strong>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 pt-1">
                   <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Đối tượng chi</span>
-                    <strong className="text-slate-200 text-sm">{viewingProposalDetail.subcontractorName}</strong>
+                    <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Đối tượng chi</span>
+                    <strong className="text-slate-900 text-sm">{viewingProposalDetail.subcontractorName}</strong>
                     {viewingProposalDetail.subcontractorId && viewingProposalDetail.subcontractorId !== 'expense_recipient' && (
                       <span className="text-slate-500 font-mono text-[10px] ml-1">({viewingProposalDetail.subcontractorId})</span>
                     )}
-                    <div className="text-[9px] text-amber-400/90 font-semibold mt-1">→ Khi lập phiếu: {proposalTargetCatLabel(viewingProposalDetail)}</div>
+                    <div className="text-[9px] text-[#0d47c9] font-semibold mt-1">→ Khi lập phiếu: {proposalTargetCatLabel(viewingProposalDetail)}</div>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Số tiền đề xuất</span>
-                    <strong className="text-orange-400 font-mono text-base">{viewingProposalDetail.amount.toLocaleString('vi-VN')} đ</strong>
+                    <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Số tiền đề xuất</span>
+                    <strong className="text-[#0d47c9] font-mono text-base">{viewingProposalDetail.amount.toLocaleString('vi-VN')} đ</strong>
                   </div>
                 </div>
 
                 {/* Số tiền duyệt chi — người xét duyệt nhập; Người lập phiếu lập phiếu dựa vào đây.
                     Giữ "Số tiền đề xuất" bên trên làm tham chiếu lịch sử. */}
-                <div className="pt-3 border-t border-slate-800/60">
+                <div className="pt-3 border-t border-slate-200">
                   <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Số tiền duyệt chi</span>
+                    <span className="text-slate-400 block text-[11px] font-bold">Số tiền duyệt chi</span>
                     {viewingProposalDetail.status === 'pending_approval' && canApproveProposal(viewingProposalDetail) ? (
-                      <span className="text-[9px] text-emerald-400 font-semibold">✍️ Nhập số tiền được duyệt</span>
+                      <span className="text-[9px] text-emerald-700 font-semibold">✍️ Nhập số tiền được duyệt</span>
                     ) : viewingProposalDetail.approvedAmount != null ? (
-                      <span className="text-[9px] text-emerald-400 font-semibold">✅ Đã duyệt: {viewingProposalDetail.approvedAmount.toLocaleString('vi-VN')} đ</span>
+                      <span className="text-[9px] text-emerald-700 font-semibold">✅ Đã duyệt: {viewingProposalDetail.approvedAmount.toLocaleString('vi-VN')} đ</span>
                     ) : null}
                   </div>
                   {viewingProposalDetail.status === 'pending_approval' && canApproveProposal(viewingProposalDetail) ? (
@@ -10405,41 +10407,41 @@ export default function FinanceManagement({
                       min={0}
                       value={approveAmountInput}
                       onChange={(e) => setApproveAmountInput(e.target.value)}
-                      className="w-full bg-slate-900 border border-emerald-600/50 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold text-sm outline-none focus:border-emerald-400 transition-colors"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono font-bold text-sm outline-none focus:border-[#0d47c9] transition-colors"
                       placeholder="Nhập Số tiền duyệt chi"
                     />
                   ) : (
-                    <strong className={`font-mono text-base ${viewingProposalDetail.approvedAmount != null ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    <strong className={`font-mono text-base ${viewingProposalDetail.approvedAmount != null ? 'text-emerald-700' : 'text-slate-400'}`}>
                       {viewingProposalDetail.approvedAmount != null ? `${viewingProposalDetail.approvedAmount.toLocaleString('vi-VN')} đ` : 'Chưa duyệt (dùng Số tiền đề xuất)'}
                     </strong>
                   )}
                 </div>
 
                 <div className="pt-1">
-                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Dự án / Công trình</span>
-                  <strong className="text-slate-200 text-sm">{viewingProposalDetail.projectName}</strong>
+                  <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Dự án / Công trình</span>
+                  <strong className="text-slate-900 text-sm">{viewingProposalDetail.projectName}</strong>
                 </div>
 
                 <div className="pt-1">
-                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Nội dung công việc con</span>
-                  <strong className="text-slate-300">{viewingProposalDetail.taskName || '—'}</strong>
+                  <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Nội dung công việc con</span>
+                  <strong className="text-slate-700">{viewingProposalDetail.taskName || '—'}</strong>
                 </div>
 
                 <div className="pt-1">
-                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Diễn giải / Lý do chi tiết</span>
-                  <p className="text-slate-300 italic whitespace-pre-wrap bg-slate-900/60 p-3 rounded-lg border border-slate-800/40">
+                  <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Diễn giải / Lý do chi tiết</span>
+                  <p className="text-slate-700 italic whitespace-pre-wrap bg-white p-3 rounded-lg border border-slate-200">
                     "{viewingProposalDetail.reason || 'Không có diễn giải.'}"
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 pt-1">
                   <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Nhân sự lập đề xuất</span>
-                    <strong className="text-slate-300">{viewingProposalDetail.creatorName || viewingProposalDetail.creator || '—'}</strong>
+                    <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Nhân sự lập đề xuất</span>
+                    <strong className="text-slate-700">{viewingProposalDetail.creatorName || viewingProposalDetail.creator || '—'}</strong>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Nhân sự phê duyệt</span>
-                    <strong className="text-slate-300">{viewingProposalDetail.approverName || viewingProposalDetail.approver || 'Ban Giám Đốc'}</strong>
+                    <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Nhân sự phê duyệt</span>
+                    <strong className="text-slate-700">{viewingProposalDetail.approverName || viewingProposalDetail.approver || 'Ban Giám Đốc'}</strong>
                   </div>
                 </div>
 
@@ -10447,23 +10449,23 @@ export default function FinanceManagement({
                 {(viewingProposalDetail.payCreatorName || viewingProposalDetail.settlerName) && (
                   <div className="grid grid-cols-2 gap-4 pt-1">
                     <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Người lập phiếu</span>
-                      <strong className="text-slate-300">{viewingProposalDetail.payCreatorName || '—'}</strong>
+                      <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Người lập phiếu</span>
+                      <strong className="text-slate-700">{viewingProposalDetail.payCreatorName || '—'}</strong>
                     </div>
                     <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider mb-0.5">Người quyết toán</span>
-                      <strong className="text-slate-300">{viewingProposalDetail.settlerName || '—'}</strong>
+                      <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Người quyết toán</span>
+                      <strong className="text-slate-700">{viewingProposalDetail.settlerName || '—'}</strong>
                     </div>
                   </div>
                 )}
 
                 {/* Nếu có các dòng chi tiết chi phí phát sinh */}
                 {viewingProposalDetail.expenseItems && viewingProposalDetail.expenseItems.length > 0 && (
-                  <div className="pt-3 border-t border-slate-800/60">
-                    <span className="text-slate-400 block text-[10px] uppercase font-black tracking-wider mb-2">Bảng phân rã chi phí chi tiết</span>
-                    <div className="border border-slate-800 rounded-xl overflow-hidden">
+                  <div className="pt-3 border-t border-slate-200">
+                    <span className="text-slate-400 block text-[11px] font-bold mb-2">Bảng phân rã chi phí chi tiết</span>
+                    <div className="border border-slate-200 rounded-xl overflow-hidden">
                       <table className="w-full text-left text-[11px]">
-                        <thead className="bg-slate-900 text-slate-400 uppercase text-[9px] font-bold">
+                        <thead className="bg-slate-100 text-slate-500 text-[11px] font-bold">
                           <tr>
                             <th className="p-2 pl-3">Mục chi tiêu</th>
                             <th className="p-2">Công trình</th>
@@ -10471,12 +10473,12 @@ export default function FinanceManagement({
                             <th className="p-2 pr-3">Ghi chú</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800">
+                        <tbody className="divide-y divide-slate-200">
                           {viewingProposalDetail.expenseItems.map((item, idx) => (
-                            <tr key={item.id || idx} className="hover:bg-slate-900/40">
-                              <td className="p-2 pl-3 font-bold text-slate-200">{item.item}</td>
-                              <td className="p-2 text-slate-300">{item.projectName || '—'}</td>
-                              <td className="p-2 text-right font-mono font-bold text-orange-400">{item.amount.toLocaleString('vi-VN')} đ</td>
+                            <tr key={item.id || idx} className="hover:bg-slate-50">
+                              <td className="p-2 pl-3 font-bold text-slate-900">{item.item}</td>
+                              <td className="p-2 text-slate-700">{item.projectName || '—'}</td>
+                              <td className="p-2 text-right font-mono font-bold text-[#0d47c9]">{item.amount.toLocaleString('vi-VN')} đ</td>
                               <td className="p-2 pr-3 text-slate-400 italic text-[10px]">{item.note || '—'}</td>
                             </tr>
                           ))}
@@ -10495,12 +10497,12 @@ export default function FinanceManagement({
                   const hasDocs = !!linkedVoucher && getPaymentImageCount(linkedVoucher) > 0;
                   if (!hasDocs) {
                     return viewingProposalDetail.status === 'awaiting_voucher_update' ? (
-                      <div className="pt-3 border-t border-slate-800/60">
-                        <span className="text-violet-400 block text-[10px] uppercase font-black tracking-wider mb-2">Sao kê / Chứng từ</span>
+                      <div className="pt-3 border-t border-slate-200">
+                        <span className="text-slate-500 block text-[11px] font-bold mb-2">Sao kê / Chứng từ</span>
                         <button
                           type="button"
                           onClick={() => openVoucherUpload(viewingProposalDetail)}
-                          className="bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-extrabold px-3 py-2 rounded-xl flex items-center gap-2 cursor-pointer transition-all shadow"
+                          style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Upload className="w-4 h-4" /> Upload Sao Kê (chưa có)
                         </button>
@@ -10509,12 +10511,12 @@ export default function FinanceManagement({
                   }
                   const images = linkedVoucherImages?.paymentId === linkedVoucher!.id ? linkedVoucherImages.images : null;
                   return (
-                    <div className="pt-3 border-t border-slate-800/60">
-                      <span className="text-violet-400 block text-[10px] uppercase font-black tracking-wider mb-2">Sao kê / Chứng từ ({getPaymentImageCount(linkedVoucher!)})</span>
+                    <div className="pt-3 border-t border-slate-200">
+                      <span className="text-slate-500 block text-[11px] font-bold mb-2">Sao kê / Chứng từ ({getPaymentImageCount(linkedVoucher!)})</span>
                       {images ? (
                         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                           {images.map((img, idx) => (
-                            <img key={idx} src={img} alt={`sao ke ${idx + 1}`} onClick={() => setLightboxImages(images)} className="w-full h-24 object-cover rounded-lg border border-slate-700 cursor-pointer hover:opacity-80 transition-opacity" title="Click để phóng to" />
+                            <img key={idx} src={img} alt={`sao ke ${idx + 1}`} onClick={() => setLightboxImages(images)} className="w-full h-24 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-80 transition-opacity" title="Click để phóng to" />
                           ))}
                         </div>
                       ) : (
@@ -10526,12 +10528,12 @@ export default function FinanceManagement({
               </div>
             </div>
 
-            <div className="px-6 py-4 bg-slate-950/40 border-t border-slate-800 flex items-center justify-between gap-2 shrink-0 flex-wrap">
+            <div className="px-6 py-4 bg-white border-t border-slate-200 flex items-center justify-between gap-2 shrink-0 flex-wrap">
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => exportProposalPdf(viewingProposalDetail)}
-                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow transition-all"
+                  className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
                   title="Xuất Phiếu Đề Xuất dạng PDF (có header doanh nghiệp)"
                 >
                   <Download className="w-4 h-4" /> Xuất PDF
@@ -10551,14 +10553,14 @@ export default function FinanceManagement({
                             await handleApprove(viewingProposalDetail, amt);
                             setViewingProposalDetail(null);
                           }}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow transition-all"
+                          style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Check className="w-4 h-4" /> Duyệt
                         </button>
                         <button
                           type="button"
                           onClick={() => setRejectProposalModal(viewingProposalDetail)}
-                          className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow transition-all"
+                          className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-rose-300 text-rose-600 hover:bg-rose-50"
                         >
                           <X className="w-4 h-4" /> Từ Chối
                         </button>
@@ -10578,14 +10580,14 @@ export default function FinanceManagement({
                             if (!window.confirm(`🧾 Xác nhận lập phiếu chi cho Đề xuất ${viewingProposalDetail.id}?\nSố tiền: ${amt.toLocaleString('vi-VN')}đ`)) return;
                             handleCreateVoucherFromProposal(viewingProposalDetail);
                           }}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow transition-all"
+                          style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Plus className="w-4 h-4" /> Lập Phiếu
                         </button>
                         <button
                           type="button"
                           onClick={() => setRevertProposalModal(viewingProposalDetail)}
-                          className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow transition-all"
+                          className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-rose-300 text-rose-600 hover:bg-rose-50"
                         >
                           <X className="w-4 h-4" /> Từ Chối
                         </button>
@@ -10597,7 +10599,7 @@ export default function FinanceManagement({
                       <button
                         type="button"
                         onClick={() => openVoucherUpload(viewingProposalDetail)}
-                        className="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow transition-all"
+                        style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Upload className="w-4 h-4" /> Upload Sao Kê
                       </button>
@@ -10608,14 +10610,14 @@ export default function FinanceManagement({
                       <button
                         type="button"
                         onClick={() => handleDeleteProposal(viewingProposalDetail.id)}
-                        className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow transition-all"
+                        className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-rose-300 text-rose-600 hover:bg-rose-50"
                       >
                         <Trash2 className="w-4 h-4" /> Xóa
                       </button>
                     );
                   }
                   if (eff === 'completed') {
-                    return <span className="text-emerald-400 font-bold text-xs flex items-center gap-1.5"><Check className="w-4 h-4" /> Hoàn Tất</span>;
+                    return <span className="text-emerald-700 font-bold text-xs flex items-center gap-1.5"><Check className="w-4 h-4" /> Hoàn Tất</span>;
                   }
                   return null;
                 })()}
@@ -10623,7 +10625,7 @@ export default function FinanceManagement({
               <button
                 type="button"
                 onClick={() => setViewingProposalDetail(null)}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-sm hover:scale-[1.01]"
+                className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
               >
                 Đóng lại
               </button>
@@ -10635,27 +10637,27 @@ export default function FinanceManagement({
       {/* Custom Modal: Thùng rác Đề Xuất bị Từ Chối (tự xóa sau 30 ngày + khôi phục) */}
       {trashOpen && (
         <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
           onClick={() => setTrashOpen(false)}
         >
           <div
-            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl text-slate-100 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans max-h-[90vh] flex flex-col"
+            className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl text-slate-800 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
-              <span className="font-extrabold text-sm text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Trash2 className="w-5 h-5 text-rose-500" />
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <span className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                <Trash2 className="w-5 h-5 text-[#0d47c9]" />
                 Thùng rác — Đề Xuất bị Từ Chối ({rejectedProposals.length})
               </span>
-              <button type="button" onClick={() => setTrashOpen(false)} className="text-slate-400 hover:text-white transition-colors cursor-pointer">
+              <button type="button" onClick={() => setTrashOpen(false)} className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-5 space-y-3 overflow-y-auto">
-              <p className="text-[11px] text-slate-300 leading-relaxed bg-rose-500/10 border border-rose-500/20 rounded-lg p-3">
-                Các Đề Xuất bị Từ Chối sẽ <strong className="text-rose-300">tự động xóa vĩnh viễn sau 30 ngày</strong> kể từ lúc bị từ chối.
-                Bạn có thể <strong className="text-emerald-300">khôi phục</strong> về một cột trong quy trình hoặc <strong className="text-rose-300">xóa ngay</strong>.
+              <p className="text-[11px] text-slate-700 leading-relaxed bg-rose-500/10 border border-rose-500/20 rounded-lg p-3">
+                Các Đề Xuất bị Từ Chối sẽ <strong className="text-rose-600">tự động xóa vĩnh viễn sau 30 ngày</strong> kể từ lúc bị từ chối.
+                Bạn có thể <strong className="text-emerald-700">khôi phục</strong> về một cột trong quy trình hoặc <strong className="text-rose-600">xóa ngay</strong>.
               </p>
 
               {rejectedProposals.length === 0 ? (
@@ -10663,23 +10665,23 @@ export default function FinanceManagement({
               ) : (
                 <div className="space-y-2">
                   {rejectedProposals.map(p => (
-                    <div key={p.id} className="bg-slate-950/50 border border-slate-800 rounded-xl p-3 space-y-2">
+                    <div key={p.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="font-mono font-bold text-amber-500 text-[11px] truncate">{p.id}</div>
-                          <div className="text-slate-200 text-[12px] truncate">{p.subcontractorName}</div>
+                          <div className="font-mono font-bold text-[#0d47c9] text-[11px] truncate">{p.id}</div>
+                          <div className="text-slate-900 text-[12px] truncate">{p.subcontractorName}</div>
                           <div className="text-slate-500 text-[10px]">{p.projectName} · {p.amount.toLocaleString('vi-VN')} đ</div>
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="text-[9px] text-slate-500 uppercase">Tự xóa sau</div>
-                          <div className={`text-[12px] font-black ${daysUntilDeletion(p) <= 7 ? 'text-rose-400' : 'text-amber-400'}`}>{daysUntilDeletion(p)} ngày</div>
+                          <div className="text-[11px] text-slate-500">Tự xóa sau</div>
+                          <div className={`text-[12px] font-black ${daysUntilDeletion(p) <= 7 ? 'text-rose-600' : 'text-[#0d47c9]'}`}>{daysUntilDeletion(p)} ngày</div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <select
                           value={restoreTarget[p.id] || 'pending_approval'}
                           onChange={(e) => setRestoreTarget(prev => ({ ...prev, [p.id]: e.target.value as SubcontractorAdvanceProposal['status'] }))}
-                          className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] font-bold text-slate-200 outline-none cursor-pointer"
+                          className="bg-white border border-slate-200 rounded-xl px-2 h-9 text-[13px] font-bold text-slate-800 outline-none cursor-pointer"
                         >
                           <option value="pending_approval">Chờ Duyệt</option>
                           <option value="pending_payment">Chờ Lập Phiếu</option>
@@ -10688,14 +10690,14 @@ export default function FinanceManagement({
                         <button
                           type="button"
                           onClick={() => restoreRejectedProposal(p)}
-                          className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                          style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <RefreshCcw className="w-3.5 h-3.5" /> Khôi phục
                         </button>
                         <button
                           type="button"
                           onClick={() => deleteRejectedNow(p)}
-                          className="bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                          className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-rose-300 text-rose-600 hover:bg-rose-50"
                         >
                           <Trash2 className="w-3.5 h-3.5" /> Xóa ngay
                         </button>
@@ -10712,67 +10714,67 @@ export default function FinanceManagement({
       {/* Custom Modal: Reject Subcontractor Advance Proposal (Approver) */}
       {rejectProposalModal && (
         <div 
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
           onClick={() => setRejectProposalModal(null)}
         >
           <div 
-            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg text-slate-100 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans"
+            className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg text-slate-800 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
-              <span className="font-extrabold text-sm text-red-400 uppercase tracking-wider flex items-center gap-1.5">
-                <X className="w-5 h-5 text-red-500" />
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <span className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                <X className="w-5 h-5 text-[#0d47c9]" />
                 Xác nhận từ chối đề xuất
               </span>
               <button 
                 type="button"
                 onClick={() => setRejectProposalModal(null)}
-                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-6 space-y-4">
-              <p className="text-sm text-slate-300 leading-relaxed">
-                Bạn có chắc chắn muốn <strong className="text-red-400">TỪ CHỐI</strong> yêu cầu đề xuất tạm ứng thầu phụ này không?
+              <p className="text-sm text-slate-700 leading-relaxed">
+                Bạn có chắc chắn muốn <strong className="text-rose-600">TỪ CHỐI</strong> yêu cầu đề xuất tạm ứng thầu phụ này không?
               </p>
               
-              <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-xl space-y-2 text-xs">
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2 text-xs">
                 <div>
                   <span className="text-slate-500">Mã đề xuất:</span>{" "}
-                  <strong className="text-amber-500 font-mono">{rejectProposalModal.id}</strong>
+                  <strong className="text-[#0d47c9] font-mono">{rejectProposalModal.id}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Thầu phụ:</span>{" "}
-                  <strong className="text-slate-200">{rejectProposalModal.subcontractorName}</strong>
+                  <strong className="text-slate-900">{rejectProposalModal.subcontractorName}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Dự án:</span>{" "}
-                  <strong className="text-slate-200">{rejectProposalModal.projectName}</strong>
+                  <strong className="text-slate-900">{rejectProposalModal.projectName}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Nội dung công việc:</span>{" "}
-                  <strong className="text-slate-200">{rejectProposalModal.taskName}</strong>
+                  <strong className="text-slate-900">{rejectProposalModal.taskName}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Số tiền đề xuất:</span>{" "}
-                  <strong className="text-orange-400 font-mono text-[13px]">{rejectProposalModal.amount.toLocaleString('vi-VN')} đ</strong>
+                  <strong className="text-[#0d47c9] font-mono text-[13px]">{rejectProposalModal.amount.toLocaleString('vi-VN')} đ</strong>
                 </div>
                 {rejectProposalModal.reason && (
                   <div>
                     <span className="text-slate-500">Lý do:</span>{" "}
-                    <span className="text-slate-300 italic">"{rejectProposalModal.reason}"</span>
+                    <span className="text-slate-700 italic">"{rejectProposalModal.reason}"</span>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="px-6 py-4 bg-slate-950/40 border-t border-slate-800 flex justify-end gap-3">
+            <div className="px-6 py-4 bg-white border-t border-slate-200 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setRejectProposalModal(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
               >
                 Hủy bỏ
               </button>
@@ -10784,7 +10786,7 @@ export default function FinanceManagement({
                   setViewingProposalDetail(null);
                   await handleRejectByApprover(proposal);
                 }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-md"
+                style={{ background: '#e11d48', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
               >
                 Xác nhận từ chối
               </button>
@@ -10796,67 +10798,67 @@ export default function FinanceManagement({
       {/* Custom Modal: Revert/Reject Subcontractor Advance Proposal (Accountant) */}
       {revertProposalModal && (
         <div 
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
           onClick={() => setRevertProposalModal(null)}
         >
           <div 
-            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg text-slate-100 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans"
+            className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg text-slate-800 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
-              <span className="font-extrabold text-sm text-red-400 uppercase tracking-wider flex items-center gap-1.5">
-                <X className="w-5 h-5 text-red-500" />
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <span className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                <X className="w-5 h-5 text-[#0d47c9]" />
                 Xác nhận từ chối đề xuất (Kế toán)
               </span>
               <button 
                 type="button"
                 onClick={() => setRevertProposalModal(null)}
-                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-6 space-y-4">
-              <p className="text-sm text-slate-300 leading-relaxed">
-                Bạn có chắc chắn muốn <strong className="text-red-400">TỪ CHỐI</strong> yêu cầu đề xuất tạm ứng thầu phụ này không? Trạng thái đề xuất sẽ chuyển thành <strong className="text-red-400">Từ Chối</strong>.
+              <p className="text-sm text-slate-700 leading-relaxed">
+                Bạn có chắc chắn muốn <strong className="text-rose-600">TỪ CHỐI</strong> yêu cầu đề xuất tạm ứng thầu phụ này không? Trạng thái đề xuất sẽ chuyển thành <strong className="text-rose-600">Từ Chối</strong>.
               </p>
               
-              <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-xl space-y-2 text-xs">
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2 text-xs">
                 <div>
                   <span className="text-slate-500">Mã đề xuất:</span>{" "}
-                  <strong className="text-amber-500 font-mono">{revertProposalModal.id}</strong>
+                  <strong className="text-[#0d47c9] font-mono">{revertProposalModal.id}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Thầu phụ:</span>{" "}
-                  <strong className="text-slate-200">{revertProposalModal.subcontractorName}</strong>
+                  <strong className="text-slate-900">{revertProposalModal.subcontractorName}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Dự án:</span>{" "}
-                  <strong className="text-slate-200">{revertProposalModal.projectName}</strong>
+                  <strong className="text-slate-900">{revertProposalModal.projectName}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Nội dung công việc:</span>{" "}
-                  <strong className="text-slate-200">{revertProposalModal.taskName}</strong>
+                  <strong className="text-slate-900">{revertProposalModal.taskName}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Số tiền đề xuất:</span>{" "}
-                  <strong className="text-orange-400 font-mono text-[13px]">{revertProposalModal.amount.toLocaleString('vi-VN')} đ</strong>
+                  <strong className="text-[#0d47c9] font-mono text-[13px]">{revertProposalModal.amount.toLocaleString('vi-VN')} đ</strong>
                 </div>
                 {revertProposalModal.reason && (
                   <div>
                     <span className="text-slate-500">Lý do:</span>{" "}
-                    <span className="text-slate-300 italic">"{revertProposalModal.reason}"</span>
+                    <span className="text-slate-700 italic">"{revertProposalModal.reason}"</span>
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="px-6 py-4 bg-slate-950/40 border-t border-slate-800 flex justify-end gap-3">
+            <div className="px-6 py-4 bg-white border-t border-slate-200 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setRevertProposalModal(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
               >
                 Hủy bỏ
               </button>
@@ -10868,7 +10870,7 @@ export default function FinanceManagement({
                   setViewingProposalDetail(null);
                   await handleRevertByAccountant(proposal);
                 }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-md"
+                style={{ background: '#e11d48', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
               >
                 Từ Chối Đề Xuất
               </button>
@@ -10880,53 +10882,53 @@ export default function FinanceManagement({
       {/* Custom Modal: Edit Proposal Amount (Board of Directors) */}
       {editingAmountProposal && (
         <div 
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999] p-4 text-left animate-fadeIn select-text"
           onClick={() => setEditingAmountProposal(null)}
         >
           <div 
-            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg text-slate-100 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans"
+            className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg text-slate-800 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 font-sans"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
-              <span className="font-extrabold text-sm text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
-                <Edit className="w-5 h-5 text-amber-500" />
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <span className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5">
+                <Edit className="w-5 h-5 text-[#0d47c9]" />
                 Chỉnh sửa số tiền đề xuất (BGĐ)
               </span>
               <button 
                 type="button"
                 onClick={() => setEditingAmountProposal(null)}
-                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+                className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-6 space-y-4">
-              <p className="text-sm text-slate-300 leading-relaxed">
+              <p className="text-sm text-slate-700 leading-relaxed">
                 Ban Giám Đốc điều chỉnh lại số tiền đề xuất thầu phụ trước khi phê duyệt:
               </p>
               
-              <div className="bg-slate-950/50 border border-slate-800 p-4 rounded-xl space-y-2 text-xs">
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2 text-xs">
                 <div>
                   <span className="text-slate-500">Mã đề xuất:</span>{" "}
-                  <strong className="text-amber-500 font-mono">{editingAmountProposal.id}</strong>
+                  <strong className="text-[#0d47c9] font-mono">{editingAmountProposal.id}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Thầu phụ:</span>{" "}
-                  <strong className="text-slate-200">{editingAmountProposal.subcontractorName}</strong>
+                  <strong className="text-slate-900">{editingAmountProposal.subcontractorName}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Công việc:</span>{" "}
-                  <strong className="text-slate-200">{editingAmountProposal.taskName}</strong>
+                  <strong className="text-slate-900">{editingAmountProposal.taskName}</strong>
                 </div>
                 <div>
                   <span className="text-slate-500">Số tiền hiện tại:</span>{" "}
-                  <strong className="text-slate-300 font-mono">{editingAmountProposal.amount.toLocaleString('vi-VN')} đ</strong>
+                  <strong className="text-slate-700 font-mono">{editingAmountProposal.amount.toLocaleString('vi-VN')} đ</strong>
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-slate-450 uppercase tracking-wider">Số tiền đề xuất mới (VNĐ)</label>
+                <label className="block text-[11px] font-bold text-slate-500 ">Số tiền đề xuất mới (VNĐ)</label>
                 <div className="relative">
                   <input
                     type="text"
@@ -10935,7 +10937,7 @@ export default function FinanceManagement({
                       const raw = e.target.value.replace(/\D/g, '');
                       setEditAmountValue(raw);
                     }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-orange-400 font-mono font-black text-sm focus:outline-none focus:border-amber-500/50"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-[#0d47c9] font-mono font-black text-sm focus:outline-none focus:border-[#0d47c9]"
                     placeholder="Nhập số tiền..."
                     autoFocus
                   />
@@ -10944,18 +10946,18 @@ export default function FinanceManagement({
               </div>
             </div>
 
-            <div className="px-6 py-4 bg-slate-950/40 border-t border-slate-800 flex justify-end gap-3">
+            <div className="px-6 py-4 bg-white border-t border-slate-200 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setEditingAmountProposal(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
               >
                 Hủy bỏ
               </button>
               <button
                 type="button"
                 onClick={() => handleUpdateAmount(editingAmountProposal, editAmountValue)}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-md"
+                style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Cập nhật số tiền
               </button>
