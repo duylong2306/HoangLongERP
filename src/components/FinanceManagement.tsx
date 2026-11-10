@@ -355,23 +355,23 @@ const ReceiptFormContent = React.memo(({
   };
 
   return (
-    <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <form
         onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-5 space-y-3 text-[10.5px] shadow-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
+        className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-5 space-y-3 text-[13px] shadow-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
       >
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-1">
-          <h3 className="font-extrabold text-sm uppercase tracking-wide text-emerald-400 flex items-center gap-2">
+        <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-1">
+          <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
             <Plus className="w-4 h-4" />
             Lập Phiếu Thu Mới
           </h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 p-1.5 rounded-lg">
+          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer">
             <X className="w-4 h-4" />
           </button>
         </div>
         <div className="space-y-1">
-          <label className="block text-slate-400 font-semibold mb-1">Khách hàng <span className="text-rose-400">*</span>:</label>
+          <label className="block text-slate-600 font-bold text-[12px] mb-1">Khách hàng <span className="text-rose-600">*</span>:</label>
           <SearchableSelect
             options={customers.map(c => ({ id: c.id, label: c.name }))}
             value={custId}
@@ -380,31 +380,31 @@ const ReceiptFormContent = React.memo(({
             searchPlaceholder="🔍 Gõ tên khách hàng..."
             required
           />
-          <button type="button" onClick={onAddCustomer} className="text-[10px] text-sky-400 hover:text-sky-300 underline cursor-pointer">+ Thêm khách hàng nhanh</button>
+          <button type="button" onClick={onAddCustomer} className="text-[12px] text-[#0d47c9] hover:underline underline cursor-pointer">+ Thêm khách hàng nhanh</button>
         </div>
 
         <div className="space-y-1">
-          <label className="block text-slate-400 font-semibold mb-1">Số tiền thực tế thu (VNĐ) <span className="text-rose-400">*</span>:</label>
+          <label className="block text-slate-600 font-bold text-[12px] mb-1">Số tiền thực tế thu (VNĐ) <span className="text-rose-600">*</span>:</label>
           <input
             type="number"
             required
             min={1}
             value={amount || ''}
             onChange={(e) => setAmount(Number(e.target.value))}
-            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white font-mono font-bold"
+            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono font-bold"
             placeholder="0"
           />
-          <p className="text-[10px] text-slate-500 font-mono">{amount > 0 ? `${amount.toLocaleString('vi-VN')} đồng` : 'Nhập số tiền, ví dụ: 1500000 = 1.500.000đ'}</p>
+          <p className="text-[12px] text-slate-500 font-mono">{amount > 0 ? `${amount.toLocaleString('vi-VN')} đồng` : 'Nhập số tiền, ví dụ: 1500000 = 1.500.000đ'}</p>
         </div>
 
         <div className="space-y-1">
-          <label className="block text-slate-400 font-semibold mb-1">Dự án liên kết <span className="text-rose-400">*</span>:</label>
+          <label className="block text-slate-600 font-bold text-[12px] mb-1">Dự án liên kết <span className="text-rose-600">*</span>:</label>
           <select
             required
             value={projId}
             onChange={(e) => setProjId(e.target.value)}
             disabled={!custId}
-            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white cursor-pointer font-medium disabled:opacity-40"
+            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer font-medium disabled:opacity-40"
           >
             <option value="" disabled>{custId ? '— Chọn dự án —' : '— Chọn khách hàng trước —'}</option>
             <option value="__none__">📭 Thu ngoài dự án (không gắn công trình)</option>
@@ -415,11 +415,11 @@ const ReceiptFormContent = React.memo(({
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Hình thức thanh toán:</label>
+          <label className="block text-slate-600 font-bold text-[12px] mb-1">Hình thức thanh toán:</label>
           <select
             value={method}
             onChange={(e) => setMethod(e.target.value as 'cash' | 'transfer')}
-            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
+            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer font-bold"
           >
             <option value="transfer">Chuyển khoản</option>
             <option value="cash">Tiền mặt</option>
@@ -427,20 +427,20 @@ const ReceiptFormContent = React.memo(({
         </div>
 
         <div>
-          <label className="block text-slate-400 font-semibold mb-1">Giải nghĩa chi tiết phiếu thu:</label>
+          <label className="block text-slate-600 font-bold text-[12px] mb-1">Giải nghĩa chi tiết phiếu thu:</label>
           <input
             type="text"
             required
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Khách tạm ứng 30% tiền gỗ ván..."
-            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white"
+            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900"
           />
         </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-          <button type="button" onClick={onClose} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-slate-300 cursor-pointer">Bỏ qua</button>
-          <button type="submit" className="bg-emerald-600 hover:bg-emerald-550 text-white px-3 py-1.5 rounded font-bold cursor-pointer">Lập Phiếu Thu</button>
+        <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+          <button type="button" onClick={onClose} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Bỏ qua</button>
+          <button type="submit" style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">Lập Phiếu Thu</button>
         </div>
       </form>
     </div>
@@ -5678,9 +5678,9 @@ export default function FinanceManagement({
               </nav>
             )}
 
-            {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi và Đơn Hàng (tab đã làm lại: tên tab đã có trên thanh tab,
+            {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi, Đơn Hàng và Nhập Thu (tab đã làm lại: tên tab đã có trên thanh tab,
                 ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
-            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && (
+            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && (
               <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
@@ -8501,11 +8501,66 @@ export default function FinanceManagement({
                     </div>
                   )}
             {/* TAB 7: NHẬP THU */}
-            {activeSubTab === 'nhap_thu' && (
+            {activeSubTab === 'nhap_thu' && (() => {
+              // Cụm nút thao tác của 1 phiếu thu (xem/in, sửa, xóa) — dùng chung cho bảng (máy tính) và thẻ (điện thoại)
+              const recActions = (rec: Receipt) => {
+                const projName = projects.find(p => p.id === rec.projectId)?.name || 'Văn phòng';
+                return (
+                  <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        onClick={() => {
+                                          const cust = (customers || []).find(c => c.id === rec.customerId);
+                                          const payerName = cust?.name || 'Khách hàng';
+                                          const collectorName = rec.collectorId
+                                            ? ((employeesProp || []).find(e => e.id === rec.collectorId)?.name || rec.collector)
+                                            : rec.collector;
+                                          setPreviewVoucher({
+                                            type: 'receipt',
+                                            data: rec,
+                                            meta: {
+                                              payer: payerName,
+                                              project: projName !== 'Văn phòng' ? projName : undefined,
+                                              collector: collectorName,
+                                              order: rec.salesOrderId,
+                                            },
+                                          });
+                                        }}
+                                        title="Xem chi tiết / In phiếu thu"
+                                        className="p-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg cursor-pointer"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                      </button>
+                                      {(rec.source === 'manual' || rec.source === 'import') && (
+                                        <button
+                                          onClick={() => openEditReceipt(rec)}
+                                          title="Sửa phiếu thu"
+                                          className="p-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg cursor-pointer"
+                                        >
+                                          <Edit className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                      {(rec.source === 'manual' || rec.source === 'import') && (
+                                        <button
+                                          onClick={() => {
+                                            if (window.confirm(`⚠️ Xóa phiếu thu ${rec.code}?\nHành động không thể hoàn tác.`)) {
+                                              if (onDeleteReceipt) onDeleteReceipt(rec.id);
+                                              addToast({ title: '✅ Đã xóa', message: `Đã xóa phiếu thu ${rec.code}.`, type: 'success' });
+                                            }
+                                          }}
+                                          title="Xóa phiếu thu"
+                                          className="p-1.5 border border-rose-300 text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                  </div>
+                );
+              };
+              return (
               <div className="space-y-4">
                 
-                <div className="flex justify-between items-center border-b border-slate-850 pb-2">
-                  <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px]">Danh sách các khoản thu</span>
+                <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+                  <span className="font-extrabold text-slate-900 text-sm">Danh sách các khoản thu</span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -8522,18 +8577,16 @@ export default function FinanceManagement({
                         exportToExcel(data, 'NhapThu', `Nhap_Thu_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.receipt]);
                         addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} phiếu thu`, type: 'success' });
                       }}
-                      className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
+                      className="h-9 w-9 rounded-xl flex items-center justify-center bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
                       title="Xuất Excel phiếu thu"
                     >
-                      <Download className="w-3 h-3 text-blue-400" />
-                      Xuất Excel
+                      <Download className="w-4 h-4" />
                     </button>
                     <label
-                      className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
+                      className="h-9 w-9 rounded-xl flex items-center justify-center bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
                       title="Nhập Excel phiếu thu"
                     >
-                      <FileUp className="w-3 h-3 text-emerald-400" />
-                      Nhập Excel
+                      <FileUp className="w-4 h-4" />
                       <input
                         type="file"
                         accept=".xlsx,.xls"
@@ -8605,9 +8658,10 @@ export default function FinanceManagement({
                         }
                         setShowRecForm(!showRecForm);
                       }}
-                      className={`font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 transition-colors ${canCreate ? 'bg-emerald-600 hover:bg-emerald-550 text-white cursor-pointer' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}
+                      style={canCreate ? { background: '#0d47c9', color: '#ffffff' } : undefined}
+                      className={`h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 ${canCreate ? 'cursor-pointer' : 'bg-slate-100 text-slate-500 border border-slate-200 cursor-not-allowed'}`}
                     >
-                      <Plus className="w-3.5 h-3.5" />
+                      <Plus className="w-4 h-4" />
                       Lập phiếu thu mới
                     </button>
                   </div>
@@ -8649,33 +8703,42 @@ export default function FinanceManagement({
                   />
                 )}
 
-                <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
+                <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="receipt-filters">
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Từ ngày</label>
-                    <input type="date" value={receiptFilters.fromDate} onChange={(e) => updateReceiptFilter({ fromDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                    <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input type="text" data-testid="receipt-search" placeholder="Mã phiếu, chủ đầu tư, công trình…" value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="h-9 w-56 bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Đến ngày</label>
-                    <input type="date" value={receiptFilters.toDate} onChange={(e) => updateReceiptFilter({ toDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                    <label className="text-[11px] text-slate-500 font-bold">Từ ngày</label>
+                    <input type="date" value={receiptFilters.fromDate} onChange={(e) => updateReceiptFilter({ fromDate: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-slate-500 font-bold">Đến ngày</label>
+                    <input type="date" value={receiptFilters.toDate} onChange={(e) => updateReceiptFilter({ toDate: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
                   </div>
                   <div className="flex flex-col gap-1 relative">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Chủ đầu tư</label>
+                    <label className="text-[11px] text-slate-500 font-bold">Chủ đầu tư</label>
                     <input
                       type="text"
                       value={receiptFilters.customer ? (customers.find(c => c.id === receiptFilters.customer)?.name || recCustFilterSearch) : recCustFilterSearch}
                       onChange={(e) => { setRecCustFilterSearch(e.target.value); setRecCustFilterOpen(true); if (receiptFilters.customer) updateReceiptFilter({ customer: '' }); }}
                       onFocus={() => { setRecCustFilterSearch(receiptFilters.customer ? (customers.find(c => c.id === receiptFilters.customer)?.name || '') : ''); setRecCustFilterOpen(true); }}
                       placeholder="Tìm kiếm chủ đầu tư..."
-                      className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer w-full"
+                      className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer w-full"
                     />
                     {recCustFilterOpen && (
                       <>
                         <div className="fixed inset-0 z-[190] bg-transparent cursor-default" onClick={() => setRecCustFilterOpen(false)} />
-                        <div className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-lg shadow-2xl z-[200] divide-y divide-slate-900">
-                          <button type="button" onClick={() => { updateReceiptFilter({ customer: '' }); setRecCustFilterSearch(''); setRecCustFilterOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-900 transition-colors text-slate-400 text-[10.5px]">Tất cả</button>
+                        <div className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl z-[200] divide-y divide-slate-100">
+                          <button type="button" onClick={() => { updateReceiptFilter({ customer: '' }); setRecCustFilterSearch(''); setRecCustFilterOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors text-slate-500 text-[10.5px]">Tất cả</button>
                           {customers.filter(c => !recCustFilterSearch || c.name.toLowerCase().includes(recCustFilterSearch.toLowerCase())).map(c => (
-                            <button key={c.id} type="button" onClick={() => { updateReceiptFilter({ customer: c.id }); setRecCustFilterSearch(c.name); setRecCustFilterOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-900 transition-colors text-slate-200 text-[10.5px]">
-                              <span className="font-semibold text-slate-100">{c.name}</span>
+                            <button key={c.id} type="button" onClick={() => { updateReceiptFilter({ customer: c.id }); setRecCustFilterSearch(c.name); setRecCustFilterOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors text-slate-900 text-[10.5px]">
+                              <span className="font-semibold text-slate-900">{c.name}</span>
                             </button>
                           ))}
                           {customers.filter(c => !recCustFilterSearch || c.name.toLowerCase().includes(recCustFilterSearch.toLowerCase())).length === 0 && (
@@ -8686,19 +8749,19 @@ export default function FinanceManagement({
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Hình thức</label>
-                    <select value={receiptFilters.form} onChange={(e) => updateReceiptFilter({ form: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                    <label className="text-[11px] text-slate-500 font-bold">Hình thức</label>
+                    <select value={receiptFilters.form} onChange={(e) => updateReceiptFilter({ form: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
                       <option value="">Tất cả</option>
                       <option value="cash">Tiền mặt</option>
                       <option value="transfer">Chuyển khoản</option>
                     </select>
                   </div>
-                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updateReceiptFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, customer: '', form: '' }); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updateReceiptFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, customer: '', form: '' }); }} className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đặt lại</button>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-slate-300 text-[10.5px]">
-                    <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
+                <div className="hidden md:block overflow-x-auto bg-white border border-slate-200 rounded-2xl">
+                  <table className="w-full text-left text-slate-700 text-[13px]">
+                    <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
                       <tr>
                         <th className="px-3 py-2 w-12 text-center">#</th>
                         <th className="px-3 py-2">Mã Phiếu Thu</th>
@@ -8721,106 +8784,105 @@ export default function FinanceManagement({
                         const toggle = () => setRecExpanded(prev => { const n = new Set(prev); n.has(g.customerId) ? n.delete(g.customerId) : n.add(g.customerId); return n; });
                         return (
                           <React.Fragment key={g.customerId}>
-                            <tr className="border-b border-slate-800 bg-slate-800/40 hover:bg-slate-800/70 font-sans">
-                              <td className="px-3 py-3 text-center font-bold text-slate-300">{groupNo}</td>
+                            <tr className="border-b border-slate-200 bg-slate-50 hover:bg-slate-100 font-sans">
+                              <td className="px-3 py-3 text-center font-bold text-slate-700">{groupNo}</td>
                               <td className="px-3 py-3" colSpan={4}>
                                 <div className="flex items-center gap-2">
-                                  <button onClick={toggle} className="text-slate-400 hover:text-white text-[10px] w-4 cursor-pointer" title={expanded ? 'Thu gọn' : 'Xem chi tiết'}>
+                                  <button onClick={toggle} className="text-slate-500 hover:text-slate-900 text-[12px] w-4 cursor-pointer" title={expanded ? 'Thu gọn' : 'Xem chi tiết'}>
                                     {expanded ? '▼' : '▶'}
                                   </button>
                                   <div>
-                                    <button onClick={toggle} className="font-extrabold text-white text-[13px] text-left hover:underline cursor-pointer">
+                                    <button onClick={toggle} className="font-extrabold text-slate-900 text-[13px] text-left hover:underline cursor-pointer">
                                       {g.customerName}
                                     </button>
-                                    <div className="text-[9px] text-slate-400 mt-0.5">{g.receipts.length} phiếu thu · Nhóm theo Chủ đầu tư</div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5">{g.receipts.length} phiếu thu · Nhóm theo Chủ đầu tư</div>
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-3 py-3 text-right font-mono font-bold text-emerald-400">+{sum.toLocaleString('vi-VN')} đ</td>
-                              <td className="px-3 py-3 text-center text-slate-600 text-[9px] italic">—</td>
+                              <td className="px-3 py-3 text-right font-mono font-bold text-emerald-700">+{sum.toLocaleString('vi-VN')} đ</td>
+                              <td className="px-3 py-3 text-center text-slate-600 text-[11px] italic">—</td>
                             </tr>
                             {expanded && g.receipts.map((rec) => {
                               const projName = projects.find(p => p.id === rec.projectId)?.name || 'Văn phòng';
                               return (
-                                <tr key={rec.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
+                                <tr key={rec.id} className="border-b border-slate-200 bg-white hover:bg-slate-50 font-sans">
                                   <td className="px-3 py-2.5 pl-9 text-slate-500 text-center">—</td>
-                                  <td className="px-3 py-2.5 font-mono font-bold text-emerald-400">{rec.code}</td>
+                                  <td className="px-3 py-2.5 font-mono font-bold text-[#0d47c9]">{rec.code}</td>
                                   <td className="px-3 py-2.5">{rec.date}</td>
-                                  <td className="px-3 py-2.5 font-bold text-slate-100 truncate max-w-[200px]">{projName}</td>
-                                  <td className="px-3 py-2.5 text-slate-450 truncate max-w-[220px]">{rec.notes}</td>
-                                  <td className="px-3 py-2.5 text-right font-bold text-emerald-400 font-mono">+{rec.amount.toLocaleString('vi-VN')} đ</td>
+                                  <td className="px-3 py-2.5 font-bold text-slate-900 truncate max-w-[200px]">{projName}</td>
+                                  <td className="px-3 py-2.5 text-slate-500 truncate max-w-[220px]">{rec.notes}</td>
+                                  <td className="px-3 py-2.5 text-right font-bold text-emerald-700 font-mono">+{rec.amount.toLocaleString('vi-VN')} đ</td>
                                   <td className="px-3 py-2.5 text-center">
-                                    <div className="flex items-center justify-center gap-1">
-                                      <button
-                                        onClick={() => {
-                                          const cust = (customers || []).find(c => c.id === rec.customerId);
-                                          const payerName = cust?.name || 'Khách hàng';
-                                          const collectorName = rec.collectorId
-                                            ? ((employeesProp || []).find(e => e.id === rec.collectorId)?.name || rec.collector)
-                                            : rec.collector;
-                                          setPreviewVoucher({
-                                            type: 'receipt',
-                                            data: rec,
-                                            meta: {
-                                              payer: payerName,
-                                              project: projName !== 'Văn phòng' ? projName : undefined,
-                                              collector: collectorName,
-                                              order: rec.salesOrderId,
-                                            },
-                                          });
-                                        }}
-                                        title="Xem chi tiết / In phiếu thu"
-                                        className="p-1.5 text-blue-400 hover:text-blue-300 hover:bg-blue-950 rounded-lg transition-colors cursor-pointer"
-                                      >
-                                        <Eye className="w-3.5 h-3.5" />
-                                      </button>
-                                      {(rec.source === 'manual' || rec.source === 'import') && (
-                                        <button
-                                          onClick={() => openEditReceipt(rec)}
-                                          title="Sửa phiếu thu"
-                                          className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-950 rounded-lg transition-colors cursor-pointer"
-                                        >
-                                          <Edit className="w-3.5 h-3.5" />
-                                        </button>
-                                      )}
-                                      {(rec.source === 'manual' || rec.source === 'import') && (
-                                        <button
-                                          onClick={() => {
-                                            if (window.confirm(`⚠️ Xóa phiếu thu ${rec.code}?\nHành động không thể hoàn tác.`)) {
-                                              if (onDeleteReceipt) onDeleteReceipt(rec.id);
-                                              addToast({ title: '✅ Đã xóa', message: `Đã xóa phiếu thu ${rec.code}.`, type: 'success' });
-                                            }
-                                          }}
-                                          title="Xóa phiếu thu"
-                                          className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950 rounded-lg transition-colors cursor-pointer"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                                      {recActions(rec)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                           </React.Fragment>
                         );
                       })}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t-2 border-slate-700 bg-slate-900/80">
+                      <tr className="border-t-2 border-slate-200 bg-slate-50">
                         <td className="px-3 py-3"></td>
-                        <td className="px-3 py-3 text-[11px] font-bold text-slate-300 uppercase tracking-wider" colSpan={4}>Tổng cộng ({filteredReceipts.length} khoản thu)</td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-emerald-300 text-base">+{filteredReceipts.reduce((s, r) => s + (Number(r.amount) || 0), 0).toLocaleString('vi-VN')} đ</td>
+                        <td className="px-3 py-3 text-[11px] font-bold text-slate-700 " colSpan={4}>Tổng cộng ({filteredReceipts.length} khoản thu)</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-emerald-700 text-base">+{filteredReceipts.reduce((s, r) => s + (Number(r.amount) || 0), 0).toLocaleString('vi-VN')} đ</td>
                         <td className="px-3 py-3"></td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
+                {/* ĐIỆN THOẠI (< md): mỗi chủ đầu tư 1 thẻ, bấm để mở danh sách phiếu thu */}
+                <div className="md:hidden space-y-2.5" data-testid="receipt-cards">
+                  {recPageInfo.pageGroups.length === 0 ? (
+                    <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-[13px] text-slate-500">{receipts.length === 0 ? 'Chưa có phiếu thu nào.' : 'Không tìm thấy phiếu thu khớp bộ lọc.'}</div>
+                  ) : recPageInfo.pageGroups.map((g) => {
+                    const expanded = recExpanded.has(g.customerId);
+                    const sum = g.receipts.reduce((s, r) => s + r.amount, 0);
+                    const toggle = () => setRecExpanded(prev => { const n = new Set(prev); n.has(g.customerId) ? n.delete(g.customerId) : n.add(g.customerId); return n; });
+                    return (
+                      <div key={g.customerId} data-testid={`receipt-card-${g.customerId}`} className="bg-white border border-slate-200 rounded-xl p-3">
+                        <button type="button" onClick={toggle} aria-expanded={expanded} className="w-full text-left cursor-pointer bg-transparent border-0 p-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-bold text-[13px] text-slate-900">{expanded ? '▼' : '▶'} {g.customerName}</div>
+                              <div className="text-[12px] text-slate-500 mt-0.5">{g.receipts.length} phiếu thu · Nhóm theo Chủ đầu tư</div>
+                            </div>
+                            <span className="font-mono font-black text-[13px] whitespace-nowrap text-emerald-700">+{sum.toLocaleString('vi-VN')} đ</span>
+                          </div>
+                        </button>
+                        {expanded && (
+                          <div className="mt-3 pt-3 border-t border-slate-200 space-y-2.5">
+                            {g.receipts.map((rec) => {
+                              const projName = projects.find(p => p.id === rec.projectId)?.name || 'Văn phòng';
+                              return (
+                                <div key={rec.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-mono font-bold text-[13px]" style={{ color: '#0d47c9' }}>{rec.code}</span>
+                                    <span className="font-mono font-bold text-[13px] text-emerald-700">+{rec.amount.toLocaleString('vi-VN')} đ</span>
+                                  </div>
+                                  <div className="text-[12px] text-slate-500">{rec.date} · {projName}</div>
+                                  {rec.notes && <div className="text-[12px] text-slate-700">{rec.notes}</div>}
+                                  <div className="pt-1.5 border-t border-slate-200">{recActions(rec)}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
+                    <span className="text-[13px] font-bold text-slate-700">Tổng cộng ({filteredReceipts.length} khoản thu)</span>
+                    <span className="font-mono font-black text-[14px] text-emerald-700">+{filteredReceipts.reduce((s, r) => s + (Number(r.amount) || 0), 0).toLocaleString('vi-VN')} đ</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[12px] text-slate-500">
                   <div className="flex items-center gap-2">
                     <span>Hiển thị</span>
-                    <select value={recPageSize} onChange={(e) => { setRecPageSize(Number(e.target.value)); setRecPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                    <select value={recPageSize} onChange={(e) => { setRecPageSize(Number(e.target.value)); setRecPage(1); }} className="h-9 bg-white border border-slate-200 rounded-xl px-2 text-[13px] text-slate-800 outline-none cursor-pointer">
                       <option value={5}>5</option>
                       <option value={10}>10</option>
                       <option value={20}>20</option>
@@ -8831,12 +8893,13 @@ export default function FinanceManagement({
                   </div>
                   <div className="flex items-center gap-2">
                     <span>Trang {recPageInfo.safePage}/{recPageInfo.totalPages} · {receiptGroups.length} chủ đầu tư</span>
-                    <button type="button" disabled={recPageInfo.safePage <= 1} onClick={() => setRecPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
-                    <button type="button" disabled={recPageInfo.safePage >= recPageInfo.totalPages} onClick={() => setRecPage(p => Math.min(recPageInfo.totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
+                    <button type="button" disabled={recPageInfo.safePage <= 1} onClick={() => setRecPage(p => Math.max(1, p - 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">‹ Trước</button>
+                    <button type="button" disabled={recPageInfo.safePage >= recPageInfo.totalPages} onClick={() => setRecPage(p => Math.min(recPageInfo.totalPages, p + 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">Sau ›</button>
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* TAB 8: NHẬP CHI */}
             {activeSubTab === 'nhap_chi' && (
@@ -10132,41 +10195,41 @@ export default function FinanceManagement({
 
             {/* ── Modal: Sửa phiếu thu (Nhập Thu thủ công) ──────────────── */}
             {editingReceipt && (
-              <div className="fixed inset-0 z-[60] bg-slate-950/80 flex items-center justify-center p-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+              <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+                <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 shadow-xl animate-in fade-in zoom-in-95 duration-200">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-white font-extrabold text-sm">
+                    <h3 className="text-slate-900 font-extrabold text-sm">
                       Sửa Phiếu Thu {editingReceipt.code}
                     </h3>
-                    <button onClick={() => setEditingReceipt(null)} className="text-slate-400 hover:text-white">
+                    <button onClick={() => setEditingReceipt(null)} className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer">
                       <X className="w-5 h-5" />
                     </button>
                   </div>
-                  <div className="space-y-4 text-xs">
+                  <div className="space-y-4 text-[13px]">
                     <div>
-                      <label className="block text-slate-400 font-bold mb-1">Ngày lập phiếu</label>
-                      <input type="date" value={editRecDate} onChange={e => setEditRecDate(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none" />
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Ngày lập phiếu</label>
+                      <input type="date" value={editRecDate} onChange={e => setEditRecDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:border-blue-500 outline-none" />
                     </div>
                     <div>
-                      <label className="block text-slate-400 font-bold mb-1">Số tiền (đ) <span className="text-red-400">*</span></label>
-                      <input type="number" value={editRecAmount} onChange={e => setEditRecAmount(Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none" />
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Số tiền (đ) <span className="text-rose-600">*</span></label>
+                      <input type="number" value={editRecAmount} onChange={e => setEditRecAmount(Number(e.target.value))} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:border-blue-500 outline-none" />
                     </div>
                     <div>
-                      <label className="block text-slate-400 font-bold mb-1">Hình thức</label>
-                      <select value={editRecMethod} onChange={e => setEditRecMethod(e.target.value as 'cash' | 'transfer')} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none">
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Hình thức</label>
+                      <select value={editRecMethod} onChange={e => setEditRecMethod(e.target.value as 'cash' | 'transfer')} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:border-blue-500 outline-none">
                         <option value="cash">Tiền mặt</option>
                         <option value="transfer">Chuyển khoản</option>
                       </select>
                     </div>
                     <div>
-                      <label className="block text-slate-400 font-bold mb-1">Ghi chú</label>
-                      <textarea value={editRecNotes} onChange={e => setEditRecNotes(e.target.value)} rows={3} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold focus:border-blue-500 outline-none resize-none" />
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Ghi chú</label>
+                      <textarea value={editRecNotes} onChange={e => setEditRecNotes(e.target.value)} rows={3} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:border-blue-500 outline-none resize-none" />
                     </div>
                     <div className="flex justify-end gap-2 pt-2">
-                      <button onClick={() => setEditingReceipt(null)} className="bg-slate-700 hover:bg-slate-600 text-white font-bold px-4 py-2 rounded-lg cursor-pointer">
+                      <button onClick={() => setEditingReceipt(null)} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">
                         Hủy
                       </button>
-                      <button onClick={handleSaveEditReceipt} className="bg-amber-600 hover:bg-amber-550 text-white font-bold px-4 py-2 rounded-lg cursor-pointer">
+                      <button onClick={handleSaveEditReceipt} style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer">
                         Lưu thay đổi
                       </button>
                     </div>
