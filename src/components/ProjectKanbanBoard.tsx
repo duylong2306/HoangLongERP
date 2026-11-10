@@ -927,9 +927,23 @@ export default function ProjectKanbanBoard({
     }
   };
 
+  // Ô thông tin dự án (địa điểm, ngày khởi công, thời hạn...) khóa/mở theo isEditingDetails.
+  // LỖI CŨ: effect phụ thuộc cả `projects` → mỗi lần danh sách dự án đổi (realtime, tự lưu, người khác sửa...)
+  // thì tự thoát chế độ sửa và xóa chữ vừa gõ → người dùng thấy "không sửa được thời hạn".
+  // NAY: chỉ thoát chế độ sửa khi ĐỔI sang dự án khác; còn khi danh sách đổi mà đang sửa dở thì giữ nguyên.
+  const isEditingDetailsRef = useRef(false);
+  isEditingDetailsRef.current = isEditingDetails;
+  const lastEditProjectIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    resetEditProjectDetails();
-    setIsEditingDetails(false);
+    const projectChanged = lastEditProjectIdRef.current !== selectedProjectId;
+    lastEditProjectIdRef.current = selectedProjectId;
+    if (projectChanged) {
+      resetEditProjectDetails();
+      setIsEditingDetails(false);
+    } else if (!isEditingDetailsRef.current) {
+      // Không đang sửa: chỉ làm mới ô hiển thị theo dữ liệu mới nhất.
+      resetEditProjectDetails();
+    }
   }, [selectedProjectId, projects]);
 
   // ===========================================================================
