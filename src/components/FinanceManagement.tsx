@@ -5678,9 +5678,9 @@ export default function FinanceManagement({
               </nav>
             )}
 
-            {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi (tab đã làm lại: tên tab đã có trên thanh tab,
+            {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi và Đơn Hàng (tab đã làm lại: tên tab đã có trên thanh tab,
                 ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
-            {activeSubTab !== 'de_xuat_thu_chi' && (
+            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && (
               <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
@@ -5795,57 +5795,101 @@ export default function FinanceManagement({
                 setPoExpandedSuppliers(prev => { const n = new Set(prev); n.has(name) ? n.delete(name) : n.add(name); return n; });
               };
 
+
+              // Cụm nút thao tác của 1 đơn hàng (xem / ghi nhận công nợ / hoàn tác / xóa) — dùng chung cho bảng (máy tính) và thẻ (điện thoại)
+              const poActions = (o: PurchaseOrder) => {
+                const recorded = isPoRecorded(o.id);
+                const isFromWarehouse = (o as any).fromWarehouse || o.supplierId === WAREHOUSE_SOURCE_ID;
+                const fullyReturned = !recorded && isOrderFullyReturned(o);
+                return (
+                  <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                        <button type="button" onClick={() => setPoDetailModal({ open: true, order: o })} className="text-slate-600 hover:bg-slate-50 p-1.5 border border-slate-200 rounded-lg cursor-pointer" title="Xem chi tiết"><Eye className="w-3.5 h-3.5" /></button>
+                                        {isFromWarehouse ? (
+                                          <span className="text-[11px] font-bold text-teal-600 border border-teal-500 bg-white px-2 py-1 rounded-lg" title="Đơn nội bộ xuất từ Kho có sẵn — không phát sinh công nợ">📦 Nội bộ (Kho)</span>
+                                        ) : recorded ? (
+                                          <>
+                                            <span className="text-[11px] font-bold text-amber-600 border border-amber-500 bg-white px-2 py-1 rounded-lg">Đã ghi nhận</span>
+                                            <button type="button" onClick={() => setPoUndoConfirm(o)} className="text-slate-600 hover:text-rose-600 p-1.5 border border-slate-200 hover:border-rose-300 rounded-lg cursor-pointer transition-all" title="Hoàn tác ghi nhận công nợ (dùng khi nhập sai thông tin đơn hàng)">
+                                              <RefreshCcw className="w-3.5 h-3.5" />
+                                            </button>
+                                          </>
+                                        ) : fullyReturned ? (
+                                          <span className="text-[11px] font-bold text-rose-600 border border-rose-400 bg-white px-2 py-1 rounded-lg" title="Đơn hàng đã được trả lại toàn bộ hàng cho NCC — không phát sinh công nợ cần ghi nhận">↩️ Đã trả hết hàng</span>
+                                        ) : (
+                                          <button type="button" onClick={() => setPoRecordConfirm(o)} className="bg-white border border-[#0d47c9] text-[#0d47c9] hover:bg-[#e8efff] p-1.5 rounded-lg flex items-center justify-center cursor-pointer transition-all" title="Ghi nhận công nợ nhà cung cấp">
+                                            <Plus className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                        {!recorded && !isFromWarehouse && (
+                                          <button type="button" onClick={() => handleDeletePoUnrecorded(o.id)} className="text-rose-600 hover:bg-rose-50 p-1.5 border border-rose-300 rounded-lg cursor-pointer" title="Xóa đơn hàng"><Trash2 className="w-3.5 h-3.5" /></button>
+                                        )}
+                  </div>
+                );
+              };
+
               return (
                 <div className="space-y-4">
-                  <div className="inline-flex bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => { setPoViewMode('mua'); setSearchTerm(''); }}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${poViewMode === 'mua' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                    >
-                      🛒 Đơn Hàng Mua
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setPoViewMode('tra'); setSearchTerm(''); }}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${poViewMode === 'tra' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                    >
-                      ↩️ Đơn Hàng Trả{supplierReturns.length > 0 ? ` (${supplierReturns.length})` : ''}
-                    </button>
+                  {/* Chip chuyển chế độ — kiểu chip LoLo có số đếm (cùng kiểu chip lọc của các tab đã làm lại) */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto" data-testid="po-view-chips">
+                    {([
+                      ['mua', 'Đơn Hàng Mua', purchaseOrders.filter((o: PurchaseOrder) => poHasAnyReceived(o)).length],
+                      ['tra', 'Đơn Hàng Trả', supplierReturns.length],
+                    ] as ['mua' | 'tra', string, number][]).map(([id, label, n]) => {
+                      const on = poViewMode === id;
+                      return (
+                        <button key={id} type="button" data-testid={`po-chip-${id}`} onClick={() => { setPoViewMode(id); setSearchTerm(''); }}
+                          aria-current={on ? 'page' : undefined}
+                          style={on ? { background: '#e8efff', color: '#0d47c9', borderColor: '#bcd0ff' } : undefined}
+                          className={`h-9 pl-3 pr-2 rounded-full text-[13px] font-bold whitespace-nowrap border cursor-pointer inline-flex items-center gap-1.5 ${on ? '' : 'bg-white text-slate-600 border-slate-200'}`}>
+                          {label}
+                          <span className="min-w-[22px] h-[20px] px-1.5 rounded-full text-[11px] leading-[20px] text-center font-black"
+                            style={on ? { background: '#0d47c9', color: '#ffffff' } : { background: '#e2e8f0', color: '#475569' }}>{n}</span>
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {poViewMode === 'mua' && (
                   <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-850 pb-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
                     <div>
-                      <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block">
+                      <span className="font-extrabold text-slate-900 text-sm block">
                         Danh sách Đơn Hàng Mua
                       </span>
                     </div>
                   </div>
 
                   {/* Bộ lọc: Từ ngày – Đến ngày, Nhà Cung Cấp (tìm kiếm nhanh), Trạng thái (lưu localStorage) */}
-                  <div className="flex flex-wrap items-end gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-xl">
+                  <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl">
                     <div className="flex flex-col gap-1">
-                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Từ ngày</label>
+                      <label className="text-slate-500 font-bold text-[11px]">Tìm kiếm</label>
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input type="text" data-testid="po-search" placeholder="Mã đơn, nhà cung cấp…" value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="h-9 w-56 bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-slate-500 font-bold text-[11px]">Từ ngày</label>
                       <input
                         type="date"
                         value={poFilters.fromDate}
                         onChange={(e) => updatePoFilter({ fromDate: e.target.value })}
-                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer"
+                        className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer"
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Đến ngày</label>
+                      <label className="text-slate-500 font-bold text-[11px]">Đến ngày</label>
                       <input
                         type="date"
                         value={poFilters.toDate}
                         onChange={(e) => updatePoFilter({ toDate: e.target.value })}
-                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer"
+                        className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer"
                       />
                     </div>
                     <div className="flex flex-col gap-1 relative">
-                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Nhà Cung Cấp</label>
+                      <label className="text-slate-500 font-bold text-[11px]">Nhà Cung Cấp</label>
                       <input
                         type="text"
                         value={poFilters.supplier}
@@ -5853,23 +5897,23 @@ export default function FinanceManagement({
                         onFocus={() => setPoSupplierOpen(true)}
                         onBlur={() => setTimeout(() => setPoSupplierOpen(false), 150)}
                         placeholder="Gõ để tìm NCC..."
-                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer w-48"
+                        className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer w-48"
                       />
                       {poSupplierOpen && (
-                        <div className="absolute top-full left-0 z-30 mt-1 w-64 max-h-52 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1">
-                          <button type="button" onClick={() => { updatePoFilter({ supplier: '' }); setPoSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-white">Tất cả nhà cung cấp</button>
+                        <div className="absolute top-full left-0 z-30 mt-1 w-64 max-h-52 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl py-1">
+                          <button type="button" onClick={() => { updatePoFilter({ supplier: '' }); setPoSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[13px] text-slate-500 hover:bg-slate-50">Tất cả nhà cung cấp</button>
                           {poSupplierOptions.filter(s => s.toLowerCase().includes(poFilters.supplier.toLowerCase())).map(s => (
-                            <button key={s} type="button" onClick={() => { updatePoFilter({ supplier: s }); setPoSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-200 hover:bg-slate-800">{s}</button>
+                            <button key={s} type="button" onClick={() => { updatePoFilter({ supplier: s }); setPoSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[13px] text-slate-900 hover:bg-slate-50">{s}</button>
                           ))}
                         </div>
                       )}
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Dự án</label>
+                      <label className="text-slate-500 font-bold text-[11px]">Dự án</label>
                       <select
                         value={poFilters.project}
                         onChange={(e) => updatePoFilter({ project: e.target.value })}
-                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer min-w-[160px]"
+                        className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer min-w-[160px]"
                       >
                         <option value="">Tất cả dự án</option>
                         {projects.map(p => (
@@ -5878,11 +5922,11 @@ export default function FinanceManagement({
                       </select>
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Trạng thái</label>
+                      <label className="text-slate-500 font-bold text-[11px]">Trạng thái</label>
                       <select
                         value={poFilters.status}
                         onChange={(e) => updatePoFilter({ status: e.target.value })}
-                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-violet-500 cursor-pointer"
+                        className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer"
                       >
                         <option value="">Tất cả</option>
                         <option value="recorded">Đã ghi nhận công nợ</option>
@@ -5892,16 +5936,16 @@ export default function FinanceManagement({
                     <button
                       type="button"
                       onClick={() => { const y = new Date().getFullYear(); updatePoFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, supplier: '', status: '', project: '' }); }}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                      className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
                       title="Xóa bộ lọc"
                     >
-                      <X className="w-3.5 h-3.5" /> Reset
+                      <X className="w-4 h-4" /> Đặt lại
                     </button>
                   </div>
 
-                  <div className="overflow-x-auto text-[10.5px]">
-                    <table className="w-full text-left text-slate-300">
-                      <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
+                  <div className="hidden md:block overflow-x-auto text-[13px] bg-white border border-slate-200 rounded-2xl">
+                    <table className="w-full text-left text-slate-700">
+                      <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
                         <tr>
                           <th className="px-3 py-2.5 w-10 text-center">#</th>
                           <th className="px-3 py-2.5">Tên nhà cung cấp</th>
@@ -5922,14 +5966,14 @@ export default function FinanceManagement({
                           const expanded = poExpandedSuppliers.has(g.supplierName);
                           return (
                             <React.Fragment key={g.supplierName}>
-                              <tr className="border-b border-slate-800 bg-slate-800/40 hover:bg-slate-800/70 font-sans">
+                              <tr className="border-b border-slate-200 bg-slate-50 hover:bg-slate-100 font-sans">
                                 <td className="px-3 py-3 text-center font-mono text-slate-500">{gi + 1}</td>
                                 <td className="px-3 py-3">
                                   <div className="flex items-center gap-2">
                                     <button
                                       type="button"
                                       onClick={() => toggleSupplier(g.supplierName)}
-                                      className="text-slate-400 hover:text-white text-[10px] w-4 cursor-pointer"
+                                      className="text-slate-500 hover:text-slate-900 text-[12px] w-4 cursor-pointer"
                                       title={expanded ? 'Thu gọn' : 'Xem chi tiết'}
                                     >
                                       {expanded ? '▼' : '▶'}
@@ -5937,29 +5981,29 @@ export default function FinanceManagement({
                                     <button
                                       type="button"
                                       onClick={() => toggleSupplier(g.supplierName)}
-                                      className="font-extrabold text-white text-[13px] text-left hover:underline cursor-pointer"
+                                      className="font-extrabold text-slate-900 text-[13px] text-left hover:underline cursor-pointer"
                                       title="Click để xem chi tiết các đơn hàng"
                                     >
                                       {g.supplierName}
                                     </button>
-                                    <span className="text-[9px] text-slate-400">({g.orders.length} đơn)</span>
+                                    <span className="text-[11px] text-slate-500">({g.orders.length} đơn)</span>
                                   </div>
                                 </td>
                                 <td className="px-3 py-3">
                                   {(() => {
                                     const projs = Array.from(new Set((g.orders || []).map((o: any) => o.projectName).filter(Boolean)));
-                                    if (projs.length === 0) return <span className="text-slate-600 text-[9px] italic">—</span>;
-                                    return <span className="text-[10px] text-sky-400">🏗️ {projs.length} Dự Án</span>;
+                                    if (projs.length === 0) return <span className="text-slate-600 text-[11px] italic">—</span>;
+                                    return <span className="text-[12px] text-slate-600">🏗️ {projs.length} Dự Án</span>;
                                   })()}
                                 </td>
-                                <td className="px-3 py-3 text-right font-mono font-bold text-fuchsia-400">{(g.total).toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-[#0d47c9]">{(g.total).toLocaleString('vi-VN')} đ</td>
                                 <td className="px-3 py-3">
                                   {(() => {
                                     const total = g.orders.length;
                                     const recorded = g.orders.filter(o => isPoRecorded(o.id)).length;
                                     const all = total > 0 && recorded === total;
                                     return (
-                                      <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold border ${all ? 'bg-white text-emerald-700 border-emerald-600' : 'bg-white text-orange-600 border-orange-500'}`}>
+                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${all ? 'bg-white text-emerald-700 border-emerald-600' : 'bg-white text-orange-600 border-orange-500'}`}>
                                         Ghi nhận công nợ: {recorded}/{total}
                                       </span>
                                     );
@@ -5968,9 +6012,9 @@ export default function FinanceManagement({
                                 <td className="px-3 py-3">
                                   <div className="flex items-center justify-center">
                                     {g.settled ? (
-                                      <span className="text-emerald-500 text-[9px] italic font-bold">Đã khóa</span>
+                                      <span className="text-emerald-700 text-[11px] italic font-bold">Đã khóa</span>
                                     ) : (
-                                      <span className="text-slate-600 text-[9px] italic">—</span>
+                                      <span className="text-slate-600 text-[11px] italic">—</span>
                                     )}
                                   </div>
                                 </td>
@@ -5981,11 +6025,11 @@ export default function FinanceManagement({
                                 const isFromWarehouse = (o as any).fromWarehouse || o.supplierId === WAREHOUSE_SOURCE_ID;
                                 const fullyReturned = !recorded && isOrderFullyReturned(o);
                                 return (
-                                  <tr key={o.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
+                                  <tr key={o.id} className="border-b border-slate-200 bg-white hover:bg-slate-50 font-sans">
                                     <td className="px-3 py-2.5 text-center text-slate-600">—</td>
                                     <td className="px-3 py-2.5 pl-9">
-                                      <div className="font-semibold text-slate-200 text-[11px]">{o.id}</div>
-                                      <div className="text-[9px] text-slate-400 mt-0.5">Ngày: {(o.createdAt || '').slice(0, 10) || '—'}</div>
+                                      <div className="font-semibold text-slate-900 text-[11px]">{o.id}</div>
+                                      <div className="text-[11px] text-slate-500 mt-0.5">Ngày: {(o.createdAt || '').slice(0, 10) || '—'}</div>
                                       {(() => {
                                         const items = (o.items || (o as any).vatTuList || []) as any[];
                                         const first5 = items.slice(0, 5);
@@ -5993,42 +6037,21 @@ export default function FinanceManagement({
                                         const more = items.length - first5.length;
                                         const full = items.map((i: any) => `${poItemName(i)} × ${poItemQty(i)}`).join(', ');
                                         return (
-                                          <div className="text-[9px] text-slate-500 mt-1 leading-snug max-w-[16rem] truncate" title={full}>
+                                          <div className="text-[11px] text-slate-500 mt-1 leading-snug max-w-[16rem] truncate" title={full}>
                                             VT: {first5.map((i: any, k: number) => `${poItemName(i)} × ${poItemQty(i)}`).join(', ')}{more > 0 ? ` … (+${more})` : ''}
                                           </div>
                                         );
                                       })()}
                                     </td>
                                     <td className="px-3 py-2.5">
-                                      {o.projectName ? <span className="text-[10px] text-sky-400">🏗️ {o.projectName}</span> : <span className="text-slate-600 text-[9px] italic">—</span>}
+                                      {o.projectName ? <span className="text-[12px] text-slate-600">🏗️ {o.projectName}</span> : <span className="text-slate-600 text-[11px] italic">—</span>}
                                     </td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-bold text-fuchsia-400 text-[11px]">{(o.tongTien || 0).toLocaleString('vi-VN')} đ</td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-bold text-[#0d47c9] text-[11px]">{(o.tongTien || 0).toLocaleString('vi-VN')} đ</td>
                                     <td className="px-3 py-2.5">
-                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${poStatusToneClass(st.tone)}`}>{st.label}</span>
+                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${poStatusToneClass(st.tone)}`}>{st.label}</span>
                                     </td>
                                     <td className="px-3 py-2.5">
-                                      <div className="flex items-center justify-center gap-1.5">
-                                        <button type="button" onClick={() => setPoDetailModal({ open: true, order: o })} className="text-cyan-400 hover:text-cyan-300 p-1 border border-cyan-500/30 rounded cursor-pointer" title="Xem chi tiết"><Eye className="w-3.5 h-3.5" /></button>
-                                        {isFromWarehouse ? (
-                                          <span className="text-[9px] font-bold text-teal-600 border border-teal-500 bg-white px-2 py-1 rounded-lg" title="Đơn nội bộ xuất từ Kho có sẵn — không phát sinh công nợ">📦 Nội bộ (Kho)</span>
-                                        ) : recorded ? (
-                                          <>
-                                            <span className="text-[9px] font-bold text-amber-600 border border-amber-500 bg-white px-2 py-1 rounded-lg">Đã ghi nhận</span>
-                                            <button type="button" onClick={() => setPoUndoConfirm(o)} className="text-slate-400 hover:text-rose-400 p-1 border border-slate-700 hover:border-rose-500/50 rounded cursor-pointer transition-all" title="Hoàn tác ghi nhận công nợ (dùng khi nhập sai thông tin đơn hàng)">
-                                              <RefreshCcw className="w-3.5 h-3.5" />
-                                            </button>
-                                          </>
-                                        ) : fullyReturned ? (
-                                          <span className="text-[9px] font-bold text-rose-600 border border-rose-400 bg-white px-2 py-1 rounded-lg" title="Đơn hàng đã được trả lại toàn bộ hàng cho NCC — không phát sinh công nợ cần ghi nhận">↩️ Đã trả hết hàng</span>
-                                        ) : (
-                                          <button type="button" onClick={() => setPoRecordConfirm(o)} className="bg-white border border-orange-500 text-orange-500 hover:bg-orange-50 p-1.5 rounded-lg flex items-center justify-center cursor-pointer transition-all" title="Ghi nhận công nợ nhà cung cấp">
-                                            <Plus className="w-3.5 h-3.5" />
-                                          </button>
-                                        )}
-                                        {!recorded && !isFromWarehouse && (
-                                          <button type="button" onClick={() => handleDeletePoUnrecorded(o.id)} className="text-rose-400 hover:text-rose-300 p-1 border border-rose-500/30 rounded cursor-pointer" title="Xóa đơn hàng"><Trash2 className="w-3.5 h-3.5" /></button>
-                                        )}
-                                      </div>
+                                      {poActions(o)}
                                     </td>
                                   </tr>
                                 );
@@ -6038,11 +6061,11 @@ export default function FinanceManagement({
                         })}
                       </tbody>
                       <tfoot>
-                        <tr className="border-t-2 border-slate-700 bg-slate-900/80">
+                        <tr className="border-t-2 border-slate-200 bg-slate-50">
                           <td className="px-3 py-3"></td>
-                          <td className="px-3 py-3 text-[11px] font-bold text-slate-300 uppercase tracking-wider">Tổng cộng ({poGrandCount} đơn hàng)</td>
+                          <td className="px-3 py-3 text-[11px] font-bold text-slate-700 ">Tổng cộng ({poGrandCount} đơn hàng)</td>
                           <td className="px-3 py-3"></td>
-                          <td className="px-3 py-3 text-right font-mono font-black text-violet-400 text-base">{poGrandTotal.toLocaleString('vi-VN')} đ</td>
+                          <td className="px-3 py-3 text-right font-mono font-black text-[#0d47c9] text-base">{poGrandTotal.toLocaleString('vi-VN')} đ</td>
                           <td className="px-3 py-3"></td>
                           <td className="px-3 py-3"></td>
                         </tr>
@@ -6050,23 +6073,79 @@ export default function FinanceManagement({
                     </table>
                   </div>
 
+                  {/* ĐIỆN THOẠI (< md): mỗi nhà cung cấp 1 thẻ, bấm để mở danh sách đơn của NCC đó */}
+                  <div className="md:hidden space-y-2.5" data-testid="po-cards">
+                    {supplierGroups.length === 0 ? (
+                      <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-[13px] text-slate-500" data-testid="po-cards-empty">
+                        {purchaseOrders.length === 0 ? 'Chưa có đơn hàng nào. Đơn hàng xuất hiện ở đây khi đề xuất vật tư được nhận hàng.' : 'Không tìm thấy đơn hàng phù hợp với bộ lọc.'}
+                      </div>
+                    ) : pageGroups.map(g => {
+                      const expanded = poExpandedSuppliers.has(g.supplierName);
+                      const recordedCnt = g.orders.filter(o => isPoRecorded(o.id)).length;
+                      const allRecorded = g.orders.length > 0 && recordedCnt === g.orders.length;
+                      const projCnt = new Set((g.orders || []).map((o: any) => o.projectName).filter(Boolean)).size;
+                      return (
+                        <div key={g.supplierName} data-testid={`po-card-${g.supplierName}`} className="bg-white border border-slate-200 rounded-xl p-3">
+                          <button type="button" onClick={() => toggleSupplier(g.supplierName)} aria-expanded={expanded}
+                            className="w-full text-left cursor-pointer bg-transparent border-0 p-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="font-bold text-[13px] text-slate-900">{expanded ? '▼' : '▶'} {g.supplierName}</div>
+                                <div className="text-[12px] text-slate-500 mt-0.5">{g.orders.length} đơn{projCnt > 0 ? ` · ${projCnt} dự án` : ''}</div>
+                              </div>
+                              <span className="font-mono font-black text-[13px] whitespace-nowrap" style={{ color: '#0d47c9' }}>{g.total.toLocaleString('vi-VN')} đ</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${allRecorded ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>Ghi nhận công nợ: {recordedCnt}/{g.orders.length}</span>
+                              {g.settled && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border bg-slate-50 text-slate-600 border-slate-200">Đã khóa</span>}
+                            </div>
+                          </button>
+                          {expanded && (
+                            <div className="mt-3 pt-3 border-t border-slate-200 space-y-2.5">
+                              {g.orders.map((o: PurchaseOrder) => {
+                                const st = getPoRowStatus(o);
+                                return (
+                                  <div key={o.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 space-y-1.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="font-semibold text-[13px] text-slate-900">{o.id}</span>
+                                      <span className="font-mono font-bold text-[13px]" style={{ color: '#0d47c9' }}>{(o.tongTien || 0).toLocaleString('vi-VN')} đ</span>
+                                    </div>
+                                    <div className="text-[12px] text-slate-500">Ngày: {(o.createdAt || '').slice(0, 10) || '—'}{o.projectName ? ` · ${o.projectName}` : ''}</div>
+                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${poStatusToneClass(st.tone)}`}>{st.label}</span>
+                                      {poActions(o)}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
+                      <span className="text-[13px] font-bold text-slate-700">Tổng cộng ({poGrandCount} đơn hàng)</span>
+                      <span className="font-mono font-black text-[14px]" style={{ color: '#0d47c9' }}>{poGrandTotal.toLocaleString('vi-VN')} đ</span>
+                    </div>
+                  </div>
+
                   {/* Phân trang & Tổng cộng */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[12px] text-slate-500">
                     <div className="flex items-center gap-2">
                       <span>
-                        Tổng: <span className="text-violet-400 font-black font-mono">{poGrandCount}</span> đơn ·{' '}
-                        <span className="text-violet-400 font-black font-mono">{totalPages}</span> trang
+                        Tổng: <span className="text-[#0d47c9] font-black font-mono">{poGrandCount}</span> đơn ·{' '}
+                        <span className="text-[#0d47c9] font-black font-mono">{totalPages}</span> trang
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span>Dòng / trang:</span>
-                      <select value={poPageSize} onChange={(e) => { setPoPageSize(Number(e.target.value)); setPoPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                      <select value={poPageSize} onChange={(e) => { setPoPageSize(Number(e.target.value)); setPoPage(1); }} className="h-9 bg-white border border-slate-200 rounded-xl px-2 text-[13px] text-slate-800 outline-none cursor-pointer">
                         {[5, 10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
                         <option value={-1}>Tất cả</option>
                       </select>
-                      <button type="button" disabled={poPage <= 1} onClick={() => setPoPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
+                      <button type="button" disabled={poPage <= 1} onClick={() => setPoPage(p => Math.max(1, p - 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">‹ Trước</button>
                       <span>Trang {poPage} / {totalPages}</span>
-                      <button type="button" disabled={poPage >= totalPages} onClick={() => setPoPage(p => Math.min(totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
+                      <button type="button" disabled={poPage >= totalPages} onClick={() => setPoPage(p => Math.min(totalPages, p + 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">Sau ›</button>
                     </div>
                   </div>
 
@@ -6095,38 +6174,82 @@ export default function FinanceManagement({
                     const returnsTotalPages = returnsPageSize === -1 ? 1 : Math.max(1, Math.ceil(matchedReturns.length / returnsPageSize));
                     const returnsPageItems = returnsPageSize === -1 ? matchedReturns : matchedReturns.slice((returnsPage - 1) * returnsPageSize, returnsPage * returnsPageSize);
 
+
+                    // Cụm nút thao tác của 1 chứng từ trả hàng — dùng chung cho bảng (máy tính) và thẻ (điện thoại)
+                    const returnActions = (r: any, originPo: any, available: number, applied: number) => (
+                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                        <button
+                                          type="button"
+                                          onClick={() => { if (originPo) setPoDetailModal({ open: true, order: originPo }); else addToast({ title: 'ℹ️ Không tìm thấy', message: 'Đơn hàng gốc đã bị xóa.', type: 'info' }); }}
+                                          className="text-slate-600 hover:bg-slate-50 p-1.5 border border-slate-200 rounded-lg cursor-pointer"
+                                          title="Xem đơn hàng gốc"
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                        </button>
+                                        {available > 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => { setActiveSubTab('cong_no_phai_tra'); setSearchTerm(r.supplierName || ''); }}
+                                            style={{ background: '#0d47c9', color: '#ffffff' }} className="h-8 px-3 text-[12px] font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                                            title="Sang Công Nợ Trả để cấn trừ khoản này vào 1 đơn hàng"
+                                          >
+                                            <Undo2 className="w-3 h-3" /> Cấn trừ ngay
+                                          </button>
+                                        )}
+                                        {applied <= 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteSupplierReturnFromList(r)}
+                                            className="text-rose-600 hover:bg-rose-50 p-1.5 border border-rose-300 rounded-lg cursor-pointer"
+                                            title="Xóa chứng từ trả hàng"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                      </div>
+                    );
+
                     return (
                       <div className="space-y-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-850 pb-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
                           <div>
-                            <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block">
+                            <span className="font-extrabold text-slate-900 text-sm block">
                               Danh sách Đơn Hàng Trả (Trả Hàng NCC)
                             </span>
                           </div>
                         </div>
 
                         {/* Bộ lọc */}
-                        <div className="flex flex-wrap items-end gap-3 p-3 bg-slate-900/60 border border-slate-800 rounded-xl">
+                        <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-slate-500 font-bold text-[11px]">Tìm kiếm</label>
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input type="text" data-testid="return-search" placeholder="Mã chứng từ, NCC, đơn gốc…" value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="h-9 w-56 bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                      </div>
+                    </div>
                           <div className="flex flex-col gap-1">
-                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Từ ngày</label>
+                            <label className="text-slate-500 font-bold text-[11px]">Từ ngày</label>
                             <input
                               type="date"
                               value={returnFilters.fromDate}
                               onChange={(e) => updateReturnFilter({ fromDate: e.target.value })}
-                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer"
+                              className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer"
                             />
                           </div>
                           <div className="flex flex-col gap-1">
-                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Đến ngày</label>
+                            <label className="text-slate-500 font-bold text-[11px]">Đến ngày</label>
                             <input
                               type="date"
                               value={returnFilters.toDate}
                               onChange={(e) => updateReturnFilter({ toDate: e.target.value })}
-                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer"
+                              className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer"
                             />
                           </div>
                           <div className="flex flex-col gap-1 relative">
-                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Nhà Cung Cấp</label>
+                            <label className="text-slate-500 font-bold text-[11px]">Nhà Cung Cấp</label>
                             <input
                               type="text"
                               value={returnFilters.supplier}
@@ -6134,23 +6257,23 @@ export default function FinanceManagement({
                               onFocus={() => setReturnSupplierOpen(true)}
                               onBlur={() => setTimeout(() => setReturnSupplierOpen(false), 150)}
                               placeholder="Gõ để tìm NCC..."
-                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer w-48"
+                              className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer w-48"
                             />
                             {returnSupplierOpen && (
-                              <div className="absolute top-full left-0 z-30 mt-1 w-64 max-h-52 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1">
-                                <button type="button" onClick={() => { updateReturnFilter({ supplier: '' }); setReturnSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-white">Tất cả nhà cung cấp</button>
+                              <div className="absolute top-full left-0 z-30 mt-1 w-64 max-h-52 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl py-1">
+                                <button type="button" onClick={() => { updateReturnFilter({ supplier: '' }); setReturnSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[13px] text-slate-500 hover:bg-slate-50">Tất cả nhà cung cấp</button>
                                 {returnSupplierOptions.filter(s => s.toLowerCase().includes(returnFilters.supplier.toLowerCase())).map(s => (
-                                  <button key={s} type="button" onClick={() => { updateReturnFilter({ supplier: s }); setReturnSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[11px] text-slate-200 hover:bg-slate-800">{s}</button>
+                                  <button key={s} type="button" onClick={() => { updateReturnFilter({ supplier: s }); setReturnSupplierOpen(false); }} className="w-full text-left px-3 py-1.5 text-[13px] text-slate-900 hover:bg-slate-50">{s}</button>
                                 ))}
                               </div>
                             )}
                           </div>
                           <div className="flex flex-col gap-1">
-                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Dự án</label>
+                            <label className="text-slate-500 font-bold text-[11px]">Dự án</label>
                             <select
                               value={returnFilters.project}
                               onChange={(e) => updateReturnFilter({ project: e.target.value })}
-                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer min-w-[160px]"
+                              className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer min-w-[160px]"
                             >
                               <option value="">Tất cả dự án</option>
                               {projects.map(p => (
@@ -6159,11 +6282,11 @@ export default function FinanceManagement({
                             </select>
                           </div>
                           <div className="flex flex-col gap-1">
-                            <label className="text-slate-400 font-bold text-[9px] uppercase tracking-wide">Trạng thái cấn trừ</label>
+                            <label className="text-slate-500 font-bold text-[11px]">Trạng thái cấn trừ</label>
                             <select
                               value={returnFilters.status}
                               onChange={(e) => updateReturnFilter({ status: e.target.value })}
-                              className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-[11px] text-slate-100 outline-none focus:border-rose-500 cursor-pointer"
+                              className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer"
                             >
                               <option value="">Tất cả</option>
                               <option value="unused">Chưa cấn trừ</option>
@@ -6174,16 +6297,16 @@ export default function FinanceManagement({
                           <button
                             type="button"
                             onClick={() => setReturnFilters({ fromDate: '', toDate: '', supplier: '', project: '', status: '' })}
-                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all"
+                            className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
                             title="Xóa bộ lọc"
                           >
-                            <X className="w-3.5 h-3.5" /> Reset
+                            <X className="w-4 h-4" /> Đặt lại
                           </button>
                         </div>
 
-                        <div className="overflow-x-auto text-[10.5px]">
-                          <table className="w-full text-left text-slate-300">
-                            <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
+                        <div className="hidden md:block overflow-x-auto text-[13px] bg-white border border-slate-200 rounded-2xl">
+                          <table className="w-full text-left text-slate-700">
+                            <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
                               <tr>
                                 <th className="px-3 py-2.5 w-10 text-center">#</th>
                                 <th className="px-3 py-2.5">Mã chứng từ</th>
@@ -6211,89 +6334,101 @@ export default function FinanceManagement({
                                 const available = total - applied;
                                 const stat = applied <= 0 ? 'unused' : applied >= total ? 'full' : 'partial';
                                 const statLabel = stat === 'unused' ? 'Chưa cấn trừ' : stat === 'full' ? 'Đã cấn trừ hết' : 'Cấn trừ 1 phần';
-                                const statClass = stat === 'unused' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : stat === 'full' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+                                const statClass = stat === 'unused' ? 'bg-rose-50 text-rose-700 border-rose-200' : stat === 'full' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200';
                                 const originPo = purchaseOrders.find(p => p.id === r.purchaseOrderId);
                                 return (
-                                  <tr key={r.id} className="border-b border-slate-850/60 hover:bg-slate-900/40">
+                                  <tr key={r.id} className="border-b border-slate-200 hover:bg-slate-50">
                                     <td className="px-3 py-2.5 text-center text-slate-600">{(returnsPage - 1) * (returnsPageSize === -1 ? 0 : returnsPageSize) + ri + 1}</td>
-                                    <td className="px-3 py-2.5 font-semibold text-slate-200">{r.id}</td>
-                                    <td className="px-3 py-2.5 text-slate-300">{r.supplierName || '—'}</td>
+                                    <td className="px-3 py-2.5 font-semibold text-slate-900">{r.id}</td>
+                                    <td className="px-3 py-2.5 text-slate-700">{r.supplierName || '—'}</td>
                                     <td className="px-3 py-2.5">
-                                      <div className="text-slate-300">{r.purchaseOrderId || '—'}</div>
-                                      {r.projectName && <div className="text-[9px] text-sky-400">🏗️ {r.projectName}</div>}
+                                      <div className="text-slate-700">{r.purchaseOrderId || '—'}</div>
+                                      {r.projectName && <div className="text-[11px] text-slate-600">🏗️ {r.projectName}</div>}
                                     </td>
-                                    <td className="px-3 py-2.5 text-slate-400">{(r.createdAt || '').slice(0, 10) || '—'}</td>
-                                    <td className="px-3 py-2.5 text-slate-400 max-w-[14rem] truncate" title={r.reason}>{r.reason || '—'}</td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-bold text-rose-400">{total.toLocaleString('vi-VN')} đ</td>
-                                    <td className="px-3 py-2.5 text-right font-mono text-emerald-400">{applied.toLocaleString('vi-VN')} đ</td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-black text-slate-200">{available.toLocaleString('vi-VN')} đ</td>
+                                    <td className="px-3 py-2.5 text-slate-500">{(r.createdAt || '').slice(0, 10) || '—'}</td>
+                                    <td className="px-3 py-2.5 text-slate-500 max-w-[14rem] truncate" title={r.reason}>{r.reason || '—'}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-bold text-rose-600">{total.toLocaleString('vi-VN')} đ</td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-emerald-700">{applied.toLocaleString('vi-VN')} đ</td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-black text-slate-900">{available.toLocaleString('vi-VN')} đ</td>
                                     <td className="px-3 py-2.5">
-                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${statClass}`}>{statLabel}</span>
+                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statClass}`}>{statLabel}</span>
                                     </td>
                                     <td className="px-3 py-2.5">
-                                      <div className="flex items-center justify-center gap-1.5">
-                                        <button
-                                          type="button"
-                                          onClick={() => { if (originPo) setPoDetailModal({ open: true, order: originPo }); else addToast({ title: 'ℹ️ Không tìm thấy', message: 'Đơn hàng gốc đã bị xóa.', type: 'info' }); }}
-                                          className="text-cyan-400 hover:text-cyan-300 p-1 border border-cyan-500/30 rounded cursor-pointer"
-                                          title="Xem đơn hàng gốc"
-                                        >
-                                          <Eye className="w-3.5 h-3.5" />
-                                        </button>
-                                        {available > 0 && (
-                                          <button
-                                            type="button"
-                                            onClick={() => { setActiveSubTab('cong_no_phai_tra'); setSearchTerm(r.supplierName || ''); }}
-                                            className="bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap"
-                                            title="Sang Công Nợ Trả để cấn trừ khoản này vào 1 đơn hàng"
-                                          >
-                                            <Undo2 className="w-3 h-3" /> Cấn trừ ngay
-                                          </button>
-                                        )}
-                                        {applied <= 0 && (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleDeleteSupplierReturnFromList(r)}
-                                            className="text-rose-400 hover:text-rose-300 p-1 border border-rose-500/30 rounded cursor-pointer"
-                                            title="Xóa chứng từ trả hàng"
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </button>
-                                        )}
-                                      </div>
+                                      {returnActions(r, originPo, available, applied)}
                                     </td>
                                   </tr>
                                 );
                               })}
                             </tbody>
                             <tfoot>
-                              <tr className="border-t-2 border-slate-700 bg-slate-900/80">
+                              <tr className="border-t-2 border-slate-200 bg-slate-50">
                                 <td className="px-3 py-3" colSpan={6}></td>
-                                <td className="px-3 py-3 text-right font-mono font-black text-rose-400">{returnsGrandTotal.toLocaleString('vi-VN')} đ</td>
-                                <td className="px-3 py-3 text-right font-mono font-black text-emerald-400">{returnsGrandApplied.toLocaleString('vi-VN')} đ</td>
-                                <td className="px-3 py-3 text-right font-mono font-black text-slate-200">{returnsGrandAvailable.toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3 text-right font-mono font-black text-rose-600">{returnsGrandTotal.toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3 text-right font-mono font-black text-emerald-700">{returnsGrandApplied.toLocaleString('vi-VN')} đ</td>
+                                <td className="px-3 py-3 text-right font-mono font-black text-slate-900">{returnsGrandAvailable.toLocaleString('vi-VN')} đ</td>
                                 <td className="px-3 py-3" colSpan={2}></td>
                               </tr>
                             </tfoot>
                           </table>
                         </div>
 
-                        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
+                        {/* ĐIỆN THOẠI (< md): mỗi chứng từ trả hàng 1 thẻ */}
+                        <div className="md:hidden space-y-2.5" data-testid="return-cards">
+                          {matchedReturns.length === 0 ? (
+                            <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-[13px] text-slate-500">
+                              {supplierReturns.length === 0 ? 'Chưa có chứng từ trả hàng NCC nào. Tạo chứng từ ở Điều Phối Vật Tư (nút "Trả hàng NCC" trên đơn đã nhận hàng).' : 'Không tìm thấy chứng từ trả hàng phù hợp với bộ lọc.'}
+                            </div>
+                          ) : returnsPageItems.map((r: any) => {
+                            const applied = r.appliedAmount || 0;
+                            const total = r.totalAmount || 0;
+                            const available = total - applied;
+                            const stat = applied <= 0 ? 'unused' : applied >= total ? 'full' : 'partial';
+                            const statLabel = stat === 'unused' ? 'Chưa cấn trừ' : stat === 'full' ? 'Đã cấn trừ hết' : 'Cấn trừ 1 phần';
+                            const statClass = stat === 'unused' ? 'bg-rose-50 text-rose-700 border-rose-200' : stat === 'full' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200';
+                            const originPo = purchaseOrders.find(p => p.id === r.purchaseOrderId);
+                            return (
+                              <div key={r.id} data-testid={`return-card-${r.id}`} className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-[13px] text-slate-900">{r.id}</span>
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statClass}`}>{statLabel}</span>
+                                </div>
+                                <div>
+                                  <div className="text-[13px] font-bold text-slate-900">{r.supplierName || '—'}</div>
+                                  <div className="text-[12px] text-slate-500">Đơn gốc: {r.purchaseOrderId || '—'}{r.projectName ? ` · ${r.projectName}` : ''} · {(r.createdAt || '').slice(0, 10) || '—'}</div>
+                                  {r.reason && <div className="text-[12px] text-slate-500 mt-0.5">Lý do: {r.reason}</div>}
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-[12px]">
+                                  <div><div className="text-slate-500">Tiền trả</div><div className="font-mono font-bold text-rose-600">{total.toLocaleString('vi-VN')}</div></div>
+                                  <div><div className="text-slate-500">Đã cấn trừ</div><div className="font-mono font-bold text-emerald-700">{applied.toLocaleString('vi-VN')}</div></div>
+                                  <div><div className="text-slate-500">Khả dụng</div><div className="font-mono font-black text-slate-900">{available.toLocaleString('vi-VN')}</div></div>
+                                </div>
+                                <div className="pt-2 border-t border-slate-200">{returnActions(r, originPo, available, applied)}</div>
+                              </div>
+                            );
+                          })}
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 grid grid-cols-3 gap-2 text-[12px]">
+                            <div><div className="text-slate-500">Tổng tiền trả</div><div className="font-mono font-black text-rose-600">{returnsGrandTotal.toLocaleString('vi-VN')}</div></div>
+                            <div><div className="text-slate-500">Đã cấn trừ</div><div className="font-mono font-black text-emerald-700">{returnsGrandApplied.toLocaleString('vi-VN')}</div></div>
+                            <div><div className="text-slate-500">Còn khả dụng</div><div className="font-mono font-black text-slate-900">{returnsGrandAvailable.toLocaleString('vi-VN')}</div></div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[12px] text-slate-500">
                           <div className="flex items-center gap-2">
                             <span>
-                              Tổng: <span className="text-rose-400 font-black font-mono">{matchedReturns.length}</span> chứng từ ·{' '}
-                              <span className="text-rose-400 font-black font-mono">{returnsTotalPages}</span> trang
+                              Tổng: <span className="text-rose-600 font-black font-mono">{matchedReturns.length}</span> chứng từ ·{' '}
+                              <span className="text-rose-600 font-black font-mono">{returnsTotalPages}</span> trang
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span>Dòng / trang:</span>
-                            <select value={returnsPageSize} onChange={(e) => { setReturnsPageSize(Number(e.target.value)); setReturnsPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                            <select value={returnsPageSize} onChange={(e) => { setReturnsPageSize(Number(e.target.value)); setReturnsPage(1); }} className="h-9 bg-white border border-slate-200 rounded-xl px-2 text-[13px] text-slate-800 outline-none cursor-pointer">
                               {[5, 10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
                               <option value={-1}>Tất cả</option>
                             </select>
-                            <button type="button" disabled={returnsPage <= 1} onClick={() => setReturnsPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
+                            <button type="button" disabled={returnsPage <= 1} onClick={() => setReturnsPage(p => Math.max(1, p - 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">‹ Trước</button>
                             <span>Trang {returnsPage} / {returnsTotalPages}</span>
-                            <button type="button" disabled={returnsPage >= returnsTotalPages} onClick={() => setReturnsPage(p => Math.min(returnsTotalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
+                            <button type="button" disabled={returnsPage >= returnsTotalPages} onClick={() => setReturnsPage(p => Math.min(returnsTotalPages, p + 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">Sau ›</button>
                           </div>
                         </div>
                       </div>
@@ -11045,22 +11180,22 @@ export default function FinanceManagement({
         const displayTong = editing ? (poEditItems || []).reduce((s: number, it: any) => s + (poItemTotal(it) || 0), 0) : (o.tongTien || 0);
         return (
           <div
-            className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            className="fixed inset-0 z-[9600] flex items-center justify-center p-4 bg-black/50"
             onClick={() => setPoDetailModal({ open: false, order: null })}
           >
             <div
-              className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+              className="w-full max-w-3xl bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-5 h-5 text-violet-400" />
-                  <span className="font-black text-sm text-white uppercase">Chi tiết đơn hàng {o.id}</span>
+                  <ShoppingCart className="w-5 h-5 text-[#0d47c9]" />
+                  <span className="font-extrabold text-sm text-slate-900">Chi tiết đơn hàng {o.id}</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setPoDetailModal({ open: false, order: null })}
-                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                  className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
                 >
                   ✕
                 </button>
@@ -11068,34 +11203,34 @@ export default function FinanceManagement({
               <div className="p-5 space-y-4 max-h-[85vh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Mã Đề Xuất</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{o.proposalCode || '—'}</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Mã Đề Xuất</label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-900">{o.proposalCode || '—'}</div>
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{o.supplierName || '—'}</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Nhà cung cấp</label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-900">{o.supplierName || '—'}</div>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Dự án / Công trình</label>
-                  <div className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-sky-300 cursor-default">{o.projectName || '— Chưa gắn dự án —'}</div>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Dự án / Công trình</label>
+                  <div className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-sky-300 cursor-default">{o.projectName || '— Chưa gắn dự án —'}</div>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
-                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold border ${poStatusToneClass(st.tone)}`}>{st.label}</span>
-                  <span className="text-[10px] text-slate-500">Ngày tạo: {(o.createdAt || '').slice(0, 10) || '—'}</span>
+                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${poStatusToneClass(st.tone)}`}>{st.label}</span>
+                  <span className="text-[12px] text-slate-500">Ngày tạo: {(o.createdAt || '').slice(0, 10) || '—'}</span>
                 </div>
                 {recorded && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-amber-700 text-[10px] font-semibold">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-amber-700 text-[12px] font-semibold">
                     Đơn hàng đã ghi nhận vào Công nợ Trả — không thể sửa đơn giá hay xóa.
                   </div>
                 )}
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">
-                    Danh mục vật tư {editing && <span className="text-amber-400 ml-1">(đang sửa đơn giá)</span>}
+                  <label className="block text-slate-400 font-bold text-[12px] ">
+                    Danh mục vật tư {editing && <span className="text-[#0d47c9] ml-1">(đang sửa đơn giá)</span>}
                   </label>
-                  <div className="border border-slate-700 rounded-xl overflow-hidden">
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
                     <table className="w-full text-left">
-                      <thead className="bg-slate-800/80 text-slate-400 font-bold text-[9px] uppercase">
+                      <thead className="bg-slate-100 text-slate-500 font-bold text-[11px]">
                         <tr>
                           <th className="px-2 py-1.5 w-7 text-center">#</th>
                           <th className="px-2 py-1.5">Tên mặt hàng</th>
@@ -11108,18 +11243,18 @@ export default function FinanceManagement({
                         {(displayItems || []).length === 0 ? (
                           <tr><td colSpan={5} className="px-2 py-4 text-center text-[11px] text-slate-500">Đơn hàng chưa có vật tư.</td></tr>
                         ) : (displayItems || []).map((it: any, idx: number) => (
-                          <tr key={idx} className="border-t border-slate-800">
-                            <td className="px-2 py-2 text-center text-[10px] text-slate-500 font-mono">{idx + 1}</td>
-                            <td className="px-2 py-2 text-[11px] font-semibold text-slate-200">{poItemName(it)} <span className="text-[9px] text-slate-500">{poItemUnit(it)}</span></td>
-                            <td className="px-2 py-2 text-right text-[10px] font-mono text-slate-300">{poItemQty(it)}</td>
+                          <tr key={idx} className="border-t border-slate-200">
+                            <td className="px-2 py-2 text-center text-[12px] text-slate-500 font-mono">{idx + 1}</td>
+                            <td className="px-2 py-2 text-[11px] font-semibold text-slate-900">{poItemName(it)} <span className="text-[11px] text-slate-500">{poItemUnit(it)}</span></td>
+                            <td className="px-2 py-2 text-right text-[12px] font-mono text-slate-700">{poItemQty(it)}</td>
                             <td className="px-2 py-2 text-right">
                               {editing ? (
                                 <PoPriceEditInput value={poItemPrice(it)} onCommit={(v) => handlePoItemPriceChange(idx, 'donGia', v)} />
                               ) : (
-                                <span className="text-[10px] font-mono font-bold text-fuchsia-400">{poItemPrice(it).toLocaleString('vi-VN')} đ</span>
+                                <span className="text-[12px] font-mono font-bold text-[#0d47c9]">{poItemPrice(it).toLocaleString('vi-VN')} đ</span>
                               )}
                             </td>
-                            <td className="px-2 py-2 text-right text-[10px] font-mono font-bold text-fuchsia-400">{(poItemTotal(it) || 0).toLocaleString('vi-VN')} đ</td>
+                            <td className="px-2 py-2 text-right text-[12px] font-mono font-bold text-[#0d47c9]">{(poItemTotal(it) || 0).toLocaleString('vi-VN')} đ</td>
                           </tr>
                         ))}
                       </tbody>
@@ -11127,14 +11262,14 @@ export default function FinanceManagement({
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Tổng tiền</label>
-                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm font-extrabold text-fuchsia-400">{displayTong.toLocaleString('vi-VN')} đ</div>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Tổng tiền</label>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-extrabold text-[#0d47c9]">{displayTong.toLocaleString('vi-VN')} đ</div>
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Ghi chú</label>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Ghi chú</label>
                     {!recorded && !poNotesEditing && (
-                      <button type="button" onClick={() => { setPoNotesEdit(o.notes || ''); setPoNotesEditing(true); }} className="text-[10px] text-sky-400 hover:text-sky-300 cursor-pointer">Sửa</button>
+                      <button type="button" onClick={() => { setPoNotesEdit(o.notes || ''); setPoNotesEditing(true); }} className="text-[12px] text-sky-400 hover:text-sky-300 cursor-pointer">Sửa</button>
                     )}
                   </div>
                   {poNotesEditing ? (
@@ -11143,34 +11278,34 @@ export default function FinanceManagement({
                         value={poNotesEdit}
                         onChange={(e) => setPoNotesEdit(e.target.value)}
                         rows={3}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-sky-500 resize-none"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-900 outline-none focus:border-[#0d47c9] resize-none"
                         placeholder="Nhập ghi chú đơn hàng..."
                       />
                       <div className="flex gap-2">
-                        <button type="button" onClick={handleSavePoNotes} className="flex-1 bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-black py-2 rounded-lg cursor-pointer transition-all">Lưu ghi chú</button>
-                        <button type="button" onClick={() => { setPoNotesEditing(false); setPoNotesEdit(''); }} className="bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold px-3 py-2 rounded-lg cursor-pointer transition-all">Hủy</button>
+                        <button type="button" onClick={handleSavePoNotes} style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">Lưu ghi chú</button>
+                        <button type="button" onClick={() => { setPoNotesEditing(false); setPoNotesEdit(''); }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Hủy</button>
                       </div>
                     </div>
                   ) : (
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-300 whitespace-pre-line min-h-[2.5rem]">{o.notes || <span className="text-slate-600 italic">Chưa có ghi chú</span>}</div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-700 whitespace-pre-line min-h-[2.5rem]">{o.notes || <span className="text-slate-600 italic">Chưa có ghi chú</span>}</div>
                   )}
                 </div>
               </div>
-              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex flex-wrap items-center gap-2">
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center gap-2">
                 {!recorded && (
                   editing ? (
                     <div className="flex flex-1 gap-2">
                       <button
                         type="button"
                         onClick={handleSavePoPrices}
-                        className="flex-1 bg-amber-500 hover:bg-amber-400 text-black text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                        style={{ background: '#0d47c9', color: '#ffffff' }} className="flex-1 h-9 px-3 text-[13px] font-bold rounded-xl inline-flex items-center justify-center gap-1 cursor-pointer"
                       >
                         <Check className="w-3.5 h-3.5" /> Lưu đơn giá
                       </button>
                       <button
                         type="button"
                         onClick={() => { setPoEditId(null); setPoEditItems([]); }}
-                        className="flex-1 bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
+                        className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
                       >
                         Hủy sửa
                       </button>
@@ -11181,7 +11316,7 @@ export default function FinanceManagement({
                         <button
                           type="button"
                           onClick={() => openPoPriceEdit(o)}
-                          className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black py-2.5 px-3 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                          style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Edit className="w-3.5 h-3.5" /> Sửa đơn giá
                         </button>
@@ -11190,7 +11325,7 @@ export default function FinanceManagement({
                         <button
                           type="button"
                           onClick={() => { setPoDetailModal({ open: false, order: null }); handleDeletePoUnrecorded(o.id); }}
-                          className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-extrabold px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                          style={{ background: '#e11d48', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" /> Xóa
                         </button>
@@ -11199,24 +11334,24 @@ export default function FinanceManagement({
                         type="button"
                         onClick={() => { if (onOpenMaterialProposal && o.proposalId) onOpenMaterialProposal(o.proposalId); }}
                         disabled={!o.proposalId}
-                        className="bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-black px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         title={o.proposalId ? 'Mở chi tiết Đề Xuất Vật Tư' : 'Đơn này không liên kết Đề Xuất'}
                       >
                         <ExternalLink className="w-3.5 h-3.5" /> Chi tiết đơn hàng
                       </button>
                       {isFromWarehouse ? (
-                        <span className="bg-teal-50 border border-teal-200 text-teal-700 text-[10px] font-bold px-3 py-2.5 rounded-xl flex items-center gap-1" title="Đơn nội bộ xuất từ Kho có sẵn — không phát sinh công nợ">
+                        <span className="bg-teal-50 border border-teal-200 text-teal-700 text-[12px] font-bold px-3 py-2.5 rounded-xl flex items-center gap-1" title="Đơn nội bộ xuất từ Kho có sẵn — không phát sinh công nợ">
                           📦 Đơn nội bộ (Kho) — không công nợ
                         </span>
                       ) : fullyReturned ? (
-                        <span className="bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold px-3 py-2.5 rounded-xl flex items-center gap-1" title="Đơn hàng đã được trả lại toàn bộ hàng cho NCC — không phát sinh công nợ cần ghi nhận">
+                        <span className="bg-rose-50 border border-rose-200 text-rose-700 text-[12px] font-bold px-3 py-2.5 rounded-xl flex items-center gap-1" title="Đơn hàng đã được trả lại toàn bộ hàng cho NCC — không phát sinh công nợ cần ghi nhận">
                           ↩️ Đã trả hết hàng — không công nợ
                         </span>
                       ) : (
                         <button
                           type="button"
                           onClick={() => { setPoDetailModal({ open: false, order: null }); setPoRecordConfirm(o); }}
-                          className="bg-orange-500 hover:bg-orange-400 text-white text-[11px] font-black px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                          style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-3 text-[13px] font-bold rounded-xl inline-flex items-center justify-center gap-1 cursor-pointer"
                           title="Ghi nhận công nợ nhà cung cấp"
                         >
                           <Plus className="w-3.5 h-3.5" /> Ghi nhận Công nợ
@@ -11227,13 +11362,13 @@ export default function FinanceManagement({
                 )}
                 {recorded && (
                   <div className="flex items-center gap-2 flex-1">
-                    <span className="text-[10px] font-semibold text-amber-300 flex items-center gap-1">
+                    <span className="text-[12px] font-semibold text-amber-700 flex items-center gap-1">
                       <Check className="w-3.5 h-3.5" /> Đã ghi nhận Công nợ Trả
                     </span>
                     <button
                       type="button"
                       onClick={() => { setPoDetailModal({ open: false, order: null }); setPoUndoConfirm(o); }}
-                      className="ml-auto bg-slate-700 hover:bg-rose-600 text-white text-[11px] font-bold px-3 py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                      style={{ background: '#e11d48', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                       title="Hoàn tác ghi nhận công nợ (dùng khi nhập sai thông tin đơn hàng)"
                     >
                       <RefreshCcw className="w-3.5 h-3.5" /> Hoàn tác
@@ -11243,7 +11378,7 @@ export default function FinanceManagement({
                 <button
                   type="button"
                   onClick={() => setPoDetailModal({ open: false, order: null })}
-                  className="ml-auto bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold px-4 py-2.5 rounded-xl cursor-pointer transition-all"
+                  className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
                 >
                   Đóng
                 </button>
@@ -11260,22 +11395,22 @@ export default function FinanceManagement({
         const amount = ro.congNo || ro.tongTien || 0;
         return (
           <div
-            className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/50"
             onClick={() => setPoRecordConfirm(null)}
           >
             <div
-              className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+              className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-orange-400" />
-                  <span className="font-black text-sm text-white uppercase">Xác nhận ghi nhận công nợ</span>
+                  <AlertTriangle className="w-5 h-5 text-[#0d47c9]" />
+                  <span className="font-extrabold text-sm text-slate-900">Xác nhận ghi nhận công nợ</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setPoRecordConfirm(null)}
-                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                  className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
                 >
                   ✕
                 </button>
@@ -11283,43 +11418,43 @@ export default function FinanceManagement({
               <div className="p-5 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Mã đơn hàng</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{ro.id}</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Mã đơn hàng</label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-900">{ro.id}</div>
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền ghi nhận</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-orange-600">{amount.toLocaleString('vi-VN')} đ</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Số tiền ghi nhận</label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-black text-[#0d47c9]">{amount.toLocaleString('vi-VN')} đ</div>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp</label>
-                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{ro.supplierName || '—'}</div>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Nhà cung cấp</label>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-900">{ro.supplierName || '—'}</div>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Dự án</label>
-                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-sky-600">{ro.projectName || '— Chưa gắn dự án —'}</div>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Dự án</label>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-700">{ro.projectName || '— Chưa gắn dự án —'}</div>
                 </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-amber-700 text-[10px] font-semibold">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-amber-700 text-[12px] font-semibold">
                   ⚠️ Hãy kiểm tra lại số tiền trước khi ghi nhận vào Công nợ Trả.
                 </div>
                 {!active && (
-                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-700 text-[10px] font-semibold">
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-700 text-[12px] font-semibold">
                     ⚠️ Đơn hàng <b>{ro.status === 'cancelled' ? 'đã bị hủy' : 'chưa hoạt động (Nháp)'}</b>. Ghi nhận công nợ cho đơn chưa xác nhận có thể dẫn tới sai lệch sổ sách.
                   </div>
                 )}
               </div>
-              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex items-center gap-2">
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => { setPoRecordConfirm(null); }}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
+                  className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
                 >
                   Hủy
                 </button>
                 <button
                   type="button"
                   onClick={async () => { setPoRecordConfirm(null); await handleRecordSupplierDebt(ro); }}
-                  className={`flex-1 text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all ${active ? 'bg-orange-500 hover:bg-orange-400 text-white' : 'bg-amber-500 hover:bg-amber-400 text-black'}`}
+                  style={{ background: '#0d47c9', color: '#ffffff' }} className="flex-1 h-9 px-3 text-[13px] font-bold rounded-xl inline-flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" /> {active ? 'Xác nhận ghi nhận' : 'Vẫn ghi nhận'}
                 </button>
@@ -11335,22 +11470,22 @@ export default function FinanceManagement({
         const amount = ro.congNo || ro.tongTien || 0;
         return (
           <div
-            className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/50"
             onClick={() => setPoUndoConfirm(null)}
           >
             <div
-              className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+              className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-rose-400" />
-                  <span className="font-black text-sm text-white uppercase">Xác nhận hoàn tác ghi nhận công nợ</span>
+                  <AlertTriangle className="w-5 h-5 text-[#0d47c9]" />
+                  <span className="font-extrabold text-sm text-slate-900">Xác nhận hoàn tác ghi nhận công nợ</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setPoUndoConfirm(null)}
-                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                  className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
                 >
                   ✕
                 </button>
@@ -11358,34 +11493,34 @@ export default function FinanceManagement({
               <div className="p-5 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Mã đơn hàng</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{ro.id}</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Mã đơn hàng</label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-900">{ro.id}</div>
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền đã ghi nhận</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-600">{amount.toLocaleString('vi-VN')} đ</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Số tiền đã ghi nhận</label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-black text-rose-600">{amount.toLocaleString('vi-VN')} đ</div>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp</label>
-                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{ro.supplierName || '—'}</div>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Nhà cung cấp</label>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-900">{ro.supplierName || '—'}</div>
                 </div>
-                <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-700 text-[10px] font-semibold">
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-700 text-[12px] font-semibold">
                   ⚠️ Đơn hàng sẽ gỡ khỏi Công nợ Trả của {ro.supplierName || 'NCC'} và quay về trạng thái "Chưa ghi nhận". Dùng khi lỡ ghi nhận nhầm (vd nhập sai thông tin đơn hàng).
                 </div>
               </div>
-              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex items-center gap-2">
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => { setPoUndoConfirm(null); }}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
+                  className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
                 >
                   Hủy
                 </button>
                 <button
                   type="button"
                   onClick={async () => { setPoUndoConfirm(null); await handleUndoSupplierDebt(ro); }}
-                  className="flex-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                  style={{ background: '#e11d48', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <RefreshCcw className="w-3.5 h-3.5" /> Xác nhận hoàn tác
                 </button>
@@ -11404,22 +11539,22 @@ export default function FinanceManagement({
         const invalid = amount <= 0 || amount > balance + 1 || amount > congNo + 1;
         return (
           <div
-            className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            className="fixed inset-0 z-[9700] flex items-center justify-center p-4 bg-black/50"
             onClick={() => setApplyCreditModal({ open: false, order: null })}
           >
             <div
-              className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+              className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Undo2 className="w-5 h-5 text-rose-400" />
-                  <span className="font-black text-sm text-white uppercase">Cấn trừ nợ bằng NCC Nợ (trả hàng)</span>
+                  <Undo2 className="w-5 h-5 text-[#0d47c9]" />
+                  <span className="font-extrabold text-sm text-slate-900">Cấn trừ nợ bằng NCC Nợ (trả hàng)</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setApplyCreditModal({ open: false, order: null })}
-                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                  className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
                 >
                   ✕
                 </button>
@@ -11427,41 +11562,41 @@ export default function FinanceManagement({
               <div className="p-5 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Đơn hàng</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{order.id}</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Đơn hàng</label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-900">{order.id}</div>
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Công nợ còn lại</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-400">{congNo.toLocaleString('vi-VN')} đ</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Công nợ còn lại</label>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-black text-rose-600">{congNo.toLocaleString('vi-VN')} đ</div>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp</label>
-                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{order.supplierName || '—'}</div>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Nhà cung cấp</label>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-900">{order.supplierName || '—'}</div>
                 </div>
-                <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-700 text-[10px] font-semibold">
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-700 text-[12px] font-semibold">
                   ↩️ NCC Nợ (trả hàng) khả dụng: {balance.toLocaleString('vi-VN')} đ
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền cấn trừ</label>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Số tiền cấn trừ</label>
                   <input
                     type="number"
                     min={0}
                     max={Math.min(balance, congNo)}
                     value={applyCreditAmount}
                     onChange={(e) => setApplyCreditAmount(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white font-bold text-sm outline-none focus:border-rose-500"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-900 font-bold text-sm outline-none focus:border-[#0d47c9]"
                   />
                 </div>
                 <p className="text-[9.5px] text-slate-500 italic">
                   Tương đương ghi nhận "thanh toán không dùng tiền mặt" — công nợ đơn hàng này giảm đúng số tiền cấn trừ, không tạo phiếu chi.
                 </p>
               </div>
-              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex items-center gap-2">
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setApplyCreditModal({ open: false, order: null })}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold py-2.5 rounded-xl cursor-pointer transition-all"
+                  className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
                 >
                   Hủy
                 </button>
@@ -11469,7 +11604,7 @@ export default function FinanceManagement({
                   type="button"
                   onClick={applySupplierCredit}
                   disabled={invalid}
-                  className={`flex-1 ${invalid ? 'opacity-50 cursor-not-allowed bg-rose-600' : 'bg-rose-600 hover:bg-rose-500 cursor-pointer'} text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 transition-all`}
+                  style={{ background: '#e11d48', color: '#ffffff' }} className={`flex-1 h-9 px-3 text-[13px] font-bold rounded-xl inline-flex items-center justify-center gap-1 ${invalid ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                   <Undo2 className="w-3.5 h-3.5" /> Xác nhận cấn trừ
                 </button>
@@ -11488,74 +11623,74 @@ export default function FinanceManagement({
             onClick={() => setPoSupplierPay({ open: false, supplierName: '', max: 0 })}
           >
             <div
-              className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+              className="w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Circle className="w-5 h-5 text-rose-400" />
-                  <span className="font-black text-sm text-white uppercase">Tạo phiếu chi — {poSupplierPay.supplierName}</span>
+                  <Circle className="w-5 h-5 text-rose-600" />
+                  <span className="font-extrabold text-sm text-slate-900">Tạo phiếu chi — {poSupplierPay.supplierName}</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setPoSupplierPay({ open: false, supplierName: '', max: 0 })}
-                  className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 w-7 h-7 rounded-full flex items-center justify-center transition-colors"
+                  className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 w-7 h-7 rounded-lg cursor-pointer flex items-center justify-center"
                 >
                   ✕
                 </button>
               </div>
               <div className="p-5 space-y-4">
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Nhà cung cấp (thụ hưởng)</label>
-                  <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-bold text-slate-100">{poSupplierPay.supplierName || '—'}</div>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Nhà cung cấp (thụ hưởng)</label>
+                  <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-900">{poSupplierPay.supplierName || '—'}</div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Còn lại phải trả</label>
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs font-black text-rose-400">{remaining.toLocaleString('vi-VN')} đ</div>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Còn lại phải trả</label>
+                    <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-rose-600">{remaining.toLocaleString('vi-VN')} đ</div>
                   </div>
                   <div className="space-y-1">
-                    <label className="block text-slate-400 font-bold text-[10px] uppercase">Ngày lập</label>
+                    <label className="block text-slate-400 font-bold text-[12px] ">Ngày lập</label>
                     <input
                       type="date"
                       value={poPaymentDate}
                       onChange={(e) => setPoPaymentDate(e.target.value)}
-                      className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full"
+                      className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0d47c9] w-full"
                     />
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Số tiền thanh toán (đ) *</label>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Số tiền thanh toán (đ) *</label>
                   <input
                     type="number"
                     value={poPaymentAmount}
                     onChange={(e) => setPoPaymentAmount(e.target.value)}
-                    className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-sm text-slate-100 outline-none focus:border-rose-500 w-full font-mono font-bold"
+                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#0d47c9] w-full font-mono font-bold"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Hình thức thanh toán</label>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Hình thức thanh toán</label>
                   <select
                     value={poPaymentMethod}
                     onChange={(e) => setPoPaymentMethod(e.target.value as 'cash' | 'transfer')}
-                    className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full cursor-pointer"
+                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0d47c9] w-full cursor-pointer"
                   >
                     <option value="transfer">Chuyển khoản</option>
                     <option value="cash">Tiền mặt</option>
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="block text-slate-400 font-bold text-[10px] uppercase">Ghi chú</label>
+                  <label className="block text-slate-400 font-bold text-[12px] ">Ghi chú</label>
                   <textarea
                     value={poPaymentNote}
                     onChange={(e) => setPoPaymentNote(e.target.value)}
                     rows={2}
                     placeholder={`Thanh toán nhà cung cấp ${poSupplierPay.supplierName}`}
-                    className="bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 outline-none focus:border-rose-500 w-full resize-none"
+                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 outline-none focus:border-[#0d47c9] w-full resize-none"
                   />
                 </div>
               </div>
-              <div className="p-4 bg-slate-800/60 border-t border-slate-800 flex gap-2">
+              <div className="p-4 bg-white border-t border-slate-200 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setPoSupplierPay({ open: false, supplierName: '', max: 0 })}
@@ -11566,7 +11701,7 @@ export default function FinanceManagement({
                 <button
                   type="button"
                   onClick={handleCreateSupplierPayment}
-                  className="flex-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"
+                  style={{ background: '#0d47c9', color: '#ffffff' }} className="flex-1 h-9 px-3 text-[13px] font-bold rounded-xl inline-flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <Circle className="w-3.5 h-3.5" /> Tạo phiếu chi
                 </button>
