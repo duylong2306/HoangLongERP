@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
 import { SupplierPartner } from '../types';
+import TablePagination, { usePagination } from './TablePagination';
 import {
   Search, Plus, Trash2, Edit2, Check, X,
   Phone, Mail, MapPin, DollarSign, FileText, AlertCircle, RefreshCw,
@@ -382,6 +383,9 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
 
   const [fieldFilter, setFieldFilter] = useState('all');
   const supFields = Array.from(new Set(suppliers.map(s => (s.field || '').trim()).filter(Boolean))).sort();
+  // Phân trang danh sách nhà cung cấp (số dòng/trang + chuyển trang); đổi bộ lọc/tìm kiếm → về trang 1
+  const pg = usePagination(10);
+  useEffect(() => { pg.reset(); }, [searchTerm, fieldFilter]); // eslint-disable-line react-hooks/exhaustive-deps
   const filtered = suppliers.filter(s => {
     const matchSearch =
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -737,7 +741,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
                   </td>
                 </tr>
               ) : (
-                filtered.map((s) => {
+                pg.slice(filtered).map((s) => {
                   const currentDebt = s.debt || 0;
                   const openDebt = s.openingDebt || 0;
                   return (
@@ -781,6 +785,7 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
             </tbody>
           </table>
         </div>
+        {filtered.length > 0 && <TablePagination {...pg.props(filtered.length)} unit="nhà cung cấp" testId="supplier-pager" />}
         {selectedRows.size > 0 && (
           <div className="bg-slate-950 px-4 py-2 border-t border-slate-850 flex items-center gap-2 text-[10px]">
             <span className="text-amber-500 font-bold">Đã chọn: {selectedRows.size}</span>

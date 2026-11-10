@@ -1,4 +1,5 @@
 import React from 'react';
+import TablePagination, { usePagination } from '../../TablePagination';
 import { Plus, CheckCircle, Clock, Download, Pencil, Trash2, X } from 'lucide-react';
 import { EmployeeErrorLog } from '../hrTypes';
 import { calculateScoreFromErrorCount } from '../hrCalculations';
@@ -244,6 +245,17 @@ export default function PerformanceTab({
     filteredErrors.forEach(e => { const k = e.date || ''; map.set(k, [...(map.get(k) || []), e]); });
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
   }, [filteredErrors]);
+  // Phân trang nhật ký: cắt theo SỐ LỖI (không theo ngày) rồi gom lại theo ngày để vẫn đọc theo dòng thời gian
+  const logPg = usePagination(10);
+  const flatLog = React.useMemo(() => logGroups.flatMap(([, items]) => items), [logGroups]);
+  const pagedLogGroups = React.useMemo(() => {
+    const pageItems = logPg.slice(flatLog);
+    const map = new Map<string, EmployeeErrorLog[]>();
+    pageItems.forEach(e => { const k = e.date || ''; map.set(k, [...(map.get(k) || []), e]); });
+    return Array.from(map.entries());
+  }, [flatLog, logPg.page, logPg.pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Đổi bộ lọc (số lỗi thay đổi) → về trang 1
+  React.useEffect(() => { logPg.reset(); }, [filteredErrors.length]); // eslint-disable-line react-hooks/exhaustive-deps
   // Vạch màu bên trái thẻ lỗi theo loại lỗi
   const catAccent = (cat: string) => cat === 'readiness' ? '#0ea5e9' : cat === 'progress' ? '#8b5cf6' : cat === 'reporting' ? '#f59e0b' : '#94a3b8';
 
@@ -421,7 +433,7 @@ export default function PerformanceTab({
             </div>
           ) : (
             <div className="space-y-4" data-testid="perf-log">
-              {logGroups.map(([date, items]) => (
+              {pagedLogGroups.map(([date, items]) => (
                 <div key={date}>
                   {/* Tiêu đề ngày của nhóm */}
                   <div className="flex items-center gap-2 mb-2">
@@ -482,6 +494,10 @@ export default function PerformanceTab({
                   </div>
                 </div>
               ))}
+              {/* Phân trang nhật ký: số trang + số lỗi mỗi trang */}
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                <TablePagination {...logPg.props(flatLog.length)} unit="lỗi" testId="perf-pager" />
+              </div>
             </div>
           )}
         </div>

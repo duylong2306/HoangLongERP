@@ -1,5 +1,6 @@
 ﻿import { recordProjectEventFromMessage } from '../lib/projectEvents';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import TablePagination, { usePagination } from './TablePagination';
 import * as MT from '../lib/messageTemplates';
 import { dbService, stableStr } from '../lib/dbService';
 import { sendApprovalDirectMessage, findEmployeeByName, ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
@@ -2698,6 +2699,8 @@ export default function FinanceManagement({
   // Nhập Chi: phân trang + nhóm theo Đối tượng chi (recipient) — bắt chước Nhập Thu
   const [payPage, setPayPage] = useState(1);
   const [payPageSize, setPayPageSize] = useState(10);
+  // Quỹ tiền mặt: phân trang danh sách "Chi tiêu từ Quỹ theo người tạo đề xuất" (mỗi trang N người)
+  const cashFundPg = usePagination(5);
   const [payExpanded, setPayExpanded] = useState<Set<string>>(new Set());
   const paymentGroups = useMemo(() => {
     const map = new Map<string, { recipient: string; payments: Payment[] }>();
@@ -5678,9 +5681,9 @@ export default function FinanceManagement({
               </nav>
             )}
 
-            {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi, Đơn Hàng và Nhập Thu (tab đã làm lại: tên tab đã có trên thanh tab,
+            {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi, Đơn Hàng, Nhập Thu và Nhập Chi (tab đã làm lại: tên tab đã có trên thanh tab,
                 ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
-            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && (
+            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && (
               <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
@@ -8902,11 +8905,106 @@ export default function FinanceManagement({
             })()}
 
             {/* TAB 8: NHẬP CHI */}
-            {activeSubTab === 'nhap_chi' && (
+            {activeSubTab === 'nhap_chi' && (() => {
+              // Các cụm thao tác của 1 phiếu chi — dùng chung cho bảng (máy tính) và thẻ (điện thoại)
+              // 1) Xem / cập nhật chứng từ / xóa
+              const payActions = (p: Payment) => {
+                const payProj = (projects || []).find(pr => pr.id === p.projectId)?.name;
+                const proposerName = p.proposerId
+                  ? ((employeesProp || []).find(e => e.id === p.proposerId)?.name || p.proposer)
+                  : p.proposer;
+                return (
+                  <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        onClick={() => {
+                                          setPreviewVoucher({
+                                            type: 'payment',
+                                            data: p,
+                                            meta: { project: payProj, proposer: proposerName, approver: p.approver, order: p.purchaseOrderId },
+                                          });
+                                        }}
+                                        title="Xem chi tiết / In phiếu chi"
+                                        className="p-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg cursor-pointer"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => openVoucherUploadForPayment(p)}
+                                        title="Cập nhật chứng từ (sao kê / biên lai)"
+                                        className="p-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg cursor-pointer"
+                                      >
+                                        <Upload className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeletePaymentRow(p)}
+                                        title="Xóa phiếu chi"
+                                        className="p-1.5 border border-rose-300 text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                  </div>
+                );
+              };
+              // 2) Liên kết sang đề xuất / đơn hàng
+              const payLink = (p: Payment) => (
+                <>
+                                    {p.relatedAdvanceId ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const prop = (subcontractorAdvances || []).find(a => a.id === p.relatedAdvanceId);
+                                          if (prop) setViewingProposalDetail(prop);
+                                          else addToast({ title: '⚠️ Không tìm thấy', message: `Đề xuất ${p.relatedAdvanceId} không còn tồn tại.`, type: 'warning' });
+                                        }}
+                                        className="h-8 px-2.5 text-[12px] font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer whitespace-nowrap bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                                        title="Xem chi tiết Đề Xuất Chi liên kết"
+                                      >
+                                        <FileText className="w-3 h-3" /> Xem đề xuất
+                                      </button>
+                                    ) : p.purchaseOrderId ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const linkedOrder = purchaseOrders.find((o: PurchaseOrder) => o.id === p.purchaseOrderId);
+                                          if (linkedOrder) setPoDetailModal({ open: true, order: linkedOrder });
+                                          else addToast({ title: '⚠️ Không tìm thấy', message: `Đơn hàng ${p.purchaseOrderId} không còn tồn tại.`, type: 'warning' });
+                                        }}
+                                        className="h-8 px-2.5 text-[12px] font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer whitespace-nowrap bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                                        title="Xem đơn hàng được thanh toán"
+                                      >
+                                        <ShoppingCart className="w-3 h-3" /> Xem đơn
+                                      </button>
+                                    ) : (
+                                      <span className="text-slate-600 text-[11px] italic">—</span>
+                                    )}
+                </>
+              );
+              // 3) Ảnh chứng từ
+              const payDocs = (p: Payment) => (
+                <>
+                                    {getPaymentImageCount(p) > 0 ? (
+                                      <button
+                                        type="button"
+                                        // Ảnh thật có thể CHƯA có sẵn (payments.list() chỉ trả imageCount)
+                                        // — dùng luôn nếu đã có (vd Realtime patch), không thì tải lazy
+                                        // đúng lúc bấm xem, tránh phải tải ảnh của MỌI phiếu chi đang
+                                        // hiển thị trong bảng ngay từ đầu.
+                                        onClick={() => Array.isArray(p.images) ? setLightboxImages(p.images) : dbService.payments.getImages(p.id).then(setLightboxImages)}
+                                        title={`Xem ${getPaymentImageCount(p)} ảnh chứng từ`}
+                                        className="h-8 px-2.5 text-[12px] font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer whitespace-nowrap bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                                      >
+                                        <ImageIcon className="w-3 h-3" /> {getPaymentImageCount(p)}
+                                      </button>
+                                    ) : (
+                                      <span className="text-slate-600 text-[11px] italic">Chưa có</span>
+                                    )}
+                </>
+              );
+              return (
               <div className="space-y-4">
                 
-                <div className="flex justify-between items-center border-b border-slate-850 pb-2">
-                  <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px]">Danh sách các khoản chi</span>
+                <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+                  <span className="font-extrabold text-slate-900 text-sm">Danh sách các khoản chi</span>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -8922,11 +9020,10 @@ export default function FinanceManagement({
                         exportToExcel(data, 'NhapChi', `Nhap_Chi_${formatDateForFile()}.xlsx`, undefined, [...EXCEL_HEADERS.payment]);
                         addToast({ title: '✅ Xuất Excel', message: `Đã xuất ${data.length} phiếu chi`, type: 'success' });
                       }}
-                      className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-slate-700"
+                      className="h-9 w-9 rounded-xl flex items-center justify-center bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
                       title="Xuất Excel phiếu chi"
                     >
-                      <Download className="w-3 h-3 text-blue-400" />
-                      Xuất Excel
+                      <Download className="w-4 h-4" />
                     </button>
                     {/* Nhập Excel & "Tạo đề xuất chi mới" đã được chuyển sang Đề Xuất Chi (nút Lập phiếu gọi modal showPayForm). Chỉ giữ Xuất Excel. */}
 
@@ -8934,23 +9031,23 @@ export default function FinanceManagement({
                 </div>
 
                 {showPayForm && (
-                  <div className="fixed inset-0 z-[130] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowPayForm(false)}>
+                  <div className="fixed inset-0 z-[130] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowPayForm(false)}>
                     <form
                       onSubmit={handleAddPaymentSubmit}
                       onClick={(e) => e.stopPropagation()}
-                      className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-5 space-y-3 text-[10.5px] shadow-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
+                      className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg p-5 space-y-3 text-[13px] shadow-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200"
                     >
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-1">
-                        <h3 className="font-extrabold text-sm uppercase tracking-wide text-rose-400 flex items-center gap-2">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-1">
+                        <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
                           <Plus className="w-4 h-4" />
                           Tạo Đề Xuất Chi Mới
                         </h3>
-                        <button type="button" onClick={() => setShowPayForm(false)} className="text-slate-400 hover:text-white cursor-pointer bg-slate-800 hover:bg-slate-700 p-1.5 rounded-lg">
+                        <button type="button" onClick={() => setShowPayForm(false)} className="text-slate-500 hover:text-slate-800 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer">
                           <X className="w-4 h-4" />
                         </button>
                       </div>
                       <div>
-                        <label className="block text-slate-400 font-semibold mb-1">Hạng mục chi phí:</label>
+                        <label className="block text-slate-600 font-bold text-[12px] mb-1">Hạng mục chi phí:</label>
                         <select
                           value={payCategory}
                           onChange={(e) => {
@@ -8966,7 +9063,7 @@ export default function FinanceManagement({
                           // Lập phiếu từ một Đề Xuất đã duyệt: khóa Hạng mục chi phí,
                           // giữ nguyên đúng mục đích chi đã ghi trong đề xuất gốc.
                           disabled={!!activeProposalForPayment}
-                          className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <option value="salary_advance">Ứng Lương Nhân Sự</option>
                           <option value="subcontractor_advance">Tạm ứng Thầu Phụ</option>
@@ -8987,7 +9084,7 @@ export default function FinanceManagement({
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Số tiền thanh toán (VND):</label>
+                          <label className="block text-slate-600 font-bold text-[12px] mb-1">Số tiền thanh toán (VND):</label>
                           <input
                             type="number"
                             required
@@ -8996,11 +9093,11 @@ export default function FinanceManagement({
                             // Lập phiếu từ một Đề Xuất đã duyệt: khóa số tiền, không cho sửa lệch
                             // so với số tiền đã duyệt trong đề xuất gốc.
                             disabled={!!activeProposalForPayment}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white font-mono font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono font-bold disabled:opacity-40 disabled:cursor-not-allowed"
                           />
                         </div>
                         <div className="relative">
-                          <label className="block text-slate-400 font-semibold mb-1">Người nhận tiền:</label>
+                          <label className="block text-slate-600 font-bold text-[12px] mb-1">Người nhận tiền:</label>
                           <div className="relative">
                             <input
                               type="text"
@@ -9026,13 +9123,13 @@ export default function FinanceManagement({
                               // Lập phiếu từ một Đề Xuất đã duyệt: khóa Người nhận tiền,
                               // giữ đúng người/đơn vị đã ghi trong đề xuất gốc.
                               disabled={!!activeProposalForPayment}
-                              className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white pr-8 disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 pr-8 disabled:opacity-40 disabled:cursor-not-allowed"
                             />
                             <button
                               type="button"
                               onClick={() => setShowRecipientDropdown(!showRecipientDropdown)}
                               disabled={!!activeProposalForPayment}
-                              className="absolute right-2 top-1.5 text-slate-400 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="absolute right-2 top-1.5 text-slate-500 hover:text-slate-900 disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               <Search className="w-3.5 h-3.5" />
                             </button>
@@ -9048,7 +9145,7 @@ export default function FinanceManagement({
 
                           {/* Dropdown list of choices */}
                           {showRecipientDropdown && (
-                            <div className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-lg shadow-2xl z-[200] divide-y divide-slate-900">
+                            <div className="absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-2xl z-[200] divide-y divide-slate-900">
                               {getRecipientChoices().map((item) => (
                                 <button
                                   key={item.id}
@@ -9060,15 +9157,15 @@ export default function FinanceManagement({
                                     setRecipientSearch(item.name);
                                     setShowRecipientDropdown(false);
                                   }}
-                                  className="w-full text-left px-3 py-2 hover:bg-slate-900 transition-colors text-slate-200 text-[10.5px] flex justify-between items-center"
+                                  className="w-full text-left px-3 py-2 hover:bg-white transition-colors text-slate-900 text-[13px] flex justify-between items-center"
                                 >
                                   <div>
-                                    <span className="font-semibold text-slate-100">{item.name}</span>
+                                    <span className="font-semibold text-slate-900">{item.name}</span>
                                     {item.subText && (
-                                      <span className="text-[9px] text-slate-500 block">{item.subText}</span>
+                                      <span className="text-[11px] text-slate-500 block">{item.subText}</span>
                                     )}
                                   </div>
-                                  <span className="text-[9px] font-mono text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded">
+                                  <span className="text-[11px] font-mono text-slate-500 bg-white px-1.5 py-0.5 rounded">
                                     {item.id}
                                   </span>
                                 </button>
@@ -9085,7 +9182,7 @@ export default function FinanceManagement({
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Dự án gán chi:</label>
+                          <label className="block text-slate-600 font-bold text-[12px] mb-1">Dự án gán chi:</label>
                           <select
                             value={payProj}
                             onChange={(e) => setPayProj(e.target.value)}
@@ -9093,7 +9190,7 @@ export default function FinanceManagement({
                             // dự án của đề xuất gốc (để trống nếu là ứng lương/nhà cung cấp/
                             // công nợ thầu phụ/quỹ tiền mặt).
                             disabled={!!activeProposalForPayment}
-                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             {projects.map(p => (
                               <option key={p.id} value={p.id}>{p.name}</option>
@@ -9102,11 +9199,11 @@ export default function FinanceManagement({
                           </select>
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Đơn hàng mua (tùy chọn):</label>
+                          <label className="block text-slate-600 font-bold text-[12px] mb-1">Đơn hàng mua (tùy chọn):</label>
                           <select
                             value={payPurchaseOrder}
                             onChange={(e) => setPayPurchaseOrder(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-medium"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer font-medium"
                           >
                             <option value="">— Không gắn đơn hàng —</option>
                             {purchaseOrders.map(o => (
@@ -9115,11 +9212,11 @@ export default function FinanceManagement({
                           </select>
                         </div>
                         <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Hình thức thanh toán:</label>
+                          <label className="block text-slate-600 font-bold text-[12px] mb-1">Hình thức thanh toán:</label>
                           <select
                             value={payMethod}
                             onChange={(e) => setPayMethod(e.target.value as 'cash' | 'transfer' | 'cash_fund')}
-                            className="w-full bg-slate-950 border border-slate-800 rounded p-1 text-white cursor-pointer font-bold"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 cursor-pointer font-bold"
                           >
                             <option value="cash">Tiền mặt</option>
                             <option value="transfer">Chuyển khoản</option>
@@ -9127,28 +9224,28 @@ export default function FinanceManagement({
                             {payCategory !== 'cash_fund' && <option value="cash_fund">Quỹ tiền mặt</option>}
                           </select>
                           {payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance && (
-                            <p className="text-[9px] text-rose-400 font-bold mt-1">⛔ Vượt số dư Quỹ hiện tại ({cashFundBalance.toLocaleString('vi-VN')}đ) — không thể lập phiếu.</p>
+                            <p className="text-[11px] text-rose-600 font-bold mt-1">⛔ Vượt số dư Quỹ hiện tại ({cashFundBalance.toLocaleString('vi-VN')}đ) — không thể lập phiếu.</p>
                           )}
                         </div>
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 font-semibold mb-1">Ghi chú giải nghĩa:</label>
+                        <label className="block text-slate-600 font-bold text-[12px] mb-1">Ghi chú giải nghĩa:</label>
                         <input
                           type="text"
                           required
                           value={payNotes}
                           onChange={(e) => setPayNotes(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white font-medium"
+                          className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-medium"
                         />
                       </div>
 
-                      <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-                        <button type="button" onClick={() => setShowPayForm(false)} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded text-slate-300 cursor-pointer">Bỏ qua</button>
+                      <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                        <button type="button" onClick={() => setShowPayForm(false)} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Bỏ qua</button>
                         <button
                           type="submit"
                           disabled={isSubmittingPayment || (payMethod === 'cash_fund' && Number(payAmount) > cashFundBalance)}
-                          className="bg-rose-600 hover:bg-rose-550 disabled:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 text-white px-3 py-1.5 rounded font-bold cursor-pointer"
+                          style={{ background: '#e11d48', color: '#ffffff' }} className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer"
                         >
                           {isSubmittingPayment ? 'Đang xử lý...' : 'Nộp đề xuất chi'}
                         </button>
@@ -9157,18 +9254,27 @@ export default function FinanceManagement({
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
+                <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="payment-filters">
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Từ ngày</label>
-                    <input type="date" value={paymentFilters.fromDate} onChange={(e) => updatePaymentFilter({ fromDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                    <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input type="text" data-testid="payment-search" placeholder="Mã phiếu, đối tượng, ghi chú…" value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="h-9 w-56 bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Đến ngày</label>
-                    <input type="date" value={paymentFilters.toDate} onChange={(e) => updatePaymentFilter({ toDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                    <label className="text-[11px] text-slate-500 font-bold">Từ ngày</label>
+                    <input type="date" value={paymentFilters.fromDate} onChange={(e) => updatePaymentFilter({ fromDate: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Nhóm gốc chi</label>
-                    <select value={paymentFilters.category} onChange={(e) => updatePaymentFilter({ category: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                    <label className="text-[11px] text-slate-500 font-bold">Đến ngày</label>
+                    <input type="date" value={paymentFilters.toDate} onChange={(e) => updatePaymentFilter({ toDate: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-slate-500 font-bold">Nhóm gốc chi</label>
+                    <select value={paymentFilters.category} onChange={(e) => updatePaymentFilter({ category: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
                       <option value="">Tất cả</option>
                       <option value="salary_advance">Ứng Lương Nhân Sự</option>
                       <option value="subcontractor_advance">Tạm ứng Thầu Phụ</option>
@@ -9180,20 +9286,20 @@ export default function FinanceManagement({
                     </select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Trạng thái</label>
-                    <select value={paymentFilters.status} onChange={(e) => updatePaymentFilter({ status: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                    <label className="text-[11px] text-slate-500 font-bold">Trạng thái</label>
+                    <select value={paymentFilters.status} onChange={(e) => updatePaymentFilter({ status: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
                       <option value="">Tất cả</option>
                       <option value="missing_docs">Thiếu chứng từ</option>
                       <option value="completed">Hoàn Thành</option>
                       <option value="rejected">Bác thầu</option>
                     </select>
                   </div>
-                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updatePaymentFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, category: '', status: '' }); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updatePaymentFilter({ fromDate: `${y}-01-01`, toDate: `${y}-12-31`, category: '', status: '' }); }} className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đặt lại</button>
                 </div>
 
-                <div className="overflow-x-auto animate-fadeIn">
-                  <table className="w-full text-left text-slate-300 text-[10.5px]">
-                    <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
+                <div className="hidden md:block overflow-x-auto bg-white border border-slate-200 rounded-2xl">
+                  <table className="w-full text-left text-slate-700 text-[13px]">
+                    <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
                       <tr>
                         <th className="px-3 py-2 w-10 text-center">#</th>
                         <th className="px-3 py-2">Mã Phiếu Chi</th>
@@ -9218,27 +9324,27 @@ export default function FinanceManagement({
                         const toggle = () => setPayExpanded(prev => { const n = new Set(prev); n.has(g.recipient) ? n.delete(g.recipient) : n.add(g.recipient); return n; });
                         return (
                           <React.Fragment key={g.recipient}>
-                            <tr className="border-b border-slate-800 bg-slate-800/40 hover:bg-slate-800/70 font-sans cursor-pointer" onClick={toggle}>
-                              <td className="px-3 py-3 text-center font-bold text-slate-300">{groupNo}</td>
+                            <tr className="border-b border-slate-200 bg-slate-50 hover:bg-slate-100 font-sans cursor-pointer" onClick={toggle}>
+                              <td className="px-3 py-3 text-center font-bold text-slate-700">{groupNo}</td>
                               <td className="px-3 py-3" colSpan={3}>
                                 <div className="flex items-center gap-2">
-                                  <button onClick={(e) => { e.stopPropagation(); toggle(); }} className="text-slate-400 hover:text-white text-[10px] w-4 cursor-pointer" title={expanded ? 'Thu gọn' : 'Xem chi tiết'}>
+                                  <button onClick={(e) => { e.stopPropagation(); toggle(); }} className="text-slate-500 hover:text-slate-900 text-[12px] w-4 cursor-pointer" title={expanded ? 'Thu gọn' : 'Xem chi tiết'}>
                                     {expanded ? '▼' : '▶'}
                                   </button>
                                   <div>
-                                    <div className="font-extrabold text-white text-[13px] text-left">{g.recipient}</div>
-                                    <div className="text-[9px] text-slate-400 mt-0.5">{g.payments.length} phiếu chi · Quản lý theo Đối tượng chi</div>
+                                    <div className="font-extrabold text-slate-900 text-[13px] text-left">{g.recipient}</div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5">{g.payments.length} phiếu chi · Quản lý theo Đối tượng chi</div>
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-3 py-3 text-right font-mono font-bold text-rose-400">-{sum.toLocaleString('vi-VN')} đ</td>
+                              <td className="px-3 py-3 text-right font-mono font-bold text-rose-600">-{sum.toLocaleString('vi-VN')} đ</td>
                               <td className="px-3 py-3">
                                 {(() => {
                                   const total = g.payments.length;
                                   const withDocs = g.payments.filter(p => getPaymentImageCount(p) > 0).length;
                                   const all = total > 0 && withDocs === total;
                                   return (
-                                    <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold border ${all ? 'bg-white text-emerald-700 border-emerald-600' : 'bg-white text-orange-600 border-orange-500'}`}>
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${all ? 'bg-white text-emerald-700 border-emerald-600' : 'bg-white text-orange-600 border-orange-500'}`}>
                                       Chứng từ: {withDocs}/{total}
                                     </span>
                                   );
@@ -9255,11 +9361,11 @@ export default function FinanceManagement({
                                 : p.proposer;
                               const docStatus = getPaymentDocStatus(p);
                               return (
-                                <tr key={p.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
+                                <tr key={p.id} className="border-b border-slate-200 bg-white hover:bg-slate-50 font-sans">
                                   <td className="px-3 py-2.5 pl-9 text-slate-500 text-center">—</td>
-                                  <td className="px-3 py-2.5 font-mono font-bold text-rose-450">{p.code}</td>
+                                  <td className="px-3 py-2.5 font-mono font-bold text-[#0d47c9]">{p.code}</td>
                                   <td className="px-3 py-2.5">
-                                    <span className={`text-[9.5px] uppercase font-extrabold px-1.5 py-0.5 rounded border ${PAYMENT_CAT_BADGE[p.category] || 'bg-white text-slate-600 border-slate-400'}`}>{PAYMENT_CAT_LABEL[p.category] || p.category}</span>
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${PAYMENT_CAT_BADGE[p.category] || 'bg-white text-slate-600 border-slate-400'}`}>{PAYMENT_CAT_LABEL[p.category] || p.category}</span>
                                   </td>
                                   <td className="px-3 py-2.5">
                                     {/* Chi phí Công trình: nhóm cha đã hiện tên người lập đề xuất rồi
@@ -9267,101 +9373,30 @@ export default function FinanceManagement({
                                         Dự án/Công trình của khoản chi này thay thế, đúng yêu cầu
                                         "tổng hợp theo người lập, xổ chi tiết theo công trình". */}
                                     {p.category === 'site_expense' ? (
-                                      <div className="font-extrabold text-slate-100">🏗️ {payProj || 'Không rõ công trình'}</div>
+                                      <div className="font-extrabold text-slate-900">🏗️ {payProj || 'Không rõ công trình'}</div>
                                     ) : (
-                                      <div className="font-extrabold text-slate-100">{p.recipient}</div>
+                                      <div className="font-extrabold text-slate-900">{p.recipient}</div>
                                     )}
-                                    <div className="text-[9.5px] text-slate-500 italic mt-0.5">{p.notes}</div>
+                                    <div className="text-[12px] text-slate-500 italic mt-0.5">{p.notes}</div>
                                   </td>
-                                  <td className="px-3 py-2.5 text-right font-bold text-rose-450 font-mono">-{p.amount.toLocaleString('vi-VN')} đ</td>
+                                  <td className="px-3 py-2.5 text-right font-bold text-rose-600 font-mono">-{p.amount.toLocaleString('vi-VN')} đ</td>
                                   <td className="px-3 py-2.5 text-center">
                                     {docStatus === 'rejected' ? (
-                                      <span className="bg-rose-50 text-rose-700 text-[9px] px-1.5 py-0.5 rounded uppercase border border-rose-200">Bác thầu</span>
+                                      <span className="bg-rose-50 text-rose-700 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border border-rose-200">Bác thầu</span>
                                     ) : docStatus === 'completed' ? (
-                                      <span className="bg-emerald-50 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border border-emerald-200">Hoàn Thành</span>
+                                      <span className="bg-emerald-50 text-emerald-700 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border border-emerald-200">Hoàn Thành</span>
                                     ) : (
-                                      <span className="bg-orange-50 text-orange-700 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border border-orange-200">Thiếu chứng từ</span>
+                                      <span className="bg-orange-50 text-orange-700 inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border border-orange-200">Thiếu chứng từ</span>
                                     )}
                                   </td>
                                   <td className="px-3 py-2.5 text-center">
-                                    <div className="flex items-center justify-center gap-1">
-                                      <button
-                                        onClick={() => {
-                                          setPreviewVoucher({
-                                            type: 'payment',
-                                            data: p,
-                                            meta: { project: payProj, proposer: proposerName, approver: p.approver, order: p.purchaseOrderId },
-                                          });
-                                        }}
-                                        title="Xem chi tiết / In phiếu chi"
-                                        className="p-1.5 text-blue-400 hover:text-blue-300 hover:bg-blue-950 rounded-lg transition-colors cursor-pointer"
-                                      >
-                                        <Eye className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        onClick={() => openVoucherUploadForPayment(p)}
-                                        title="Cập nhật chứng từ (sao kê / biên lai)"
-                                        className="p-1.5 text-violet-400 hover:text-violet-300 hover:bg-violet-950 rounded-lg transition-colors cursor-pointer"
-                                      >
-                                        <Upload className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        onClick={() => handleDeletePaymentRow(p)}
-                                        title="Xóa phiếu chi"
-                                        className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950 rounded-lg transition-colors cursor-pointer"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
+                                    {payActions(p)}
                                   </td>
                                   <td className="px-3 py-2.5 text-center">
-                                    {p.relatedAdvanceId ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const prop = (subcontractorAdvances || []).find(a => a.id === p.relatedAdvanceId);
-                                          if (prop) setViewingProposalDetail(prop);
-                                          else addToast({ title: '⚠️ Không tìm thấy', message: `Đề xuất ${p.relatedAdvanceId} không còn tồn tại.`, type: 'warning' });
-                                        }}
-                                        className="bg-violet-600 hover:bg-violet-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
-                                        title="Xem chi tiết Đề Xuất Chi liên kết"
-                                      >
-                                        <FileText className="w-3 h-3" /> Xem đề xuất
-                                      </button>
-                                    ) : p.purchaseOrderId ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const linkedOrder = purchaseOrders.find((o: PurchaseOrder) => o.id === p.purchaseOrderId);
-                                          if (linkedOrder) setPoDetailModal({ open: true, order: linkedOrder });
-                                          else addToast({ title: '⚠️ Không tìm thấy', message: `Đơn hàng ${p.purchaseOrderId} không còn tồn tại.`, type: 'warning' });
-                                        }}
-                                        className="bg-slate-700 hover:bg-slate-600 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
-                                        title="Xem đơn hàng được thanh toán"
-                                      >
-                                        <ShoppingCart className="w-3 h-3" /> Xem đơn
-                                      </button>
-                                    ) : (
-                                      <span className="text-slate-600 text-[9px] italic">—</span>
-                                    )}
+                                    {payLink(p)}
                                   </td>
                                   <td className="px-3 py-2.5 text-center">
-                                    {getPaymentImageCount(p) > 0 ? (
-                                      <button
-                                        type="button"
-                                        // Ảnh thật có thể CHƯA có sẵn (payments.list() chỉ trả imageCount)
-                                        // — dùng luôn nếu đã có (vd Realtime patch), không thì tải lazy
-                                        // đúng lúc bấm xem, tránh phải tải ảnh của MỌI phiếu chi đang
-                                        // hiển thị trong bảng ngay từ đầu.
-                                        onClick={() => Array.isArray(p.images) ? setLightboxImages(p.images) : dbService.payments.getImages(p.id).then(setLightboxImages)}
-                                        title={`Xem ${getPaymentImageCount(p)} ảnh chứng từ`}
-                                        className="bg-slate-700 hover:bg-slate-600 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
-                                      >
-                                        <ImageIcon className="w-3 h-3" /> {getPaymentImageCount(p)}
-                                      </button>
-                                    ) : (
-                                      <span className="text-slate-600 text-[9px] italic">Chưa có</span>
-                                    )}
+                                    {payDocs(p)}
                                   </td>
                                 </tr>
                               );
@@ -9371,10 +9406,10 @@ export default function FinanceManagement({
                       })}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t-2 border-slate-700 bg-slate-900/80">
+                      <tr className="border-t-2 border-slate-200 bg-slate-50">
                         <td className="px-3 py-3"></td>
-                        <td className="px-3 py-3 text-[11px] font-bold text-slate-300 uppercase tracking-wider" colSpan={3}>Tổng cộng ({filteredPayments.length} phiếu chi)</td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-rose-400 text-base">-{payTotalAmount.toLocaleString('vi-VN')} đ</td>
+                        <td className="px-3 py-3 text-[11px] font-bold text-slate-700 " colSpan={3}>Tổng cộng ({filteredPayments.length} phiếu chi)</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-rose-600 text-base">-{payTotalAmount.toLocaleString('vi-VN')} đ</td>
                         <td className="px-3 py-3"></td>
                         <td className="px-3 py-3"></td>
                         <td className="px-3 py-3"></td>
@@ -9384,10 +9419,67 @@ export default function FinanceManagement({
                   </table>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
+                {/* ĐIỆN THOẠI (< md): mỗi đối tượng chi 1 thẻ, bấm để mở danh sách phiếu chi */}
+                <div className="md:hidden space-y-2.5" data-testid="payment-cards">
+                  {payPageInfo.pageGroups.length === 0 ? (
+                    <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-[13px] text-slate-500">{payments.length === 0 ? 'Chưa có phiếu chi nào.' : 'Không tìm thấy phiếu chi khớp bộ lọc.'}</div>
+                  ) : payPageInfo.pageGroups.map((g) => {
+                    const expanded = payExpanded.has(g.recipient);
+                    const sum = g.payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+                    const toggle = () => setPayExpanded(prev => { const n = new Set(prev); n.has(g.recipient) ? n.delete(g.recipient) : n.add(g.recipient); return n; });
+                    const withDocs = g.payments.filter(p => getPaymentImageCount(p) > 0).length;
+                    const allDocs = g.payments.length > 0 && withDocs === g.payments.length;
+                    return (
+                      <div key={g.recipient} data-testid={`payment-card-${g.recipient}`} className="bg-white border border-slate-200 rounded-xl p-3">
+                        <button type="button" onClick={toggle} aria-expanded={expanded} className="w-full text-left cursor-pointer bg-transparent border-0 p-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-bold text-[13px] text-slate-900">{expanded ? '▼' : '▶'} {g.recipient}</div>
+                              <div className="text-[12px] text-slate-500 mt-0.5">{g.payments.length} phiếu chi · theo Đối tượng chi</div>
+                            </div>
+                            <span className="font-mono font-black text-[13px] whitespace-nowrap text-rose-600">-{sum.toLocaleString('vi-VN')} đ</span>
+                          </div>
+                          <div className="mt-2"><span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${allDocs ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>Chứng từ: {withDocs}/{g.payments.length}</span></div>
+                        </button>
+                        {expanded && (
+                          <div className="mt-3 pt-3 border-t border-slate-200 space-y-2.5">
+                            {g.payments.map((p) => {
+                              const payProj = (projects || []).find(pr => pr.id === p.projectId)?.name;
+                              const docStatus = getPaymentDocStatus(p);
+                              return (
+                                <div key={p.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-mono font-bold text-[13px]" style={{ color: '#0d47c9' }}>{p.code}</span>
+                                    <span className="font-mono font-bold text-[13px] text-rose-600">-{p.amount.toLocaleString('vi-VN')} đ</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${PAYMENT_CAT_BADGE[p.category] || 'bg-white text-slate-600 border-slate-300'}`}>{PAYMENT_CAT_LABEL[p.category] || p.category}</span>
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${docStatus === 'rejected' ? 'bg-rose-50 text-rose-700 border-rose-200' : docStatus === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{docStatus === 'rejected' ? 'Bác thầu' : docStatus === 'completed' ? 'Hoàn Thành' : 'Thiếu chứng từ'}</span>
+                                  </div>
+                                  <div className="text-[12px] text-slate-700">{p.category === 'site_expense' ? (payProj || 'Không rõ công trình') : p.recipient}</div>
+                                  {p.notes && <div className="text-[12px] text-slate-500">{p.notes}</div>}
+                                  <div className="pt-1.5 border-t border-slate-200 flex items-center justify-between gap-2 flex-wrap">
+                                    {payActions(p)}
+                                    <div className="flex items-center gap-1.5">{payLink(p)}{payDocs(p)}</div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
+                    <span className="text-[13px] font-bold text-slate-700">Tổng cộng ({filteredPayments.length} phiếu chi)</span>
+                    <span className="font-mono font-black text-[14px] text-rose-600">-{payTotalAmount.toLocaleString('vi-VN')} đ</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[12px] text-slate-500">
                   <div className="flex items-center gap-2">
                     <span>Hiển thị</span>
-                    <select value={payPageSize} onChange={(e) => { setPayPageSize(Number(e.target.value)); setPayPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
+                    <select value={payPageSize} onChange={(e) => { setPayPageSize(Number(e.target.value)); setPayPage(1); }} className="h-9 bg-white border border-slate-200 rounded-xl px-2 text-[13px] text-slate-800 outline-none cursor-pointer">
                       <option value={5}>5</option>
                       <option value={10}>10</option>
                       <option value={20}>20</option>
@@ -9398,12 +9490,14 @@ export default function FinanceManagement({
                   </div>
                   <div className="flex items-center gap-2">
                     <span>Trang {payPageInfo.safePage}/{payPageInfo.totalPages} · {paymentGroups.length} đối tượng chi</span>
-                    <button type="button" disabled={payPageInfo.safePage <= 1} onClick={() => setPayPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
-                    <button type="button" disabled={payPageInfo.safePage >= payPageInfo.totalPages} onClick={() => setPayPage(p => Math.min(payPageInfo.totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
+                    <button type="button" disabled={payPageInfo.safePage <= 1} onClick={() => setPayPage(p => Math.max(1, p - 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">‹ Trước</button>
+                    <button type="button" disabled={payPageInfo.safePage >= payPageInfo.totalPages} onClick={() => setPayPage(p => Math.min(payPageInfo.totalPages, p + 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">Sau ›</button>
                   </div>
                 </div>
               </div>
-            )}
+            
+              );
+            })()}
 
             {/* TAB: QUỸ TIỀN MẶT */}
             {activeSubTab === 'quy_tien_mat' && (() => {
@@ -9476,7 +9570,7 @@ export default function FinanceManagement({
                       <p className="text-[11px] text-slate-500 italic bg-slate-900 border border-dashed border-slate-800 rounded-xl p-4 text-center">
                         {cashFundLoading ? 'Đang tải...' : 'Chưa có khoản chi nào lấy từ Quỹ tiền mặt.'}
                       </p>
-                    ) : spentGroupList.map((g, gi) => {
+                    ) : cashFundPg.slice(spentGroupList).map((g, gi) => {
                       const groupTotal = g.items.reduce((s, p) => s + (p.amount || 0), 0);
                       return (
                         <div key={gi} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
@@ -9505,6 +9599,11 @@ export default function FinanceManagement({
                         </div>
                       );
                     })}
+                    {spentGroupList.length > 0 && (
+                      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                        <TablePagination {...cashFundPg.props(spentGroupList.length)} unit="người đề xuất" testId="cashfund-pager" sizes={[5, 10, 20]} />
+                      </div>
+                    )}
                   </div>
                 </div>
               );

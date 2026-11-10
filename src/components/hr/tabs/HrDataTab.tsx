@@ -1,3 +1,4 @@
+import TablePagination, { usePagination } from '../../TablePagination';
 import React, { useRef, useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import {
@@ -706,8 +707,13 @@ export default function HrDataTab(props: HrDataTabProps) {
     </div>
   );
 
+  // Phân trang dùng chung cho mọi danh mục: cắt trang bằng pg.slice(), thanh phân trang nằm ở chân khung (shell)
+  const pg = usePagination(10);
+  // Đổi danh mục → về trang 1
+  useEffect(() => { pg.reset(); }, [activeHrDataSubTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Khung bảng (máy tính) + khung thẻ (điện thoại) + dòng đếm
-  const shell = (o: { tableHead: React.ReactNode; tableBody: React.ReactNode; cards: React.ReactNode; empty: boolean; emptyText: string; count: React.ReactNode; minW?: string }) => (
+  const shell = (o: { tableHead: React.ReactNode; tableBody: React.ReactNode; cards: React.ReactNode; empty: boolean; emptyText: string; count: React.ReactNode; total: number; unit: string; minW?: string }) => (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
       {o.empty ? (
         <div className="py-12 text-center text-slate-500 text-sm" data-testid="hrdata-empty">{o.emptyText}</div>
@@ -723,6 +729,8 @@ export default function HrDataTab(props: HrDataTabProps) {
         </>
       )}
       <div className="px-4 py-2.5 border-t border-slate-100 text-xs text-slate-500" data-testid="hrdata-count">{o.count}</div>
+      {/* Phân trang: số trang + số dòng/trang (luôn hiện khi có dữ liệu) */}
+      {!o.empty && <TablePagination {...pg.props(o.total)} unit={o.unit} testId="hrdata-pager" />}
     </div>
   );
   const rowCls = (id: string) => `hover:bg-blue-50/40 ${hrSelectedRows.has(id) ? 'bg-blue-50/60' : ''}`;
@@ -761,10 +769,10 @@ export default function HrDataTab(props: HrDataTabProps) {
           {toolbar({ search: holidaySearchQuery, setSearch: setHolidaySearchQuery, placeholder: 'Tìm dịp lễ, ngày…', onExport: handleExportHolidays, exportTitle: 'Xuất Excel ngày nghỉ lễ', fileRef: holidaysFileRef, onImport: handleImportHolidays, addLabel: 'Thêm ngày nghỉ lễ', onAdd: () => setShowHolidayModal(true), addId: 'add_holiday_btn' })}
           {bulkBar}
           {shell({
-            empty: filteredHolidays.length === 0, emptyText: 'Không tìm thấy ngày nghỉ lễ nào khớp với bộ lọc.',
+            total: filteredHolidays.length, unit: 'ngày nghỉ lễ', empty: filteredHolidays.length === 0, emptyText: 'Không tìm thấy ngày nghỉ lễ nào khớp với bộ lọc.',
             count: <>Tổng cộng <b className="text-slate-700">{holidays.length}</b> ngày nghỉ lễ{filteredHolidays.length !== holidays.length && <> · đang hiển thị {filteredHolidays.length}</>}</>,
             tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredHolidays)}</th><th className={th}>Ngày nghỉ</th><th className={th}>Tên dịp lễ</th><th className={th}>Mã</th><th className={`${th} text-right`}>Thao tác</th></>),
-            tableBody: filteredHolidays.map(item => (
+            tableBody: pg.slice(filteredHolidays).map(item => (
               <tr key={item.id} data-testid={`hrdata-row-${item.id}`} className={rowCls(item.id)}>
                 <td className="py-2.5 px-3">{rowCheck(item.id)}</td>
                 <td className="py-2.5 px-3"><span className={`${PILL} bg-slate-50 text-slate-700 border-slate-200 font-mono`}>{item.date}</span></td>
@@ -772,7 +780,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                 <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{item.id}</td>
                 <td className="py-2.5 px-3">{actions(() => onEditHoliday(item), () => handleDeleteHoliday(item.id), 'ngày nghỉ')}</td>
               </tr>)),
-            cards: filteredHolidays.map(item => (
+            cards: pg.slice(filteredHolidays).map(item => (
               <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
                 <div className="pt-1">{rowCheck(item.id)}</div>
                 <div className="flex-1 min-w-0">
@@ -802,10 +810,10 @@ export default function HrDataTab(props: HrDataTabProps) {
                 onChange={(e) => { const val = Number(e.target.value); setLeaveCoefficients(prev => prev.map(c => c.id === item.id ? { ...c, coefficient: val } : c)); }}
                 className="w-16 h-8 bg-white border border-slate-200 rounded-lg px-1.5 text-center font-mono font-bold text-[13px] outline-none focus:border-blue-400" />);
             return shell({
-              empty: filteredCoefs.length === 0, emptyText: 'Không tìm thấy hệ số chấm công nào khớp với bộ lọc.',
+              total: filteredCoefs.length, unit: 'hệ số', empty: filteredCoefs.length === 0, emptyText: 'Không tìm thấy hệ số chấm công nào khớp với bộ lọc.',
               count: <>Tổng cộng <b className="text-slate-700">{leaveCoefficients.length}</b> loại hệ số chấm công</>,
               tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredCoefs)}</th><th className={th}>Nội dung chấm công</th><th className={th}>Mã</th><th className={th}>Chấm tự động</th><th className={th}>Hệ số</th><th className={`${th} text-right`}>Thao tác</th></>),
-              tableBody: filteredCoefs.map(item => (
+              tableBody: pg.slice(filteredCoefs).map(item => (
                 <tr key={item.id} data-testid={`hrdata-row-${item.id}`} className={rowCls(item.id)}>
                   <td className="py-2.5 px-3">{rowCheck(item.id)}</td>
                   <td className="py-2.5 px-3 font-bold text-slate-900">{item.type}</td>
@@ -814,7 +822,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                   <td className="py-2.5 px-3">{coefInput(item)}</td>
                   <td className="py-2.5 px-3">{actions(null, () => handleDeleteCoefficient(item.id), 'hệ số')}</td>
                 </tr>)),
-              cards: filteredCoefs.map(item => (
+              cards: pg.slice(filteredCoefs).map(item => (
                 <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
                   <div className="flex items-start gap-3">
                     <div className="pt-1">{rowCheck(item.id)}</div>
@@ -835,10 +843,10 @@ export default function HrDataTab(props: HrDataTabProps) {
             onAdd: () => { setEditingCritId(null); setEditingCritDeptId(null); setNewCritContent(''); setNewCritCategory('readiness'); setShowCriteriaModal(true); } })}
           {bulkBar}
           {shell({
-            empty: filteredCriteria.length === 0, emptyText: 'Không tìm thấy tiêu chí nào khớp với từ khóa tìm kiếm.',
+            total: filteredCriteria.length, unit: 'tiêu chí', empty: filteredCriteria.length === 0, emptyText: 'Không tìm thấy tiêu chí nào khớp với từ khóa tìm kiếm.',
             count: <>Đang hiển thị <b className="text-slate-700">{filteredCriteria.length}</b> / {allCriteria.length} tiêu chí</>,
             tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredCriteria)}</th><th className={`${th} w-12`}>STT</th><th className={th}>Phân nhóm</th><th className={th}>Nội dung tiêu chí đánh giá</th><th className={th}>Mã</th><th className={`${th} text-right`}>Thao tác</th></>),
-            tableBody: filteredCriteria.map((crit, idx) => {
+            tableBody: pg.slice(filteredCriteria).map((crit, idx) => {
               const m = critMeta(crit.category);
               return (
                 <tr key={crit.id} data-testid={`hrdata-row-${crit.id}`} className={rowCls(crit.id)}>
@@ -850,7 +858,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                   <td className="py-2.5 px-3">{actions(() => handleEditCriteriaTrigger('dept_all', crit), () => handleDeleteCriteria('dept_all', crit.id), 'tiêu chí')}</td>
                 </tr>);
             }),
-            cards: filteredCriteria.map(crit => {
+            cards: pg.slice(filteredCriteria).map(crit => {
               const m = critMeta(crit.category);
               return (
                 <div key={crit.id} data-testid={`hrdata-card-${crit.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(crit.id) ? 'bg-blue-50/60' : ''}`}>
@@ -878,10 +886,10 @@ export default function HrDataTab(props: HrDataTabProps) {
           {bulkBar}
           {shell({
             minW: 'min-w-[1000px]',
-            empty: filteredScales.length === 0, emptyText: 'Không tìm thấy thông tin bậc lương nào khớp với bộ lọc tìm kiếm.',
+            total: filteredScales.length, unit: 'bậc lương', empty: filteredScales.length === 0, emptyText: 'Không tìm thấy thông tin bậc lương nào khớp với bộ lọc tìm kiếm.',
             count: <>Đang hiển thị <b className="text-slate-700">{filteredScales.length}</b> / {salaryScales.length} bậc lương</>,
             tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredScales)}</th><th className={th}>Mã chi trả</th><th className={th}>Ngạch / đối tượng áp dụng</th><th className={th}>Bậc</th><th className={`${th} text-right`}>Lương cơ bản</th><th className={`${th} text-center`}>Tỉ lệ</th><th className={`${th} text-right`}>Lương hiệu suất</th><th className={`${th} text-right`}>Tổng (100%)</th><th className={th}>Ghi chú</th><th className={`${th} text-right`}>Thao tác</th></>),
-            tableBody: filteredScales.map(item => (
+            tableBody: pg.slice(filteredScales).map(item => (
               <tr key={item.id} data-testid={`hrdata-row-${item.id}`} className={rowCls(item.id)}>
                 <td className="py-2.5 px-3">{rowCheck(item.id)}</td>
                 <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{item.id}</td>
@@ -894,7 +902,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                 <td className="py-2.5 px-3 text-[12px] text-slate-500 max-w-[200px] truncate" title={item.notes || ''}>{item.notes || '—'}</td>
                 <td className="py-2.5 px-3">{actions(() => handleEditSalaryScaleClick(item), () => handleDeleteSalaryScale(item.id), 'bậc lương')}</td>
               </tr>)),
-            cards: filteredScales.map(item => (
+            cards: pg.slice(filteredScales).map(item => (
               <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
                 <div className="flex items-start gap-3">
                   <div className="pt-1">{rowCheck(item.id)}</div>
@@ -949,10 +957,10 @@ export default function HrDataTab(props: HrDataTabProps) {
             const calc = (emp: any) => { const sal = insSalaryOf(emp); const rate = Number(emp.bhxhRate) || 10.5; return { sal, rate, pay: (sal * rate) / 100, relief: Number(emp.taxPersonalRelief) || 15500000, dep: Number(emp.dependentCount) || 0 }; };
             return shell({
               minW: 'min-w-[1000px]',
-              empty: filteredIns.length === 0, emptyText: 'Không tìm thấy nhân sự phù hợp với điều kiện tìm kiếm.',
+              total: filteredIns.length, unit: 'nhân sự', empty: filteredIns.length === 0, emptyText: 'Không tìm thấy nhân sự phù hợp với điều kiện tìm kiếm.',
               count: <>Danh sách BHXH & giảm trừ thuế TNCN: <b className="text-slate-700">{filteredIns.length}</b> nhân sự · Mức đóng mặc định 10,5% (BHXH 8% + BHYT 1,5% + BHTN 1%)</>,
               tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredIns)}</th><th className={th}>Nhân viên</th><th className={th}>Bộ phận / chức vụ</th><th className={th}>Số sổ BHXH</th><th className={`${th} text-right`}>Mức đóng</th><th className={`${th} text-center`}>Tỷ lệ</th><th className={`${th} text-right`}>Tiền trích</th><th className={th}>Hiệu lực</th><th className={`${th} text-right`}>Giảm trừ bản thân</th><th className={`${th} text-center`}>NPT</th><th className={`${th} text-right`}>Thao tác</th></>),
-              tableBody: filteredIns.map((emp: any) => { const c = calc(emp); return (
+              tableBody: pg.slice(filteredIns).map((emp: any) => { const c = calc(emp); return (
                 <tr key={emp.id} data-testid={`hrdata-row-${emp.id}`} className={rowCls(emp.id)}>
                   <td className="py-2.5 px-3">{rowCheck(emp.id)}</td>
                   <td className="py-2.5 px-3"><div className="font-bold text-slate-900">{emp.name}</div><div className="font-mono text-[11px] text-slate-400">{emp.id}</div></td>
@@ -966,7 +974,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                   <td className="py-2.5 px-3 text-center font-mono font-bold">{c.dep}</td>
                   <td className="py-2.5 px-3 text-right"><button type="button" onClick={() => handleOpenEditIns(emp)} data-testid={`hrdata-ins-edit-${emp.id}`} className="h-8 px-3 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1"><Sliders className="w-3.5 h-3.5" />Thiết lập</button></td>
                 </tr>); }),
-              cards: filteredIns.map((emp: any) => { const c = calc(emp); return (
+              cards: pg.slice(filteredIns).map((emp: any) => { const c = calc(emp); return (
                 <div key={emp.id} data-testid={`hrdata-card-${emp.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(emp.id) ? 'bg-blue-50/60' : ''}`}>
                   <div className="flex items-start gap-3">
                     <div className="pt-1">{rowCheck(emp.id)}</div>
@@ -991,10 +999,10 @@ export default function HrDataTab(props: HrDataTabProps) {
           {toolbar({ search: travelNormSearch, setSearch: setTravelNormSearch, placeholder: 'Tìm định mức…', onExport: handleExportTravelNorms, exportTitle: 'Xuất Excel định mức công tác phí', fileRef: travelNormFileRef, onImport: handleImportTravelNorms, addLabel: 'Thêm định mức', onAdd: handleAddTravelNormClick })}
           {bulkBar}
           {shell({
-            empty: filteredNorms.length === 0, emptyText: 'Không tìm thấy định mức công tác phí nào phù hợp với từ khóa tìm kiếm.',
+            total: filteredNorms.length, unit: 'định mức', empty: filteredNorms.length === 0, emptyText: 'Không tìm thấy định mức công tác phí nào phù hợp với từ khóa tìm kiếm.',
             count: <>Tổng cộng <b className="text-slate-700">{travelNorms.length}</b> định mức{filteredNorms.length !== travelNorms.length && <> · đang hiển thị {filteredNorms.length}</>}</>,
             tableHead: (<><th className="py-2.5 px-3 w-10">{headCheck(filteredNorms)}</th><th className={th}>Mã CTP</th><th className={th}>Nội dung</th><th className={`${th} text-right`}>Đơn giá</th><th className={`${th} text-right`}>Thao tác</th></>),
-            tableBody: filteredNorms.map(norm => (
+            tableBody: pg.slice(filteredNorms).map(norm => (
               <tr key={norm.id} data-testid={`hrdata-row-${norm.id}`} className={rowCls(norm.id)}>
                 <td className="py-2.5 px-3">{rowCheck(norm.id)}</td>
                 <td className="py-2.5 px-3">{norm.code ? <span className={`${PILL} bg-orange-50 text-orange-700 border-orange-200 font-mono`}>{norm.code}</span> : '—'}</td>
@@ -1002,7 +1010,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                 <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">{money(norm.unitPrice)}</td>
                 <td className="py-2.5 px-3">{actions(() => handleEditTravelNormClick(norm), () => handleDeleteTravelNorm(norm.id), 'định mức')}</td>
               </tr>)),
-            cards: filteredNorms.map(norm => (
+            cards: pg.slice(filteredNorms).map(norm => (
               <div key={norm.id} data-testid={`hrdata-card-${norm.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(norm.id) ? 'bg-blue-50/60' : ''}`}>
                 <div className="pt-1">{rowCheck(norm.id)}</div>
                 <div className="flex-1 min-w-0">

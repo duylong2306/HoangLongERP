@@ -54,6 +54,21 @@ describe('Dữ liệu nhân sự — giao diện mới', () => {
     expect(props.setHolidaySearchQuery).toHaveBeenCalledWith('tết');
   });
 
+  it('phân trang: 25 ngày nghỉ lễ → trang 1 có 10 dòng, sang trang 2 có 10, đổi 5 dòng/trang, "Tất cả" hiện đủ', () => {
+    const many: any[] = Array.from({ length: 25 }, (_, i) => ({ id: `NLX${i + 1}`, date: `${String((i % 28) + 1).padStart(2, '0')}/05/2026`, name: `Dịp ${i + 1}` }));
+    setup('holidays', { holidays: many });
+    const rowsCount = () => within(screen.getByTestId('hrdata-table')).getAllByRole('row').length - 1;
+    expect(rowsCount()).toBe(10);
+    expect(screen.getByTestId('hrdata-pager-range').textContent).toContain('1–10');
+    fireEvent.click(screen.getByTestId('hrdata-pager-next'));
+    expect(screen.getByTestId('hrdata-pager-range').textContent).toContain('11–20');
+    fireEvent.change(screen.getByTestId('hrdata-pager-size'), { target: { value: '5' } });
+    expect(rowsCount()).toBe(5);
+    expect(screen.getByTestId('hrdata-pager-range').textContent).toContain('1–5');   // đổi số dòng → về trang 1
+    fireEvent.change(screen.getByTestId('hrdata-pager-size'), { target: { value: '-1' } });
+    expect(rowsCount()).toBe(25);
+  });
+
   it('không có kết quả → thông báo trống', () => {
     setup('holidays', { holidaySearchQuery: 'khôngcó' });
     expect(screen.getByTestId('hrdata-empty')).toBeTruthy();

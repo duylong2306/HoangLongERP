@@ -36,6 +36,18 @@ describe('Hiệu suất — giao diện mới', () => {
     expect(screen.getByTestId('perf-scale').textContent).toContain('0 lỗi → 100');
   });
 
+  it('phân trang nhật ký: 23 lỗi → trang 1 có 10, trang 3 có 3; đổi số lỗi/trang', () => {
+    const many = Array.from({ length: 23 }, (_, i) => err(`P${i + 1}`, 'NV1', 'An Văn Bình', `2026-06-${String(28 - (i % 20)).padStart(2, '0')}`));
+    setup({ employeeErrors: many });
+    const shown = () => document.querySelectorAll('[data-testid^="perf-err-"]').length;
+    expect(shown()).toBe(10);
+    expect(screen.getByTestId('perf-pager-range').textContent).toContain('1–10');
+    fireEvent.click(screen.getByTestId('perf-pager-page-3'));
+    expect(shown()).toBe(3);
+    fireEvent.change(screen.getByTestId('perf-pager-size'), { target: { value: '20' } });
+    expect(shown()).toBe(20);
+  });
+
   it('nút "Ghi nhận lỗi" mở hộp với nhân sự đầu tiên; Xuất Excel không báo lỗi; đổi bộ lọc gọi setter', () => {
     const { props } = setup();
     fireEvent.click(screen.getByTestId('perf-add'));
