@@ -747,6 +747,8 @@ export default function FinanceManagement({
   const [revertProposalModal, setRevertProposalModal] = useState<SubcontractorAdvanceProposal | null>(null);
   const [editingAmountProposal, setEditingAmountProposal] = useState<SubcontractorAdvanceProposal | null>(null);
   const [editAmountValue, setEditAmountValue] = useState<string>('');
+  // Điện thoại: bước (cột Kanban) đang xem trên thanh bước — chỉ dùng cho màn hình hẹp (< sm)
+  const [proposalMobileStep, setProposalMobileStep] = useState<'pending_approval' | 'pending_payment' | 'awaiting_voucher_update' | 'completed'>('pending_approval');
   const [proposalTypeFilter, setProposalTypeFilter] = useState<'all' | 'subcontractor' | 'expense' | 'salary' | 'supplier' | 'cash_fund' | 'other'>('all');
   const [viewingProposalDetail, setViewingProposalDetail] = useState<SubcontractorAdvanceProposal | null>(null);
   // Input "Số tiền duyệt chi" trong cửa sổ chi tiết (người xét duyệt nhập)
@@ -6642,7 +6644,72 @@ export default function FinanceManagement({
 
                         return (
                           <div className="w-full">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                            {/* ĐIỆN THOẠI (< sm): thay 4 cột dọc dài bằng thanh BƯỚC + danh sách của bước đang chọn.
+                                Vòng tròn = số thứ tự bước; số đề xuất của bước nằm ở BADGE góc vòng tròn (tránh nhầm với tên bước).
+                                Các bước đứng trước bước đang chọn tô xanh nhạt để thấy tiến trình. Bấm bước nào cũng được. */}
+                            {(() => {
+                              const stepShort: Record<string, string> = { pending_approval: 'Chờ duyệt', pending_payment: 'Lập phiếu', awaiting_voucher_update: 'Chứng từ', completed: 'Hoàn thành' };
+                              const activeIdx = Math.max(0, columns.findIndex(c => c.key === proposalMobileStep));
+                              const col = columns[activeIdx];
+                              const colItems = filteredAdvances.filter(a => effectiveStatus(a) === col.key);
+                              const colSize = getProposalColPageSize(col.key);
+                              const colTotal = proposalColTotalPages(col.key, colItems.length);
+                              const colPageClamped = Math.min(getProposalColPage(col.key), colTotal);
+                              const paged = colSize === -1 ? colItems : colItems.slice((colPageClamped - 1) * colSize, colPageClamped * colSize);
+                              const colTotalAmount = colItems.reduce((s, a) => s + (a.amount || 0), 0);
+                              return (
+                                <div className="sm:hidden" data-testid="proposal-mobile-steps">
+                                  <div className="grid grid-cols-4 relative">
+                                    {columns.map((c, i) => {
+                                      const n = filteredAdvances.filter(a => effectiveStatus(a) === c.key).length;
+                                      const on = i === activeIdx;
+                                      const done = i < activeIdx;
+                                      return (
+                                        <button key={c.key} type="button" data-testid={`proposal-step-${c.key}`} onClick={() => setProposalMobileStep(c.key as any)}
+                                          aria-current={on ? 'step' : undefined}
+                                          className="relative flex flex-col items-center gap-1 cursor-pointer bg-transparent border-0 p-0">
+                                          {/* Đường nối với bước trước (xanh khi bước này đã tới / đang chọn) */}
+                                          {i > 0 && <span className="absolute top-4 -left-1/2 w-full h-0.5" style={{ background: i <= activeIdx ? '#0d47c9' : '#cbd5e1' }} />}
+                                          <span className="relative z-10 w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold border-2"
+                                            style={on ? { background: '#0d47c9', borderColor: '#0d47c9', color: '#ffffff' }
+                                              : done ? { background: '#e8efff', borderColor: '#bcd0ff', color: '#0d47c9' }
+                                              : { background: '#ffffff', borderColor: '#cbd5e1', color: '#64748b' }}>
+                                            {i + 1}
+                                            {/* Badge số đề xuất của bước */}
+                                            <span data-testid={`proposal-step-count-${c.key}`} className="absolute -top-2 -right-3 min-w-[20px] h-[20px] px-1.5 rounded-full text-[11px] leading-[16px] text-center font-black border-2"
+                                              style={on ? { background: '#ffffff', color: '#0d47c9', borderColor: '#0d47c9' } : { background: '#0d47c9', color: '#ffffff', borderColor: '#ffffff' }}>{n}</span>
+                                          </span>
+                                          <span className="text-[11px] leading-tight text-center" style={on ? { color: '#0d47c9', fontWeight: 700 } : { color: '#64748b' }}>{stepShort[c.key]}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <div className="flex items-center justify-between mt-3 mb-2 px-0.5">
+                                    <span className="text-[12px] text-slate-500">{col.title} · tổng</span>
+                                    <span className="text-[13px] font-black font-mono" style={{ color: '#0d47c9' }}>{colTotalAmount.toLocaleString('vi-VN')} đ</span>
+                                  </div>
+                                  <div className="space-y-2.5">
+                                    {colItems.length === 0 ? (
+                                      <div className="text-center text-slate-500 py-8 border border-dashed border-slate-300 rounded-xl">
+                                        <div className="text-[13px] font-bold">Trống</div>
+                                        <div className="text-[12px] text-slate-400 mt-1">Không có đề xuất ở trạng thái này</div>
+                                      </div>
+                                    ) : paged.map(adv => proposalCard(adv))}
+                                  </div>
+                                  <ProposalPaginationBar
+                                    page={colPageClamped}
+                                    totalPages={colTotal}
+                                    pageSize={colSize}
+                                    total={colItems.length}
+                                    onPage={(p) => setProposalColPageSafe(col.key, p)}
+                                    onPageSize={(s) => { setProposalColPageSize(prev => ({ ...prev, [col.key]: s })); setProposalColPageSafe(col.key, 1); }}
+                                  />
+                                </div>
+                              );
+                            })()}
+
+                            {/* Máy tính / máy tính bảng (≥ sm): giữ nguyên bảng Kanban 4 cột */}
+                            <div className="hidden sm:grid grid-cols-2 xl:grid-cols-4 gap-3">
                               {columns.map(col => {
                                 const colItems = filteredAdvances.filter(a => effectiveStatus(a) === col.key);
                                 const colSize = getProposalColPageSize(col.key);
@@ -10364,7 +10431,7 @@ export default function FinanceManagement({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Mã đề xuất</span>
                     <strong className="text-[#0d47c9] font-mono text-sm">{viewingProposalDetail.id}</strong>
@@ -10375,7 +10442,7 @@ export default function FinanceManagement({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div>
                     <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Đối tượng chi</span>
                     <strong className="text-slate-900 text-sm">{viewingProposalDetail.subcontractorName}</strong>
@@ -10434,7 +10501,7 @@ export default function FinanceManagement({
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div>
                     <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Nhân sự lập đề xuất</span>
                     <strong className="text-slate-700">{viewingProposalDetail.creatorName || viewingProposalDetail.creator || '—'}</strong>
@@ -10447,7 +10514,7 @@ export default function FinanceManagement({
 
                 {/* Người lập phiếu & Người quyết toán (ghi nhận riêng, chỉ hiện khi có) */}
                 {(viewingProposalDetail.payCreatorName || viewingProposalDetail.settlerName) && (
-                  <div className="grid grid-cols-2 gap-4 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                     <div>
                       <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Người lập phiếu</span>
                       <strong className="text-slate-700">{viewingProposalDetail.payCreatorName || '—'}</strong>
@@ -10463,8 +10530,8 @@ export default function FinanceManagement({
                 {viewingProposalDetail.expenseItems && viewingProposalDetail.expenseItems.length > 0 && (
                   <div className="pt-3 border-t border-slate-200">
                     <span className="text-slate-400 block text-[11px] font-bold mb-2">Bảng phân rã chi phí chi tiết</span>
-                    <div className="border border-slate-200 rounded-xl overflow-hidden">
-                      <table className="w-full text-left text-[11px]">
+                    <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                      <table className="w-full min-w-[480px] text-left text-[12px]">
                         <thead className="bg-slate-100 text-slate-500 text-[11px] font-bold">
                           <tr>
                             <th className="p-2 pl-3">Mục chi tiêu</th>
