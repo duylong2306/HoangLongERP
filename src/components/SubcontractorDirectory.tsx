@@ -539,17 +539,16 @@ export default function SubcontractorDirectory({
               className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5" data-testid="sub-field-chips">
-          {fieldChips.map(([k, label, n]) => {
-            const on = fieldFilter === k;
-            return (
-              <button key={k} type="button" data-testid={`sub-chip-${k}`} onClick={() => { setFieldFilter(k); setPageSup(1); }}
-                className={`h-9 px-3 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 border cursor-pointer ${on ? 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
-                {label}
-                <span className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-black inline-flex items-center justify-center ${on ? 'bg-[#0d47c9]' : 'bg-slate-400'}`} style={{ color: '#ffffff' }}>{n}</span>
-              </button>
-            );
-          })}
+        {/* Lĩnh vực có rất nhiều giá trị → dùng ô chọn thả xuống (kèm số lượng) thay cho hàng chip dài */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-slate-500 font-bold">Lĩnh vực</label>
+          <select data-testid="sub-field-select" value={fieldFilter}
+            onChange={(e) => { setFieldFilter(e.target.value); setPageSup(1); }}
+            className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
+            {fieldChips.map(([k, label, n]) => (
+              <option key={k} value={k}>{label} ({n})</option>
+            ))}
+          </select>
         </div>
       </div>
 

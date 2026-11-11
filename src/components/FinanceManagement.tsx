@@ -5685,7 +5685,7 @@ export default function FinanceManagement({
 
             {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi, Đơn Hàng, Nhập Thu và Nhập Chi (tab đã làm lại: tên tab đã có trên thanh tab,
                 ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
-            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && activeSubTab !== 'cong_no_phai_tra' && activeSubTab !== 'quy_tien_mat' && !(activeSubTab === 'du_lieu_ke_toan' && (duLieuTab === 'khach_hang' || duLieuTab === 'danh_muc_san_pham' || duLieuTab === 'ncc_thau_phu')) && (
+            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && activeSubTab !== 'cong_no_phai_tra' && activeSubTab !== 'quy_tien_mat' && !(activeSubTab === 'du_lieu_ke_toan' && (duLieuTab === 'khach_hang' || duLieuTab === 'danh_muc_san_pham' || duLieuTab === 'ncc_thau_phu' || duLieuTab === 'nha_cung_cap_vat_tu')) && (
               <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>

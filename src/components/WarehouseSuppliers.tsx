@@ -396,281 +396,202 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
     return matchSearch && matchField;
   });
 
+  // ── Giao diện kiểu LoLo (xanh #0d47c9, ô sáng, bo xl): bộ lọc kèm ô tìm kiếm + chip lĩnh vực, bảng máy tính + thẻ điện thoại, thanh phân trang dùng chung ──
+  const iconBtn = 'h-9 w-9 rounded-xl flex items-center justify-center bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer';
+  const inputCls = 'w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-[#0d47c9]';
+  const labelCls = 'block text-slate-600 font-bold text-[12px] mb-1';
+  const money = (n: number) => `${(n || 0).toLocaleString('vi-VN')} đ`;
+  // Số NCC theo từng lĩnh vực (hiện trên chip lọc)
+  const fieldChips: [string, string, number][] = [
+    ['all', 'Tất cả', suppliers.length],
+    ...supFields.map(f => [f, f, suppliers.filter(s => (s.field || '').trim() === f).length] as [string, string, number]),
+  ];
+  const fieldPill = (f?: string) => (
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]">{f || 'Đại lý vật tư'}</span>
+  );
+  // Trang hiện tại của danh sách đã lọc; "chọn tất cả" chỉ áp dụng cho các dòng của trang này
+  const pageRows = pg.slice(filtered);
+  const pageAllSelected = pageRows.length > 0 && pageRows.every(s => selectedRows.has(s.id));
+  const togglePage = (checked: boolean) => {
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      pageRows.forEach(s => (checked ? next.add(s.id) : next.delete(s.id)));
+      return next;
+    });
+  };
+
   return (
-    <div className="space-y-6 text-slate-200" id="warehouse_suppliers_panel">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 border border-slate-800 p-5 rounded-xl">
-        <div>
-          <h2 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse"></span>
-            Danh Mục Nhà Cung Cấp Vật Tư
-          </h2>
-        </div>
+    <div className="space-y-4" id="warehouse_suppliers_panel">
+      {/* Hàng tiêu đề: tên mục + nút icon Xuất/Nhập Excel + nút Thêm (xanh LoLo) */}
+      <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+        <span className="font-extrabold text-slate-900 text-sm">Nhà cung cấp vật tư <span className="text-slate-500 font-bold">({filtered.length})</span></span>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleExportNccExcel}
-            className="bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
-          >
-            <Download className="w-3.5 h-3.5" /> Xuất Excel
-          </button>
-          <button
-            type="button"
-            onClick={() => nccFileInputRef.current?.click()}
-            className="bg-sky-600 hover:bg-sky-500 font-bold text-xs text-white px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
-          >
-            <FileUp className="w-3.5 h-3.5" /> Nhập Excel
-          </button>
-          <input
-            ref={nccFileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleImportNccExcel}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setIsAdding(!isAdding);
-            }}
-            className="bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white px-4 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
-          >
-            {isAdding ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-            {isAdding ? 'Hủy bỏ' : 'Thêm Nhà Cung Cấp'}
+          <button type="button" onClick={handleExportNccExcel} className={iconBtn} title="Xuất Excel nhà cung cấp" data-testid="ncc-export"><Download className="w-4 h-4" /></button>
+          <button type="button" onClick={() => nccFileInputRef.current?.click()} className={iconBtn} title="Nhập Excel nhà cung cấp" data-testid="ncc-import"><FileUp className="w-4 h-4" /></button>
+          <input ref={nccFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportNccExcel} />
+          <button type="button" data-testid="ncc-add"
+            onClick={() => { resetForm(); setIsAdding(true); }}
+            style={{ background: '#0d47c9', color: '#ffffff' }}
+            className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 cursor-pointer">
+            <Plus className="w-4 h-4" />
+            Thêm nhà cung cấp
           </button>
         </div>
       </div>
 
-      {/* Adding Form */}
+      {/* Bộ lọc ô sáng kèm ô tìm kiếm + chip lĩnh vực */}
+      <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="ncc-filters">
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input type="text" data-testid="ncc-search" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Tên, mã, người đại diện…"
+              className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+          </div>
+        </div>
+        {/* Lĩnh vực có rất nhiều giá trị → dùng ô chọn thả xuống (kèm số lượng) thay cho hàng chip dài */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-slate-500 font-bold">Lĩnh vực</label>
+          <select data-testid="ncc-field-select" value={fieldFilter}
+            onChange={(e) => setFieldFilter(e.target.value)}
+            className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
+            {fieldChips.map(([k, label, n]) => (
+              <option key={k} value={k}>{label} ({n})</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Hộp Thêm / Sửa nhà cung cấp */}
       {isAdding && (
-        <form onSubmit={handleAddSubmit} className="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-4 animate-fade-in text-left">
-          <h3 className="text-xs font-bold text-teal-400 uppercase tracking-wider border-b border-slate-800 pb-2">
-            {editingId ? '✍️ CẬP NHẬT NHÀ CUNG CẤP' : '✍️ KHAI BÁO NHÀ CUNG CẤP MỚI'}
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Tên Nhà Cung Cấp *</label>
-              <input
-                type="text"
-                required
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="Nhập tên công ty/đại lý..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-              />
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[9999] p-4" data-testid="ncc-modal">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto p-5 space-y-4 shadow-xl text-slate-800 text-[13px] text-left animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="font-extrabold text-slate-900 text-sm">
+                {editingId ? 'Cập nhật nhà cung cấp' : 'Khai báo nhà cung cấp mới'}
+              </h3>
+              <button type="button" onClick={() => { setIsAdding(false); resetForm(); }}
+                className="text-slate-500 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Người Đại Diện</label>
-              <input
-                type="text"
-                value={formRep}
-                onChange={(e) => setFormRep(e.target.value)}
-                placeholder="Nhập tên người đại diện..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Lĩnh Vực Cung Cấp</label>
-              <input
-                type="text"
-                value={formField}
-                onChange={(e) => setFormField(e.target.value)}
-                placeholder="Ví dụ: Cung cấp ván ép MDF, sắt hộp..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-              />
-            </div>
+            <form onSubmit={handleAddSubmit} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Tên nhà cung cấp <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formName} onChange={(e) => setFormName(e.target.value)}
+                    placeholder="Nhập tên công ty/đại lý..." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Người đại diện</label>
+                  <input type="text" value={formRep} onChange={(e) => setFormRep(e.target.value)}
+                    placeholder="Nhập tên người đại diện..." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Lĩnh vực cung cấp</label>
+                  <input type="text" value={formField} onChange={(e) => setFormField(e.target.value)}
+                    placeholder="Ví dụ: Cung cấp ván ép MDF, sắt hộp..." className={inputCls} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Số điện thoại</label>
+                  <input type="text" value={formPhone} onChange={(e) => setFormPhone(e.target.value)}
+                    placeholder="Nhập số điện thoại..." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Email liên hệ</label>
+                  <input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)}
+                    placeholder="nhacungcap@gmail.com" className={`${inputCls} font-mono`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Địa chỉ</label>
+                  <input type="text" value={formAddress} onChange={(e) => setFormAddress(e.target.value)}
+                    placeholder="Địa chỉ nhà cung cấp..." className={inputCls} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Số tài khoản</label>
+                  <input type="text" value={formBankNo} onChange={(e) => setFormBankNo(e.target.value)}
+                    placeholder="Nhập số tài khoản ngân hàng..." className={`${inputCls} font-mono`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Tên ngân hàng</label>
+                  <input type="text" value={formBankName} onChange={(e) => setFormBankName(e.target.value)}
+                    placeholder="Ví dụ: MBBank, Techcombank..." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Công nợ khởi tạo (VNĐ)</label>
+                  <input type="number" value={formDebt || ''} onChange={(e) => setFormDebt(Number(e.target.value))}
+                    placeholder="Đặt dư nợ khởi tạo nếu có..." className={`${inputCls} font-mono`} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Công nợ đầu kỳ (VNĐ)</label>
+                  <input type="number" min={0} value={formOpeningDebt || ''} onChange={(e) => setFormOpeningDebt(Number(e.target.value))}
+                    placeholder="Công nợ đầu kỳ (nếu có)..." className={`${inputCls} font-mono`} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Ghi chú hoạt động</label>
+                <textarea value={formNote} onChange={(e) => setFormNote(e.target.value)} rows={2}
+                  placeholder="Nhập ghi chú chi tiết về điều kiện giao hàng, tiến độ..." className={inputCls} />
+              </div>
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button type="button" onClick={() => { setIsAdding(false); resetForm(); }}
+                  className="h-9 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold cursor-pointer">Hủy bỏ</button>
+                <button type="submit" style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-4 rounded-xl font-bold cursor-pointer">Xác nhận lưu</button>
+              </div>
+            </form>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Số Điện Thoại</label>
-              <input
-                type="text"
-                value={formPhone}
-                onChange={(e) => setFormPhone(e.target.value)}
-                placeholder="Nhập số điện thoại..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Email Liên Hệ</label>
-              <input
-                type="email"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                placeholder="nhacungcap@gmail.com"
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Địa Chỉ</label>
-              <input
-                type="text"
-                value={formAddress}
-                onChange={(e) => setFormAddress(e.target.value)}
-                placeholder="Địa chỉ nhà cung cấp..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Số Tài Khoản</label>
-              <input
-                type="text"
-                value={formBankNo}
-                onChange={(e) => setFormBankNo(e.target.value)}
-                placeholder="Nhập số tài khoản ngân hàng..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Tên Ngân Hàng</label>
-              <input
-                type="text"
-                value={formBankName}
-                onChange={(e) => setFormBankName(e.target.value)}
-                placeholder="Ví dụ: MBBank, Techcombank..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Công Nợ Khởi Tạo (VNĐ)</label>
-              <input
-                type="number"
-                value={formDebt || ''}
-                onChange={(e) => setFormDebt(Number(e.target.value))}
-                placeholder="Đặt dư nợ khởi tạo nếu có..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-teal-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] uppercase font-bold text-slate-455">Công Nợ Đầu Kỳ (VNĐ)</label>
-              <input
-                type="number"
-                min={0}
-                value={formOpeningDebt || ''}
-                onChange={(e) => setFormOpeningDebt(Number(e.target.value))}
-                placeholder="Công nợ đầu kỳ (nếu có)..."
-                className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-teal-500"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold text-slate-455">Ghi Chú Hoạt Động</label>
-            <textarea
-              value={formNote}
-              onChange={(e) => setFormNote(e.target.value)}
-              placeholder="Nhập ghi chú chi tiết về điều kiện giao hàng, tiến độ..."
-              rows={2}
-              className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-teal-500"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2.5 border-t border-slate-800 pt-3">
-            <button
-              type="button"
-              onClick={() => {
-                setIsAdding(false);
-                resetForm();
-              }}
-              className="bg-slate-800 hover:bg-slate-750 font-bold text-[11px] text-slate-300 px-4 py-2 rounded-lg cursor-pointer"
-            >
-              Hủy bỏ
-            </button>
-            <button
-              type="submit"
-              className="bg-emerald-600 hover:bg-emerald-500 font-bold text-[11px] text-white px-4 py-2 rounded-lg cursor-pointer"
-            >
-              Xác Nhận Lưu
-            </button>
-          </div>
-        </form>
+        </div>
       )}
 
-      {/* Debt adjustment modal */}
+      {/* Hộp điều chỉnh công nợ nhà cung cấp */}
       {adjustDebtId && (() => {
         const sup = suppliers.find(s => s.id === adjustDebtId);
         if (!sup) return null;
         return (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in text-left">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 w-full max-w-md shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200">
-              <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-                <h3 className="font-extrabold text-white text-xs uppercase tracking-wider flex items-center gap-1.5">
-                  <DollarSign className="w-4 h-4 text-amber-500" />
-                  Điều chỉnh Công nợ Nhà cung cấp
+          <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-[9999] text-left" data-testid="ncc-adjust-modal">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 w-full max-w-md shadow-xl space-y-4 text-slate-800 text-[13px] animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-lg bg-[#e8efff] text-[#0d47c9] inline-flex items-center justify-center"><DollarSign className="w-4 h-4" /></span>
+                  Điều chỉnh công nợ nhà cung cấp
                 </h3>
-                <button type="button" onClick={() => setAdjustDebtId(null)} className="text-slate-400 hover:text-white cursor-pointer">
-                  <X className="w-4 h-4" />
-                </button>
+                <button type="button" onClick={() => setAdjustDebtId(null)} className="text-slate-500 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"><X className="w-4 h-4" /></button>
               </div>
-
-              <div className="space-y-1 bg-slate-950 p-2.5 rounded-lg border border-slate-850">
-                <span className="text-[10px] text-slate-400 font-semibold block uppercase">Nhà cung cấp</span>
-                <span className="text-xs font-bold text-teal-400">{sup.name}</span>
-                <div className="flex justify-between text-[11px] text-slate-300 mt-1 pt-1 border-t border-slate-900">
-                  <span>Dư nợ hiện tại:</span>
-                  <span className="font-mono font-black text-amber-400">{sup.debt?.toLocaleString('vi-VN')} đ</span>
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <span className="text-slate-500 block text-[12px] font-bold">Nhà cung cấp</span>
+                <span className="font-extrabold text-slate-900">{sup.name}</span>
+                <div className="flex justify-between mt-1.5 pt-1.5 border-t border-slate-200">
+                  <span className="text-slate-500">Dư nợ hiện tại:</span>
+                  <b className="font-mono text-amber-700">{money(sup.debt || 0)}</b>
                 </div>
               </div>
-
-              <form onSubmit={handleAdjustDebtSubmit} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Hình thức điều chỉnh</label>
-                  <select
-                    value={adjustType}
-                    onChange={(e) => setAdjustType(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none"
-                  >
+              <form onSubmit={handleAdjustDebtSubmit} className="space-y-3">
+                <div>
+                  <label className={labelCls}>Hình thức điều chỉnh</label>
+                  <select value={adjustType} onChange={(e) => setAdjustType(e.target.value as any)} className={inputCls}>
                     <option value="decrease">Thanh toán nợ / Giảm công nợ (-)</option>
                     <option value="increase">Ghi nhận hóa đơn phát sinh / Tăng công nợ (+)</option>
                   </select>
                 </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Số tiền điều chỉnh (VNĐ) *</label>
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    value={adjustAmount || ''}
-                    onChange={(e) => setAdjustAmount(Number(e.target.value))}
-                    placeholder="Nhập số tiền..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-amber-500"
-                  />
+                <div>
+                  <label className={labelCls}>Số tiền điều chỉnh (VNĐ) <span className="text-red-500">*</span></label>
+                  <input type="number" required min={1} value={adjustAmount || ''} onChange={(e) => setAdjustAmount(Number(e.target.value))}
+                    placeholder="Nhập số tiền..." className={`${inputCls} font-mono`} />
                 </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] uppercase font-bold text-slate-400">Ghi chú diễn giải</label>
-                  <input
-                    type="text"
-                    value={adjustNote}
-                    onChange={(e) => setAdjustNote(e.target.value)}
-                    placeholder="Lý do chi trả nợ, số hóa đơn..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none"
-                  />
+                <div>
+                  <label className={labelCls}>Ghi chú diễn giải</label>
+                  <input type="text" value={adjustNote} onChange={(e) => setAdjustNote(e.target.value)}
+                    placeholder="Lý do chi trả nợ, số hóa đơn..." className={inputCls} />
                 </div>
-
-                <div className="flex justify-end gap-2 border-t border-slate-800 pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setAdjustDebtId(null)}
-                    className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-[10px] px-3.5 py-2 rounded-lg"
-                  >
-                    Đóng
-                  </button>
-                  <button
-                    type="submit"
-                    className="bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-[10px] px-4 py-2 rounded-lg"
-                  >
-                    Xác nhận cập nhật
-                  </button>
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button type="button" onClick={() => setAdjustDebtId(null)}
+                    className="h-9 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold cursor-pointer">Đóng</button>
+                  <button type="submit" style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-4 rounded-xl font-bold cursor-pointer">Xác nhận cập nhật</button>
                 </div>
               </form>
             </div>
@@ -678,267 +599,166 @@ export default function WarehouseSuppliers({ autoOpenAddSignal = 0 }: { autoOpen
         );
       })()}
 
-      {/* Main Filter & List */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        <div className={`${selectedSupDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-3">
-              <div className="relative w-full sm:w-72">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Tìm kiếm nhà cung cấp..."
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 outline-none focus:border-teal-500"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10.5px] text-slate-400 uppercase font-bold hidden sm:inline">Lĩnh vực:</span>
-                <select
-                  value={fieldFilter}
-                  onChange={(e) => setFieldFilter(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-teal-500 cursor-pointer"
-                >
-                  <option value="all">Tất cả</option>
-                  {supFields.map(f => (
-                    <option key={f} value={f}>{f}</option>
-                  ))}
-                </select>
-                <div className="flex items-center gap-1.5 text-[10.5px] text-slate-400">
-                  <span>Tổng số:</span>
-                  <span className="font-bold text-teal-400 font-mono">{filtered.length} NCC</span>
-                </div>
-              </div>
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+        {/* Danh sách (trái) */}
+        <div className={`${selectedSupDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-3 transition-all duration-300`}>
+          {/* Thanh xóa hàng loạt: chỉ hiện khi có dòng được tích */}
+          {selectedRows.size > 0 && (
+            <div className="bg-[#f3f7ff] border border-[#bcd0ff] rounded-2xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-[13px]" data-testid="ncc-bulk">
+              <span className="text-[#0d47c9] font-bold">Đã chọn {selectedRows.size} nhà cung cấp</span>
+              <button onClick={handleBulkDelete}
+                className="h-9 px-3.5 rounded-xl bg-white border border-rose-300 text-rose-600 hover:bg-rose-50 font-bold inline-flex items-center gap-1.5 cursor-pointer">
+                <Trash2 className="w-3.5 h-3.5" /> Xóa
+              </button>
+              <button onClick={() => { setSelectedRows(new Set()); setSelectAll(false); }}
+                className="h-9 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold cursor-pointer">Hủy chọn</button>
             </div>
+          )}
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider">
-                <th className="p-3 w-10 text-center">
-                  <input
-                    type="checkbox"
-                    checked={selectAll && filtered.length > 0 && filtered.every(s => selectedRows.has(s.id))}
-                    onChange={(e) => handleSelectAll(e.target.checked)}
-                    className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                  />
-                </th>
-                <th className="p-3 pl-4">Mã NCC</th>
-                <th className="p-3">Tên Nhà Cung Cấp</th>
-                <th className="p-3">Địa Chỉ</th>
-                <th className="p-3">SĐT</th>
-                <th className="p-3">Lĩnh Vực</th>
-                <th className="p-3 text-right">Công Nợ đầu kỳ</th>
-                <th className="p-3 text-right">Công Nợ hiện tại</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-850 bg-slate-900/40">
-              {filtered.length === 0 ? (
+          {/* MÁY TÍNH: bảng */}
+          <div className="hidden md:block bg-white border border-slate-200 rounded-2xl overflow-x-auto" data-testid="ncc-table">
+            <table className="w-full text-left text-slate-700 text-[13px]">
+              <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
                 <tr>
-                  <td colSpan={8} className="p-10 text-center text-slate-500 font-medium">
-                    Không tìm thấy nhà cung cấp nào khớp với bộ lọc tìm kiếm.
-                  </td>
+                  <th className="px-3 py-2.5 w-10 text-center">
+                    <input type="checkbox" checked={pageAllSelected} onChange={(e) => togglePage(e.target.checked)} className="w-4 h-4 cursor-pointer accent-[#0d47c9]" />
+                  </th>
+                  <th className="px-3 py-2.5">Mã NCC</th>
+                  <th className="px-3 py-2.5">Tên nhà cung cấp</th>
+                  <th className="px-3 py-2.5">Địa chỉ</th>
+                  <th className="px-3 py-2.5">SĐT</th>
+                  <th className="px-3 py-2.5">Lĩnh vực</th>
+                  <th className="px-3 py-2.5 text-right">Công nợ đầu kỳ</th>
+                  <th className="px-3 py-2.5 text-right">Công nợ hiện tại</th>
                 </tr>
-              ) : (
-                pg.slice(filtered).map((s) => {
-                  const currentDebt = s.debt || 0;
-                  const openDebt = s.openingDebt || 0;
-                  return (
-                    <tr
-                      key={s.id}
-                      onClick={() => setSelectedSupDetail(s)}
-                      className={`hover:bg-slate-800/40 cursor-pointer transition-colors text-slate-300 ${selectedRows.has(s.id) ? 'bg-amber-50' : ''} ${selectedSupDetail?.id === s.id ? 'bg-teal-50 border-l-2 border-teal-500' : ''}`}
-                    >
-                      <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={selectedRows.has(s.id)}
-                          onChange={(e) => { e.stopPropagation(); handleRowSelect(s.id, e.target.checked); }}
-                          className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                        />
-                      </td>
-                      <td className="p-3 pl-4 font-mono font-bold text-teal-400 text-[10px] uppercase">{s.id}</td>
-                      <td className="p-3">
-                        <div className="font-extrabold text-white text-[12.5px]">{s.name}</div>
-                        <div className="text-[10px] text-slate-455">ĐD: {s.representative || 'Chưa rõ'}</div>
-                      </td>
-                      <td className="p-3 text-slate-300">{s.address || '—'}</td>
-                      <td className="p-3 whitespace-nowrap font-mono text-slate-300">{s.phone || '—'}</td>
-                      <td className="p-3">
-                        <span className="bg-teal-50 text-teal-700 border border-teal-200 text-[10px] px-2 py-0.5 rounded-full font-semibold">
-                          {s.field || 'Đại lý vật tư'}
-                        </span>
-                      </td>
-                      <td className="p-3 text-right font-mono font-bold text-amber-400">
-                        {openDebt.toLocaleString('vi-VN')} đ
-                      </td>
-                      <td className="p-3 text-right font-mono">
-                        <span className={`font-black text-[12.5px] ${currentDebt > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
-                          {currentDebt.toLocaleString('vi-VN')} đ
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        {filtered.length > 0 && <TablePagination {...pg.props(filtered.length)} unit="nhà cung cấp" testId="supplier-pager" />}
-        {selectedRows.size > 0 && (
-          <div className="bg-slate-950 px-4 py-2 border-t border-slate-850 flex items-center gap-2 text-[10px]">
-            <span className="text-amber-500 font-bold">Đã chọn: {selectedRows.size}</span>
-            <button
-              onClick={handleBulkDelete}
-              className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
-            >
-              <Trash2 className="w-3 h-3" /> Xóa
-            </button>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filtered.length === 0 ? (
+                  <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500 italic">Không tìm thấy nhà cung cấp nào khớp với bộ lọc tìm kiếm.</td></tr>
+                ) : pageRows.map(s => (
+                  <tr key={s.id} onClick={() => setSelectedSupDetail(s)} data-testid={`ncc-row-${s.id}`}
+                    className={`cursor-pointer transition-colors ${selectedSupDetail?.id === s.id ? 'bg-[#e8efff]' : selectedRows.has(s.id) ? 'bg-[#f3f7ff]' : 'hover:bg-slate-50'}`}>
+                    <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedRows.has(s.id)} onChange={(e) => handleRowSelect(s.id, e.target.checked)} className="w-4 h-4 cursor-pointer accent-[#0d47c9]" />
+                    </td>
+                    <td className="px-3 py-2.5 font-mono font-bold text-[#0d47c9] text-[12px] uppercase">{s.id}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="font-extrabold text-slate-900">{s.name}</div>
+                      <div className="text-[12px] text-slate-500 mt-0.5">ĐD: {s.representative || 'Chưa rõ'}</div>
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-600">{s.address || '—'}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap font-mono text-slate-700">{s.phone || '—'}</td>
+                    <td className="px-3 py-2.5">{fieldPill(s.field)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono text-slate-700">{money(s.openingDebt || 0)}</td>
+                    <td className={`px-3 py-2.5 text-right font-mono font-bold ${(s.debt || 0) > 0 ? 'text-amber-700' : 'text-slate-400'}`}>{money(s.debt || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
-      </div>
 
-      {/* Right Detail Panel */}
-      {selectedSupDetail && (() => {
-        const cur = selectedSupDetail.debt || 0;
-        const opn = selectedSupDetail.openingDebt || 0;
-        return (
-          <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-in fade-in zoom-in-95 duration-200 space-y-4 text-left text-xs">
-            <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-              <div>
-                <span className="font-mono text-[9px] text-teal-400 font-black uppercase tracking-wider">
-                  {selectedSupDetail.id.toUpperCase()}
-                </span>
-                <h3 className="font-extrabold text-white text-sm mt-0.5">
-                  Hồ sơ Nhà cung cấp vật tư
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedSupDetail(null)}
-                className="text-slate-400 hover:text-white bg-slate-850 p-1.5 rounded-lg transition-colors cursor-pointer"
-                title="Đóng xem chi tiết"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="p-4 bg-slate-950/60 rounded-xl space-y-3 border border-slate-850">
-                <div>
-                  <span className="text-slate-500 block text-[9.5px] uppercase font-bold">Tên nhà cung cấp</span>
-                  <strong className="text-white text-md block font-extrabold">{selectedSupDetail.name}</strong>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                  <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Người đại diện</span>
-                    <span className="text-white mt-1 block font-bold text-[11px]">{selectedSupDetail.representative || 'Chưa rõ'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số điện thoại</span>
-                    <span className="text-slate-205 mt-1 block font-mono font-bold text-[11px]">{selectedSupDetail.phone || 'Chưa cập nhật'}</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                  <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Email</span>
-                    <span className="text-slate-300 mt-1 block font-mono text-[11px] truncate" title={selectedSupDetail.email}>{selectedSupDetail.email || 'Chưa cập nhật'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Địa chỉ</span>
-                    <span className="text-slate-300 mt-1 block font-medium text-[11px]">{selectedSupDetail.address || 'Trống'}</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                  <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Lĩnh vực</span>
-                    <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded bg-teal-50 border border-teal-200 text-teal-700">
-                      {selectedSupDetail.field || 'Chưa phân loại'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ngân hàng</span>
-                    <span className="text-slate-300 mt-1 block font-mono text-[11px] truncate" title={selectedSupDetail.bankName}>
-                      {selectedSupDetail.bankAccount ? `${selectedSupDetail.bankAccount}${selectedSupDetail.bankName ? ` (${selectedSupDetail.bankName})` : ''}` : 'Chưa liên kết'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-slate-850/50">
-                  <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ghi chú</span>
-                  <span className="text-slate-300 mt-1 block text-[10.5px] max-h-12 overflow-y-auto" title={selectedSupDetail.note}>
-                    {selectedSupDetail.note || 'Không có ghi chú'}
+          {/* ĐIỆN THOẠI: mỗi nhà cung cấp 1 thẻ, bấm để xem chi tiết */}
+          <div className="md:hidden space-y-3" data-testid="ncc-cards">
+            {filtered.length === 0 && (
+              <div className="bg-white border border-slate-200 rounded-2xl px-4 py-8 text-center text-slate-500 italic text-[13px]">Không tìm thấy nhà cung cấp nào khớp với bộ lọc tìm kiếm.</div>
+            )}
+            {pageRows.map(s => (
+              <div key={`card:${s.id}`} onClick={() => setSelectedSupDetail(s)}
+                className={`bg-white border rounded-2xl p-4 space-y-2 cursor-pointer ${selectedRows.has(s.id) ? 'border-[#bcd0ff] bg-[#f3f7ff]' : 'border-slate-200'}`}>
+                <div className="flex items-start gap-2.5">
+                  <span onClick={(e) => e.stopPropagation()} className="pt-0.5">
+                    <input type="checkbox" checked={selectedRows.has(s.id)} onChange={(e) => handleRowSelect(s.id, e.target.checked)} className="w-4 h-4 cursor-pointer accent-[#0d47c9]" />
                   </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-extrabold text-slate-900 text-[14px] break-words">{s.name}</div>
+                    <div className="flex items-center flex-wrap gap-2 mt-0.5">
+                      <span className="font-mono text-[12px] text-[#0d47c9] font-bold uppercase">{s.id}</span>
+                      {fieldPill(s.field)}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-[12px] text-slate-600 space-y-1 pl-6">
+                  {s.representative && <div>👤 {s.representative}</div>}
+                  {s.phone && <div>📞 <a href={`tel:${s.phone}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[#0d47c9] font-bold">{s.phone}</a></div>}
+                  {s.address && <div>📍 {s.address}</div>}
+                  <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-500">Công nợ đầu kỳ</span><b className="font-mono text-slate-700">{money(s.openingDebt || 0)}</b></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Công nợ hiện tại</span><b className={`font-mono ${(s.debt || 0) > 0 ? 'text-amber-700' : 'text-slate-400'}`}>{money(s.debt || 0)}</b></div>
                 </div>
               </div>
-
-              <div className="p-4 bg-slate-950/60 rounded-xl space-y-2 border border-slate-850">
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">Công nợ đầu kỳ:</span>
-                  <span className="font-mono font-extrabold text-amber-400">{opn.toLocaleString('vi-VN')} đ</span>
-                </div>
-                <div className="flex justify-between text-[11px] pt-1 border-t border-slate-900">
-                  <span className="text-slate-400">Công nợ hiện tại:</span>
-                  <span className="font-mono font-extrabold text-amber-400">{cur.toLocaleString('vi-VN')} đ</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-800 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  handleEditClick(selectedSupDetail);
-                  document.getElementById('warehouse_suppliers_panel')?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="bg-amber-600 hover:bg-amber-550 text-white font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
-              >
-                <Edit2 className="w-3.5 h-3.5" /> Sửa
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAdjustDebtId(selectedSupDetail.id);
-                  setAdjustAmount(0);
-                  setAdjustType('decrease');
-                }}
-                className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
-              >
-                <DollarSign className="w-3.5 h-3.5" /> Công nợ
-              </button>
-            </div>
-
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  handleDelete(selectedSupDetail.id, selectedSupDetail.name);
-                  setSelectedSupDetail(null);
-                }}
-                className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors w-full"
-              >
-                <Trash2 className="w-3.5 h-3.5" /> Xóa nhà cung cấp
-              </button>
-            </div>
-
-            <div className="pt-1 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setSelectedSupDetail(null)}
-                className="bg-slate-800 hover:bg-slate-755 text-slate-200 font-bold px-4 py-1.5 rounded-xl transition-colors cursor-pointer w-full text-center"
-              >
-                Đóng chi tiết
-              </button>
-            </div>
+            ))}
           </div>
-        );
-      })()}
 
+          {/* Phân trang — thanh dùng chung */}
+          {filtered.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              <TablePagination {...pg.props(filtered.length)} unit="nhà cung cấp" testId="supplier-pager" />
+            </div>
+          )}
+        </div>
+
+        {/* Khung chi tiết: máy tính = cột phải dính; điện thoại/máy tính bảng = hộp nổi phủ màn hình */}
+        {selectedSupDetail && (() => {
+          const sup = selectedSupDetail;
+          const field = (label: string, val: React.ReactNode) => (
+            <div><span className="text-slate-500 block text-[12px] font-bold">{label}</span><div className="text-slate-900 font-semibold mt-0.5 break-words">{val}</div></div>
+          );
+          return (
+            <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-slate-900/40 xl:static xl:z-auto xl:bg-transparent xl:block xl:col-span-5"
+              onClick={() => setSelectedSupDetail(null)} data-testid="ncc-detail">
+              <div className="w-full max-w-lg xl:max-w-none bg-white border border-slate-200 rounded-t-2xl sm:rounded-2xl p-5 max-h-[90vh] overflow-y-auto xl:sticky xl:top-4 space-y-4 shadow-xl xl:shadow-none text-left"
+                onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-start gap-3 border-b border-slate-100 pb-3">
+                  <div className="min-w-0">
+                    <span className="font-mono text-[12px] text-[#0d47c9] font-black uppercase">{sup.id}</span>
+                    <h3 className="font-extrabold text-slate-900 text-[15px] mt-0.5 break-words">{sup.name}</h3>
+                    <div className="mt-1">{fieldPill(sup.field)}</div>
+                  </div>
+                  <button type="button" onClick={() => setSelectedSupDetail(null)} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer" title="Đóng xem chi tiết"><X className="w-4 h-4" /></button>
+                </div>
+
+                <div className="space-y-3 text-[13px]">
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                    {field('Người đại diện', sup.representative || 'Chưa rõ')}
+                    {field('📞 Số điện thoại', <span className="font-mono">{sup.phone || 'Chưa cập nhật'}</span>)}
+                    {field('✉️ Email', <span className="font-mono">{sup.email || 'Chưa cập nhật'}</span>)}
+                    {field('📍 Địa chỉ', sup.address || 'Trống')}
+                    {field('Ngân hàng', <span className="font-mono">{sup.bankAccount ? `${sup.bankAccount}${sup.bankName ? ` (${sup.bankName})` : ''}` : 'Chưa liên kết'}</span>)}
+                  </div>
+
+                  <div className="p-3.5 bg-white border border-slate-200 rounded-xl space-y-1.5">
+                    <div className="flex justify-between"><span className="text-slate-500">Công nợ đầu kỳ:</span><b className="font-mono text-slate-800">{money(sup.openingDebt || 0)}</b></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Công nợ hiện tại:</span><b className="font-mono text-amber-700">{money(sup.debt || 0)}</b></div>
+                  </div>
+
+                  {sup.note && <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-slate-700 leading-normal">{sup.note}</div>}
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex justify-between items-center gap-2">
+                  <div className="flex gap-1.5">
+                    {sup.phone && (
+                      <a href={`tel:${sup.phone}`} className="p-2 rounded-xl bg-white border border-slate-200 text-emerald-700 hover:bg-emerald-50 flex items-center justify-center" title="Gọi điện liên hệ"><Phone className="w-4 h-4" /></a>
+                    )}
+                    <button type="button" onClick={() => handleEditClick(sup)} data-testid="ncc-edit"
+                      className={`p-2 rounded-xl border ${canEditSup ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer' : 'text-slate-400 border-slate-200 cursor-not-allowed opacity-50'}`} title="Sửa nhà cung cấp">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button type="button" data-testid="ncc-adjust"
+                      onClick={() => { setAdjustDebtId(sup.id); setAdjustAmount(0); setAdjustType('decrease'); }}
+                      className="p-2 rounded-xl bg-white border border-slate-200 text-amber-700 hover:bg-amber-50 cursor-pointer" title="Điều chỉnh công nợ">
+                      <DollarSign className="w-4 h-4" />
+                    </button>
+                    <button type="button" data-testid="ncc-delete"
+                      onClick={() => { handleDelete(sup.id, sup.name); setSelectedSupDetail(null); }}
+                      className={`p-2 rounded-xl border ${canDeleteSup ? 'bg-white border-rose-300 text-rose-600 hover:bg-rose-50 cursor-pointer' : 'text-slate-400 border-slate-200 cursor-not-allowed opacity-50'}`} title="Xóa nhà cung cấp này">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => setSelectedSupDetail(null)} className="h-9 px-4 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đóng chi tiết</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
