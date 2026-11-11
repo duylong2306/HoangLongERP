@@ -5683,7 +5683,7 @@ export default function FinanceManagement({
 
             {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi, Đơn Hàng, Nhập Thu và Nhập Chi (tab đã làm lại: tên tab đã có trên thanh tab,
                 ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
-            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && (
+            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && (
               <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
@@ -9610,83 +9610,142 @@ export default function FinanceManagement({
             })()}
 
             {/* TAB 9: CÔNG NỢ PHẢI THU */}
-            {activeSubTab === 'cong_no_phai_thu' && (
+            {activeSubTab === 'cong_no_phai_thu' && (() => {
+              // Tiền VNĐ theo kiểu Việt; số âm = "Dư có" (khách trả trước nhiều hơn giá trị)
+              const money = (n: number) => `${(n || 0).toLocaleString('vi-VN')} đ`;
+              const moneySigned = (n: number) => (n >= 0 ? money(n) : `-${money(Math.abs(n))}`);
+              const toggleGroup = (key: string) => setExpandedCustomers(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+              // Pill lĩnh vực (dùng chung bảng + thẻ)
+              const fieldPill = (f?: string) => (
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${
+                  f === 'Xây dựng' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                  f === 'Nội thất' ? 'bg-sky-50 text-sky-700 border-sky-200' :
+                  f === 'Cơ khí' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                  'bg-slate-100 text-slate-600 border-slate-200'}`}>{f || '—'}</span>
+              );
+              // Nút thao tác của 1 công trình (xem phiếu thu / sửa / xóa) — dùng chung bảng + thẻ
+              const projActions = (r: any) => (
+                <div className="flex items-center justify-center gap-1.5">
+                  <button
+                    onClick={() => setReceiptDetail({ receipts: getReceiptsForRow(r), title: `Phiếu thu — ${r.projectName}` })}
+                    className="p-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg cursor-pointer"
+                    title="Xem phiếu thu của công trình"
+                  ><Eye className="w-3.5 h-3.5" /></button>
+                  {!r.isAuto && !r._isOutOfProject && (
+                    <>
+                      <button onClick={() => handleEditReceivable(r)} className="p-1.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg cursor-pointer" title="Chỉnh sửa công nợ"><Edit className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => handleDeleteReceivable(r)} className="p-1.5 border border-rose-300 text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer" title="Xóa công nợ"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </>
+                  )}
+                </div>
+              );
+              // Ô "Còn phải thu": cam khi còn nợ, xanh + nhãn "Dư có" khi khách trả trước
+              const remainCell = (v: number, strong = true) => (
+                <span className={`font-mono ${strong ? 'font-black' : 'font-bold'} ${v < 0 ? 'text-emerald-700' : 'text-orange-700'}`}>
+                  {moneySigned(v)}
+                  {v < 0 && <span className="block text-[11px] font-bold text-emerald-700" data-testid="du-co">Dư có · khách trả trước</span>}
+                </span>
+              );
+              const tot = receivablePageInfo.totals;
+              return (
               <div className="space-y-4">
+                {/* Hàng tiêu đề: tên mục + nút lấy công nợ đầu kỳ */}
+                <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+                  <span className="font-extrabold text-slate-900 text-sm">Danh sách công nợ phải thu</span>
+                  <button
+                    type="button"
+                    onClick={handleUpdateOpeningReceivables}
+                    className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-[#bcd0ff] text-[#0d47c9] hover:bg-[#f3f7ff] cursor-pointer"
+                    title="Lấy Công Nợ đầu kỳ > 0 từ Khách Hàng đưa vào cột Giá Trị"
+                    data-testid="receivable-opening"
+                  >
+                    <Database className="w-4 h-4" />
+                    Cập nhật Công Nợ Đầu Kỳ
+                  </button>
+                </div>
 
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-850 pb-3">
-                  <div>
-                    <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block">
-                      Danh sách công nợ phải thu
-                    </span>
+                {/* 3 ô tổng (tính trên toàn bộ danh sách đã lọc, không chỉ trang hiện tại) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-testid="receivable-tiles">
+                  <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                    <div className="text-[12px] text-slate-500 font-bold">Tổng giá trị</div>
+                    <div className="text-[18px] font-black text-slate-900 font-mono mt-0.5">{money(tot.tongGiaTri)}</div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleUpdateOpeningReceivables}
-                      className="bg-amber-600 hover:bg-amber-550 text-white font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-amber-500 transition-colors"
-                      title="Lấy Công Nợ đầu kỳ > 0 từ Khách Hàng đưa vào cột Giá Trị"
-                    >
-                      <Database className="w-3 h-3" />
-                      Cập nhật Công Nợ Đầu Kỳ
-                    </button>
+                  <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                    <div className="text-[12px] text-slate-500 font-bold">Đã thu / Tạm ứng</div>
+                    <div className="text-[18px] font-black text-emerald-700 font-mono mt-0.5">+{money(tot.daThu)}</div>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                    <div className="text-[12px] text-slate-500 font-bold">Còn phải thu</div>
+                    <div className="text-[18px] mt-0.5">{remainCell(tot.conLai)}</div>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
+                {/* Bộ lọc ô sáng kèm ô tìm kiếm (thanh tiêu đề chung đã ẩn cho tab này) */}
+                <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="receivable-filters">
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Từ ngày</label>
-                    <input type="date" value={receivableFilters.fromDate} onChange={(e) => updateReceivableFilter({ fromDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                    <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input type="text" data-testid="receivable-search" placeholder="Chủ đầu tư, công trình, ghi chú…" value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="h-9 w-56 bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Đến ngày</label>
-                    <input type="date" value={receivableFilters.toDate} onChange={(e) => updateReceivableFilter({ toDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                    <label className="text-[11px] text-slate-500 font-bold">Từ ngày</label>
+                    <input type="date" value={receivableFilters.fromDate} onChange={(e) => updateReceivableFilter({ fromDate: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Chủ đầu tư</label>
-                    <select value={receivableFilters.investor} onChange={(e) => updateReceivableFilter({ investor: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                    <label className="text-[11px] text-slate-500 font-bold">Đến ngày</label>
+                    <input type="date" value={receivableFilters.toDate} onChange={(e) => updateReceivableFilter({ toDate: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-slate-500 font-bold">Chủ đầu tư</label>
+                    <select value={receivableFilters.investor} onChange={(e) => updateReceivableFilter({ investor: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer max-w-[220px]">
                       <option value="">Tất cả</option>
                       {Array.from(new Set(groupedReceivables.map(g => g.investor))).map(inv => (<option key={inv} value={inv}>{inv}</option>))}
                     </select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Trạng thái</label>
-                    <select value={receivableFilters.status} onChange={(e) => updateReceivableFilter({ status: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                    <label className="text-[11px] text-slate-500 font-bold">Trạng thái</label>
+                    <select value={receivableFilters.status} onChange={(e) => updateReceivableFilter({ status: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
                       <option value="">Tất cả</option>
                       <option value="con_no">Còn phải thu</option>
                       <option value="da_thu">Đã thu hết</option>
                     </select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Lĩnh vực</label>
-                    <select value={receivableFilters.field} onChange={(e) => updateReceivableFilter({ field: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                    <label className="text-[11px] text-slate-500 font-bold">Lĩnh vực</label>
+                    <select value={receivableFilters.field} onChange={(e) => updateReceivableFilter({ field: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
                       <option value="">Tất cả</option>
                       <option value="Xây dựng">Xây Dựng</option>
                       <option value="Nội thất">Nội Thất</option>
                       <option value="Cơ khí">Cơ Khí</option>
                     </select>
                   </div>
-                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updateReceivableFilter({ investor: '', status: '', field: '', fromDate: `${y}-01-01`, toDate: `${y}-12-31` }); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updateReceivableFilter({ investor: '', status: '', field: '', fromDate: `${y}-01-01`, toDate: `${y}-12-31` }); setSearchTerm(''); }} className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đặt lại</button>
                 </div>
 
-                <div className="overflow-x-auto text-[10.5px]">
-                  <table className="w-full text-left text-slate-300">
-                    <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
+                {/* MÁY TÍNH: bảng theo chủ đầu tư, bấm mũi tên xổ danh sách công trình */}
+                <div className="hidden md:block overflow-x-auto bg-white border border-slate-200 rounded-2xl" data-testid="receivable-table">
+                  <table className="w-full text-left text-slate-700 text-[13px]">
+                    <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
                       <tr>
                         <th className="px-3 py-2">Chủ đầu tư / Dự án công trình</th>
                         <th className="px-3 py-2">Lĩnh vực</th>
-                        <th className="px-3 py-2 text-right">Công Nợ Đầu Kỳ</th>
+                        <th className="px-3 py-2 text-right">Công nợ đầu kỳ</th>
                         <th className="px-3 py-2 text-right">Giá trị HĐ</th>
                         <th className="px-3 py-2 text-right">Tổng giá trị</th>
-                        <th className="px-3 py-2 text-right">Đã Thu/ Tạm Ứng</th>
-                        <th className="px-3 py-2 text-right text-orange-400 font-black">Còn phải thu</th>
+                        <th className="px-3 py-2 text-right">Đã thu / Tạm ứng</th>
+                        <th className="px-3 py-2 text-right">Còn phải thu</th>
                         <th className="px-3 py-2">Ghi chú</th>
-                        <th className="px-3 py-2 text-center w-20">Hành động</th>
+                        <th className="px-3 py-2 text-center w-28">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredReceivables.length === 0 && (
                         <tr>
-                          <td colSpan={9} className="text-center py-10 text-slate-500 font-bold font-sans">
+                          <td colSpan={9} className="text-center py-10 text-slate-500 italic">
                             {groupedReceivables.length === 0 ? '📭 Chưa có dữ liệu công nợ phải thu. Hãy import từ Excel hoặc thêm mới.' : 'Không tìm thấy công nợ phải thu khớp bộ lọc.'}
                           </td>
                         </tr>
@@ -9696,100 +9755,41 @@ export default function FinanceManagement({
                         return (
                           <React.Fragment key={g.key}>
                             {/* Dòng Chủ đầu tư (tổng hợp) */}
-                            <tr className="border-b border-slate-800 bg-slate-800/40 hover:bg-slate-800/70 font-sans">
+                            <tr className="border-b border-slate-200 bg-slate-50 hover:bg-slate-100 font-sans" data-testid={`receivable-group-${g.key}`}>
                               <td className="px-3 py-3">
                                 <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => setExpandedCustomers(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; })}
-                                    className="text-slate-400 hover:text-white text-[10px] w-4 cursor-pointer"
-                                    title={expanded ? 'Thu gọn' : 'Xem chi tiết công trình'}
-                                  >
-                                    {expanded ? '▼' : '▶'}
-                                  </button>
+                                  <button onClick={() => toggleGroup(g.key)} className="text-slate-500 hover:text-slate-900 text-[12px] w-4 cursor-pointer" title={expanded ? 'Thu gọn' : 'Xem chi tiết công trình'}>{expanded ? '▼' : '▶'}</button>
                                   <div>
-                                    <button
-                                      onClick={() => setExpandedCustomers(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; })}
-                                      className="font-extrabold text-white text-[13px] text-left hover:underline cursor-pointer"
-                                      title="Click để xem chi tiết các công trình"
-                                    >
-                                      {g.investor}
-                                    </button>
-                                    <div className="text-[9px] text-slate-400 mt-0.5">{g.projects.filter((p: any) => !p._isOutOfProject).length} công trình · Quản lý theo Chủ đầu tư</div>
+                                    <button onClick={() => toggleGroup(g.key)} className="font-extrabold text-slate-900 text-[13px] text-left hover:underline cursor-pointer" title="Bấm để xem chi tiết các công trình">{g.investor}</button>
+                                    <div className="text-[11px] text-slate-500 mt-0.5">{g.projects.filter((p: any) => !p._isOutOfProject).length} công trình · Quản lý theo Chủ đầu tư</div>
                                   </div>
                                 </div>
                               </td>
-                              <td className="px-3 py-3 text-[10px] text-slate-400 italic">Tổng hợp</td>
-                              <td className="px-3 py-3 text-right font-mono font-bold text-amber-400">
-                                {g.cdkValue > 0 ? `${g.cdkValue.toLocaleString('vi-VN')} đ` : '—'}
-                              </td>
-                              <td className="px-3 py-3 text-right font-mono font-bold text-slate-100">
-                                {g.tongHopDong.toLocaleString('vi-VN')} đ
-                              </td>
-                              <td className="px-3 py-3 text-right font-mono font-bold text-violet-400">
-                                {g.tongGiaTri.toLocaleString('vi-VN')} đ
-                              </td>
-                              <td className="px-3 py-3 text-right font-mono text-emerald-400 font-bold">+{g.daThu.toLocaleString('vi-VN')} đ</td>
-                              <td className={`px-3 py-3 text-right font-mono font-black ${g.conLai < 0 ? 'text-emerald-700 bg-emerald-50' : 'text-orange-700 bg-orange-50'}`}>
-                                {g.conLai >= 0 ? `${g.conLai.toLocaleString('vi-VN')} đ` : `-${Math.abs(g.conLai).toLocaleString('vi-VN')} đ`}
-                                {g.conLai < 0 && <span className="block text-[9px] font-bold uppercase tracking-wide text-emerald-700" data-testid="du-co">Dư có · khách trả trước</span>}
-                              </td>
-                              <td className="px-3 py-3 text-slate-400 italic max-w-xs truncate" title={g.customer?.notes}>
-                                {g.customer?.notes || '-'}
-                              </td>
-                              <td className="px-3 py-3">
-                                <div className="flex items-center justify-center gap-2">
-                                  {/* Dòng tổng hợp không có nút thao tác */}
-                                </div>
-                              </td>
+                              <td className="px-3 py-3 text-[12px] text-slate-500 italic">Tổng hợp</td>
+                              <td className="px-3 py-3 text-right font-mono font-bold text-amber-700">{g.cdkValue > 0 ? money(g.cdkValue) : '—'}</td>
+                              <td className="px-3 py-3 text-right font-mono font-bold text-slate-900">{money(g.tongHopDong)}</td>
+                              <td className="px-3 py-3 text-right font-mono font-bold text-violet-700">{money(g.tongGiaTri)}</td>
+                              <td className="px-3 py-3 text-right font-mono text-emerald-700 font-bold">+{money(g.daThu)}</td>
+                              <td className={`px-3 py-3 text-right ${g.conLai < 0 ? 'bg-emerald-50' : 'bg-orange-50'}`}>{remainCell(g.conLai)}</td>
+                              <td className="px-3 py-3 text-slate-500 italic max-w-xs truncate" title={g.customer?.notes}>{g.customer?.notes || '-'}</td>
+                              <td className="px-3 py-3"></td>{/* Dòng tổng hợp không có nút thao tác */}
                             </tr>
 
                             {/* Chi tiết từng công trình khi mở rộng */}
                             {expanded && g.projects.map((r: any) => {
-                              const isOutOfProjectRow = !!r._isOutOfProject;
+                              const outOfProj = !!r._isOutOfProject;
                               const conLaiCT = (r.contractValue || 0) - (r.collected || 0);
                               return (
-                                <tr key={`child:${r.id}`} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
-                                  <td className="px-3 py-2.5 pl-9">
-                                    <div className="font-semibold text-slate-200 text-[11px]">{r.projectName}</div>
-                                  </td>
-                                  <td className="px-3 py-2.5">
-                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                      r.field === 'Xây dựng' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                                      r.field === 'Nội thất' ? 'bg-sky-50 text-sky-700 border border-sky-200' :
-                                      r.field === 'Cơ khí' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                                      'bg-slate-100 text-slate-600 border border-slate-200'
-                                    }`}>
-                                      {r.field || '—'}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right text-slate-500 text-[10px] italic">—</td>
-                                  <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-200">
-                                    {isOutOfProjectRow ? '—' : `${(r.contractValue || 0).toLocaleString('vi-VN')} đ`}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right font-mono text-slate-500 text-[10px] italic">—</td>
-                                  <td className="px-3 py-2.5 text-right font-mono text-emerald-400">+{(r.collected || 0).toLocaleString('vi-VN')} đ</td>
-                                  <td className="px-3 py-2.5 text-right font-mono font-black text-slate-400">
-                                    {isOutOfProjectRow ? '—' : (conLaiCT >= 0 ? `${conLaiCT.toLocaleString('vi-VN')} đ` : `-${Math.abs(conLaiCT).toLocaleString('vi-VN')} đ`)}
-                                    {!isOutOfProjectRow && conLaiCT < 0 && <span className="block text-[9px] font-bold uppercase tracking-wide text-emerald-700" data-testid="du-co">Dư có · khách trả trước</span>}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-slate-400 text-[10px] max-w-xs truncate" title={r.notes}>{r.notes || '-'}</td>
-                                  <td className="px-3 py-2.5">
-                                    <div className="flex items-center justify-center gap-2">
-                                      <button
-                                        onClick={() => setReceiptDetail({ receipts: getReceiptsForRow(r), title: `Phiếu thu — ${r.projectName}` })}
-                                        className="text-cyan-400 hover:text-cyan-300 p-1 border border-cyan-500/30 rounded cursor-pointer"
-                                        title="Xem phiếu thu của công trình"
-                                      >
-                                        🧾
-                                      </button>
-                                      {!r.isAuto && !isOutOfProjectRow && (
-                                        <>
-                                          <button onClick={() => handleEditReceivable(r)} className="text-blue-400 hover:text-blue-300 p-1" title="Chỉnh sửa công nợ"><Edit className="w-3.5 h-3.5" /></button>
-                                          <button onClick={() => handleDeleteReceivable(r)} className="text-rose-400 hover:text-rose-300 p-1" title="Xóa công nợ"><Trash2 className="w-3.5 h-3.5" /></button>
-                                        </>
-                                      )}
-                                    </div>
-                                  </td>
+                                <tr key={`child:${r.id}`} className="border-b border-slate-100 bg-white hover:bg-slate-50 font-sans">
+                                  <td className="px-3 py-2.5 pl-10"><div className="font-semibold text-slate-800">{r.projectName}</div></td>
+                                  <td className="px-3 py-2.5">{fieldPill(r.field)}</td>
+                                  <td className="px-3 py-2.5 text-right text-slate-400 italic">—</td>
+                                  <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-800">{outOfProj ? '—' : money(r.contractValue || 0)}</td>
+                                  <td className="px-3 py-2.5 text-right text-slate-400 italic">—</td>
+                                  <td className="px-3 py-2.5 text-right font-mono text-emerald-700">+{money(r.collected || 0)}</td>
+                                  <td className="px-3 py-2.5 text-right">{outOfProj ? <span className="text-slate-400">—</span> : remainCell(conLaiCT, false)}</td>
+                                  <td className="px-3 py-2.5 text-slate-500 max-w-xs truncate" title={r.notes}>{r.notes || '-'}</td>
+                                  <td className="px-3 py-2.5">{projActions(r)}</td>
                                 </tr>
                               );
                             })}
@@ -9798,26 +9798,13 @@ export default function FinanceManagement({
                       })}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t-2 border-slate-700 bg-slate-900/80 font-sans">
-                        <td className="px-3 py-3 font-extrabold text-white text-[11px] uppercase tracking-wider" colSpan={2}>
-                          Tổng cộng ({receivablePageInfo.total} chủ đầu tư)
-                        </td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-amber-400">
-                          {receivablePageInfo.totals.cdkValue > 0 ? `${receivablePageInfo.totals.cdkValue.toLocaleString('vi-VN')} đ` : '—'}
-                        </td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-slate-100">
-                          {receivablePageInfo.totals.tongHopDong.toLocaleString('vi-VN')} đ
-                        </td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-violet-400">
-                          {receivablePageInfo.totals.tongGiaTri.toLocaleString('vi-VN')} đ
-                        </td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-emerald-400">
-                          +{receivablePageInfo.totals.daThu.toLocaleString('vi-VN')} đ
-                        </td>
-                        <td className={`px-3 py-3 text-right font-mono font-black ${receivablePageInfo.totals.conLai < 0 ? 'text-emerald-700 bg-emerald-50' : 'text-orange-700 bg-orange-50'}`}>
-                          {receivablePageInfo.totals.conLai >= 0 ? `${receivablePageInfo.totals.conLai.toLocaleString('vi-VN')} đ` : `-${Math.abs(receivablePageInfo.totals.conLai).toLocaleString('vi-VN')} đ`}
-                          {receivablePageInfo.totals.conLai < 0 && <span className="block text-[9px] font-bold uppercase tracking-wide text-emerald-700" data-testid="du-co">Dư có · khách trả trước</span>}
-                        </td>
+                      <tr className="border-t-2 border-slate-200 bg-slate-50 font-sans">
+                        <td className="px-3 py-3 font-extrabold text-slate-900 text-[12px] uppercase tracking-wide" colSpan={2}>Tổng cộng ({receivablePageInfo.total} chủ đầu tư)</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-amber-700">{tot.cdkValue > 0 ? money(tot.cdkValue) : '—'}</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-slate-900">{money(tot.tongHopDong)}</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-violet-700">{money(tot.tongGiaTri)}</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-emerald-700">+{money(tot.daThu)}</td>
+                        <td className={`px-3 py-3 text-right ${tot.conLai < 0 ? 'bg-emerald-50' : 'bg-orange-50'}`}>{remainCell(tot.conLai)}</td>
                         <td className="px-3 py-3"></td>
                         <td className="px-3 py-3"></td>
                       </tr>
@@ -9825,25 +9812,81 @@ export default function FinanceManagement({
                   </table>
                 </div>
 
-                {/* Phân trang + Tổng cộng (tính trên toàn bộ danh sách lọc, không chỉ trang hiện tại) */}
-                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
-                  <div className="flex items-center gap-2">
-                    <span>Hiển thị</span>
-                    <select value={receivablePageSize} onChange={(e) => { setReceivablePageSize(Number(e.target.value)); setReceivablePage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
-                      <option value={5}>5</option>
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
-                      <option value={-1}>Tất cả</option>
-                    </select>
-                    <span>chủ đầu tư/trang</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span>Trang {receivablePageInfo.safePage}/{receivablePageInfo.totalPages} · {receivablePageInfo.total} chủ đầu tư</span>
-                    <button type="button" disabled={receivablePageInfo.safePage <= 1} onClick={() => setReceivablePage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
-                    <button type="button" disabled={receivablePageInfo.safePage >= receivablePageInfo.totalPages} onClick={() => setReceivablePage(p => Math.min(receivablePageInfo.totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
-                  </div>
+                {/* ĐIỆN THOẠI: mỗi chủ đầu tư 1 thẻ, bấm để xổ danh sách công trình */}
+                <div className="md:hidden space-y-3" data-testid="receivable-cards">
+                  {filteredReceivables.length === 0 && (
+                    <div className="bg-white border border-slate-200 rounded-2xl px-4 py-8 text-center text-slate-500 italic text-[13px]">
+                      {groupedReceivables.length === 0 ? '📭 Chưa có dữ liệu công nợ phải thu.' : 'Không tìm thấy công nợ phải thu khớp bộ lọc.'}
+                    </div>
+                  )}
+                  {receivablePageInfo.pageGroups.map((g) => {
+                    const expanded = expandedCustomers.has(g.key);
+                    return (
+                      <div key={`card:${g.key}`} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                        <button type="button" onClick={() => toggleGroup(g.key)} className="w-full text-left px-4 py-3 flex items-start gap-2 cursor-pointer">
+                          <span className="text-slate-500 text-[12px] mt-1">{expanded ? '▼' : '▶'}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-extrabold text-slate-900 text-[14px] break-words">{g.investor}</span>
+                            <span className="block text-[12px] text-slate-500">{g.projects.filter((p: any) => !p._isOutOfProject).length} công trình</span>
+                          </span>
+                        </button>
+                        <div className="px-4 pb-3 grid grid-cols-2 gap-x-3 gap-y-2 text-[12px]">
+                          {g.cdkValue > 0 && (<div><div className="text-slate-500 font-semibold">Công nợ đầu kỳ</div><div className="font-mono font-bold text-amber-700">{money(g.cdkValue)}</div></div>)}
+                          <div><div className="text-slate-500 font-semibold">Giá trị HĐ</div><div className="font-mono font-bold text-slate-900">{money(g.tongHopDong)}</div></div>
+                          <div><div className="text-slate-500 font-semibold">Tổng giá trị</div><div className="font-mono font-bold text-violet-700">{money(g.tongGiaTri)}</div></div>
+                          <div><div className="text-slate-500 font-semibold">Đã thu / Tạm ứng</div><div className="font-mono font-bold text-emerald-700">+{money(g.daThu)}</div></div>
+                        </div>
+                        <div className={`px-4 py-2.5 border-t border-slate-100 flex items-center justify-between gap-2 ${g.conLai < 0 ? 'bg-emerald-50' : 'bg-orange-50'}`}>
+                          <span className="text-[12px] font-bold text-slate-600">Còn phải thu</span>
+                          <span className="text-right text-[14px]">{remainCell(g.conLai)}</span>
+                        </div>
+                        {expanded && (
+                          <div className="border-t border-slate-100 divide-y divide-slate-100 bg-slate-50/60">
+                            {g.projects.map((r: any) => {
+                              const outOfProj = !!r._isOutOfProject;
+                              const conLaiCT = (r.contractValue || 0) - (r.collected || 0);
+                              return (
+                                <div key={`ccard:${r.id}`} className="px-4 py-3 space-y-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <span className="font-semibold text-slate-800 text-[13px] min-w-0 break-words">{r.projectName}</span>
+                                    {fieldPill(r.field)}
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]">
+                                    <div><span className="text-slate-500">Giá trị HĐ: </span><b className="font-mono text-slate-800">{outOfProj ? '—' : money(r.contractValue || 0)}</b></div>
+                                    <div><span className="text-slate-500">Đã thu: </span><b className="font-mono text-emerald-700">+{money(r.collected || 0)}</b></div>
+                                    {!outOfProj && <div className="col-span-2"><span className="text-slate-500">Còn lại: </span>{remainCell(conLaiCT, false)}</div>}
+                                    {r.notes && <div className="col-span-2 text-slate-500">{r.notes}</div>}
+                                  </div>
+                                  <div className="flex justify-end">{projActions(r)}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* Tổng cộng trên điện thoại (bảng đã có hàng tổng ở máy tính) */}
+                  {filteredReceivables.length > 0 && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-[12px] space-y-1">
+                      <div className="font-extrabold text-slate-900 uppercase tracking-wide">Tổng cộng ({receivablePageInfo.total} chủ đầu tư)</div>
+                      <div className="flex justify-between"><span className="text-slate-500">Tổng giá trị</span><b className="font-mono">{money(tot.tongGiaTri)}</b></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Đã thu</span><b className="font-mono text-emerald-700">+{money(tot.daThu)}</b></div>
+                      <div className="flex justify-between items-start"><span className="text-slate-500">Còn phải thu</span>{remainCell(tot.conLai)}</div>
+                    </div>
+                  )}
                 </div>
+
+                {/* Phân trang theo chủ đầu tư — thanh dùng chung (Hiển thị a–b / tổng, Trước/Sau, Số dòng/trang) */}
+                <TablePagination
+                  total={receivablePageInfo.total}
+                  page={receivablePageInfo.safePage}
+                  pageSize={receivablePageSize}
+                  onPage={setReceivablePage}
+                  onPageSize={(s) => { setReceivablePageSize(s); setReceivablePage(1); }}
+                  unit="chủ đầu tư"
+                  testId="receivable-pager"
+                />
 
                 {/* Pop up Lightbox Letterhead "Giấy đề nghị thanh lý thanh toán kì hạn" */}
                 {selectedReceivableProjId && (
@@ -9933,7 +9976,8 @@ export default function FinanceManagement({
                 )}
 
               </div>
-            )}
+            );
+            })()}
 
             {/* TAB 10: CÔNG NỢ PHẢI TRẢ */}
             {activeSubTab === 'cong_no_phai_tra' && (
