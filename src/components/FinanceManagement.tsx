@@ -2701,6 +2701,8 @@ export default function FinanceManagement({
   const [payPageSize, setPayPageSize] = useState(10);
   // Quỹ tiền mặt: phân trang danh sách "Chi tiêu từ Quỹ theo người tạo đề xuất" (mỗi trang N người)
   const cashFundPg = usePagination(5);
+  // Quỹ tiền mặt: những người đề xuất đã bấm "Xem thêm" (mở toàn bộ phiếu thay vì 10 phiếu gần nhất)
+  const [cashFundExpanded, setCashFundExpanded] = useState<Set<string>>(new Set());
   const [payExpanded, setPayExpanded] = useState<Set<string>>(new Set());
   const paymentGroups = useMemo(() => {
     const map = new Map<string, { recipient: string; payments: Payment[] }>();
@@ -5683,7 +5685,7 @@ export default function FinanceManagement({
 
             {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi, Đơn Hàng, Nhập Thu và Nhập Chi (tab đã làm lại: tên tab đã có trên thanh tab,
                 ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
-            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && (
+            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && activeSubTab !== 'cong_no_phai_tra' && activeSubTab !== 'quy_tien_mat' && (
               <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
@@ -9503,58 +9505,80 @@ export default function FinanceManagement({
             {activeSubTab === 'quy_tien_mat' && (() => {
               // Các khoản CHI RA từ Quỹ (mọi hạng mục, paymentMethod='cash_fund'), nhóm theo người tạo đề xuất
               // (dùng dữ liệu nhẹ `cashFundPayments` đã tải riêng ở trên, không phải `payments` đầy đủ kèm ảnh)
-              const cashFundSpentPayments = cashFundPayments.filter(p => p.paymentMethod === 'cash_fund');
-              const spentGroups = new Map<string, { proposer: string; items: Payment[] }>();
+              // Ô tìm kiếm (searchTerm) lọc theo mã phiếu / hạng mục / diễn giải / người đề xuất.
+              const kw = (searchTerm || '').toLowerCase().trim();
+              const cashFundSpentPayments = cashFundPayments.filter(p => p.paymentMethod === 'cash_fund').filter(p => {
+                if (!kw) return true;
+                return `${p.code || ''} ${PAYMENT_CAT_LABEL[p.category] || p.category || ''} ${p.notes || ''} ${p.proposer || ''}`.toLowerCase().includes(kw);
+              });
+              const spentGroups = new Map<string, { key: string; proposer: string; items: Payment[] }>();
               cashFundSpentPayments.forEach(p => {
                 const key = p.proposerId || p.proposer || '—';
-                if (!spentGroups.has(key)) spentGroups.set(key, { proposer: p.proposer || '—', items: [] });
+                if (!spentGroups.has(key)) spentGroups.set(key, { key, proposer: p.proposer || '—', items: [] });
                 spentGroups.get(key)!.items.push(p);
               });
+              // Trong mỗi người: phiếu MỚI NHẤT lên trước (ngày giảm dần, cùng ngày theo mã) để "10 phiếu gần nhất" là 10 phiếu đầu
+              spentGroups.forEach(g => g.items.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.code || '').localeCompare(a.code || '')));
               const spentGroupList = Array.from(spentGroups.values()).sort((a, b) =>
                 b.items.reduce((s, p) => s + (p.amount || 0), 0) - a.items.reduce((s, p) => s + (p.amount || 0), 0));
+              const TOP_N = 10; // mỗi người chỉ hiện 10 phiếu gần nhất; "Xem thêm" mở toàn bộ phiếu của người đó
+              const money = (n: number) => `${(n || 0).toLocaleString('vi-VN')}đ`;
+              const statusPill = (st?: string) => (
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${st === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : st === 'rejected' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                  {st === 'approved' ? 'Đã duyệt' : st === 'rejected' ? 'Từ chối' : 'Chờ duyệt'}
+                </span>
+              );
+              const tile = 'bg-white border border-slate-200 rounded-2xl px-4 py-3';
+              const tileLabel = 'text-[12px] text-slate-500 font-bold block';
               return (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Số dư hiện tại</span>
-                      <span className={`text-xl font-black font-mono ${cashFundBalance < 0 ? 'text-rose-400' : 'text-teal-400'}`}>{cashFundBalance.toLocaleString('vi-VN')}đ</span>
+                  {/* Hàng tiêu đề (thanh tiêu đề chung đã ẩn cho tab này) */}
+                  <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+                    <span className="font-extrabold text-slate-900 text-sm">Quỹ tiền mặt</span>
+                  </div>
+
+                  {/* 4 ô số liệu quỹ */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" data-testid="cashfund-tiles">
+                    <div className={tile}>
+                      <span className={tileLabel}>Số dư hiện tại</span>
+                      <span className={`text-[20px] font-black font-mono ${cashFundBalance < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>{money(cashFundBalance)}</span>
                     </div>
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                      <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Số dư đầu kỳ</span>
+                    <div className={tile}>
+                      <span className={`${tileLabel} mb-0.5`}>Số dư đầu kỳ</span>
                       {editingOpeningBalance ? (
                         <div className="flex items-center gap-1.5">
                           <input
                             type="number"
                             value={openingBalanceInput}
                             onChange={(e) => setOpeningBalanceInput(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white font-mono text-sm outline-none focus:border-teal-500"
+                            className="w-full h-9 bg-white border border-slate-200 rounded-xl px-3 text-slate-900 font-mono text-[13px] outline-none focus:border-[#0d47c9]"
                           />
-                          <button type="button" onClick={handleSaveCashFundOpening} className="p-1.5 bg-teal-600 hover:bg-teal-500 rounded text-white cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
-                          <button type="button" onClick={() => setEditingOpeningBalance(false)} className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={handleSaveCashFundOpening} style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 w-9 rounded-xl flex items-center justify-center cursor-pointer shrink-0" title="Lưu"><Check className="w-4 h-4" /></button>
+                          <button type="button" onClick={() => setEditingOpeningBalance(false)} className="h-9 w-9 rounded-xl flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer shrink-0" title="Hủy"><X className="w-4 h-4" /></button>
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-xl font-black text-white font-mono">{(cashFundConfig?.openingBalance || 0).toLocaleString('vi-VN')}đ</span>
+                          <span className="text-[20px] font-black text-slate-900 font-mono">{money(cashFundConfig?.openingBalance || 0)}</span>
                           {canEditCashFundOpening && (
-                            <button type="button" onClick={() => { setOpeningBalanceInput(String(cashFundConfig?.openingBalance || 0)); setEditingOpeningBalance(true); }} className="p-1 text-slate-400 hover:text-teal-400 cursor-pointer" title="Sửa số dư đầu kỳ">
+                            <button type="button" onClick={() => { setOpeningBalanceInput(String(cashFundConfig?.openingBalance || 0)); setEditingOpeningBalance(true); }} className="p-1.5 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 cursor-pointer" title="Sửa số dư đầu kỳ">
                               <Edit className="w-3.5 h-3.5" />
                             </button>
                           )}
                         </div>
                       )}
                     </div>
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Tổng đã nạp</span>
-                      <span className="text-xl font-black text-emerald-400 font-mono">+{cashFundDeposited.toLocaleString('vi-VN')}đ</span>
+                    <div className={tile}>
+                      <span className={tileLabel}>Tổng đã nạp</span>
+                      <span className="text-[20px] font-black text-emerald-700 font-mono">+{money(cashFundDeposited)}</span>
                     </div>
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Tổng đã chi từ Quỹ</span>
-                      <span className="text-xl font-black text-rose-400 font-mono">-{cashFundSpent.toLocaleString('vi-VN')}đ</span>
+                    <div className={tile}>
+                      <span className={tileLabel}>Tổng đã chi từ Quỹ</span>
+                      <span className="text-[20px] font-black text-rose-600 font-mono">-{money(cashFundSpent)}</span>
                     </div>
                   </div>
                   {cashFundLoading && (
-                    <div className="text-[10px] text-slate-500 italic flex items-center gap-1.5">
-                      <MiniLoader size={12} className="text-teal-500" />
+                    <div className="text-[12px] text-slate-500 italic flex items-center gap-1.5">
+                      <MiniLoader size={12} className="text-[#0d47c9]" />
                       Đang tải dữ liệu Quỹ tiền mặt...
                     </div>
                   )}
@@ -9564,45 +9588,101 @@ export default function FinanceManagement({
                       Xét duyệt và Lập phiếu như mọi đề xuất chi khác, không còn nút tắt mở
                       thẳng form "Tạo Đề Xuất Chi Mới" tại đây nữa. */}
 
-                  <div className="space-y-2">
-                    <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block border-b border-slate-850 pb-2">Chi tiêu từ Quỹ theo người tạo đề xuất</span>
+                  {/* Tiêu đề danh sách + ô tìm kiếm (chuyển từ thanh tiêu đề chung xuống đây) */}
+                  <div className="flex flex-wrap items-end justify-between gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="cashfund-filters">
+                    <span className="font-extrabold text-slate-900 text-[13px]">Chi tiêu từ Quỹ theo người tạo đề xuất</span>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input type="text" data-testid="cashfund-search" placeholder="Mã phiếu, hạng mục, diễn giải…" value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
                     {spentGroupList.length === 0 ? (
-                      <p className="text-[11px] text-slate-500 italic bg-slate-900 border border-dashed border-slate-800 rounded-xl p-4 text-center">
-                        {cashFundLoading ? 'Đang tải...' : 'Chưa có khoản chi nào lấy từ Quỹ tiền mặt.'}
+                      <p className="text-[13px] text-slate-500 italic bg-white border border-dashed border-slate-300 rounded-2xl p-6 text-center">
+                        {cashFundLoading ? 'Đang tải...' : kw ? 'Không tìm thấy phiếu chi khớp từ khóa.' : 'Chưa có khoản chi nào lấy từ Quỹ tiền mặt.'}
                       </p>
-                    ) : cashFundPg.slice(spentGroupList).map((g, gi) => {
+                    ) : cashFundPg.slice(spentGroupList).map((g) => {
                       const groupTotal = g.items.reduce((s, p) => s + (p.amount || 0), 0);
+                      const expanded = cashFundExpanded.has(g.key);
+                      const shown = expanded ? g.items : g.items.slice(0, TOP_N);
+                      const hidden = g.items.length - shown.length;
+                      const toggle = () => setCashFundExpanded(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; });
                       return (
-                        <div key={gi} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-                          <div className="flex items-center justify-between px-3 py-2 bg-slate-850/60">
-                            <span className="font-bold text-slate-200 text-[11px]">{g.proposer}</span>
-                            <span className="text-rose-400 font-mono font-bold text-[11px]">-{groupTotal.toLocaleString('vi-VN')}đ ({g.items.length} khoản)</span>
+                        <div key={g.key} className="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-testid={`cashfund-group-${g.key}`}>
+                          {/* Đầu thẻ: chữ cái đầu + tên người đề xuất + số khoản + tổng chi */}
+                          <div className="flex items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-8 h-8 rounded-full bg-[#e8efff] text-[#0d47c9] font-black text-[13px] inline-flex items-center justify-center shrink-0">{(g.proposer || '?').trim().charAt(0).toUpperCase()}</span>
+                              <div className="min-w-0">
+                                <div className="font-extrabold text-slate-900 text-[14px] truncate">{g.proposer}</div>
+                                <div className="text-[12px] text-slate-500">{g.items.length} khoản</div>
+                              </div>
+                            </div>
+                            <span className="text-rose-600 font-mono font-black text-[14px] shrink-0">-{money(groupTotal)}</span>
                           </div>
-                          <table className="w-full text-[10.5px]">
-                            <tbody className="divide-y divide-slate-850">
-                              {g.items.map(p => (
-                                <tr key={p.id}>
-                                  <td className="px-3 py-1.5 font-mono text-slate-400">{p.code}</td>
-                                  <td className="px-3 py-1.5 text-slate-300">{PAYMENT_CAT_LABEL[p.category] || p.category}</td>
-                                  <td className="px-3 py-1.5 text-slate-500">{p.date}</td>
-                                  <td className="px-3 py-1.5 text-slate-400 italic truncate max-w-[240px]">{p.notes}</td>
-                                  <td className="px-3 py-1.5 text-right">
-                                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border ${p.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : p.status === 'rejected' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                                      {p.status === 'approved' ? 'Đã duyệt' : p.status === 'rejected' ? 'Từ chối' : 'Chờ duyệt'}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-1.5 text-right font-mono font-bold text-rose-400">-{p.amount.toLocaleString('vi-VN')}đ</td>
+
+                          {/* MÁY TÍNH: bảng phiếu */}
+                          <div className="hidden md:block overflow-x-auto">
+                            <table className="w-full text-left text-slate-700 text-[13px]">
+                              <thead className="text-slate-500 text-[12px] font-bold border-b border-slate-100">
+                                <tr>
+                                  <th className="px-4 py-2">Mã phiếu</th>
+                                  <th className="px-4 py-2">Hạng mục</th>
+                                  <th className="px-4 py-2">Ngày</th>
+                                  <th className="px-4 py-2">Diễn giải</th>
+                                  <th className="px-4 py-2 text-center">Trạng thái</th>
+                                  <th className="px-4 py-2 text-right">Số tiền</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {shown.map(p => (
+                                  <tr key={p.id} className="hover:bg-slate-50">
+                                    <td className="px-4 py-2 font-mono text-slate-600">{p.code}</td>
+                                    <td className="px-4 py-2">{PAYMENT_CAT_LABEL[p.category] || p.category}</td>
+                                    <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{p.date}</td>
+                                    <td className="px-4 py-2 text-slate-500 truncate max-w-[320px]" title={p.notes}>{p.notes}</td>
+                                    <td className="px-4 py-2 text-center">{statusPill(p.status)}</td>
+                                    <td className="px-4 py-2 text-right font-mono font-bold text-rose-600 whitespace-nowrap">-{money(p.amount)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* ĐIỆN THOẠI: mỗi phiếu 1 dòng thẻ gọn */}
+                          <div className="md:hidden divide-y divide-slate-100">
+                            {shown.map(p => (
+                              <div key={`c:${p.id}`} className="px-4 py-3 space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-mono text-[12px] text-slate-600">{p.code}</span>
+                                  <span className="font-mono font-bold text-rose-600 text-[13px]">-{money(p.amount)}</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 text-[12px] text-slate-500">
+                                  <span>{PAYMENT_CAT_LABEL[p.category] || p.category} · {p.date}</span>
+                                  {statusPill(p.status)}
+                                </div>
+                                {p.notes && <div className="text-[12px] text-slate-500 line-clamp-2">{p.notes}</div>}
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Xem thêm / Thu gọn: chỉ hiện khi người này có hơn TOP_N phiếu */}
+                          {g.items.length > TOP_N && (
+                            <div className="px-4 py-2.5 border-t border-slate-100 flex justify-center">
+                              <button type="button" onClick={toggle} data-testid={`cashfund-more-${g.key}`}
+                                className="h-9 px-4 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-[#bcd0ff] text-[#0d47c9] hover:bg-[#f3f7ff] cursor-pointer">
+                                {expanded ? 'Thu gọn (chỉ 10 phiếu gần nhất)' : `Xem thêm ${hidden} phiếu`}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                     {spentGroupList.length > 0 && (
-                      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                        <TablePagination {...cashFundPg.props(spentGroupList.length)} unit="người đề xuất" testId="cashfund-pager" sizes={[5, 10, 20]} />
-                      </div>
+                      <TablePagination {...cashFundPg.props(spentGroupList.length)} unit="người đề xuất" testId="cashfund-pager" sizes={[5, 10, 20]} />
                     )}
                   </div>
                 </div>
@@ -9980,25 +10060,118 @@ export default function FinanceManagement({
             })()}
 
             {/* TAB 10: CÔNG NỢ PHẢI TRẢ */}
-            {activeSubTab === 'cong_no_phai_tra' && (
+            {activeSubTab === 'cong_no_phai_tra' && (() => {
+              // Tiền VNĐ kiểu Việt; số âm = "Dư" (đã trả nhiều hơn nợ)
+              const money = (n: number) => `${(n || 0).toLocaleString('vi-VN')} đ`;
+              const moneySigned = (n: number) => (n >= 0 ? money(n) : `-${money(Math.abs(n))}`);
+              // Ô "Còn lại": đỏ khi còn nợ, xanh khi đã trả dư
+              const remainCell = (v: number, strong = true) => (
+                <span className={`font-mono ${strong ? 'font-black' : 'font-bold'} ${v < 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{moneySigned(v)}</span>
+              );
+              // Pill phân loại đơn vị (dùng chung bảng + thẻ)
+              const catPill = (c?: string) => (
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${
+                  c === 'Thầu Phụ' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                  c === 'Nhà Cung Cấp' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                  'bg-slate-100 text-slate-600 border-slate-200'}`}>{c || '—'}</span>
+              );
+              // Thông tin hiển thị của 1 đơn vị: khi từ khóa tìm kiếm khớp trực tiếp vào vài dòng chi tiết cụ thể
+              // (VD: mã đơn PO-... từ nút "Xem Công Nợ Trả" ở Điều phối vật tư) → CHỈ hiện đúng các dòng khớp thay vì cả
+              // nhóm; nếu từ khóa khớp tên/loại đơn vị thì giữ hành vi cũ — hiện đủ mọi khoản nợ.
+              const groupMeta = (g: any) => {
+                const kw = (searchTerm || '').toLowerCase().trim();
+                const nameOrCategoryMatches = !!kw && `${g.name || ''} ${g.category || ''}`.toLowerCase().includes(kw);
+                const itemMatches = kw && !nameOrCategoryMatches
+                  ? g.visibleItems.filter((it: any) => (it.notes || '').toLowerCase().includes(kw))
+                  : null;
+                const displayItems = itemMatches && itemMatches.length > 0 ? itemMatches : g.visibleItems;
+                const isNarrowed = displayItems !== g.visibleItems;
+                const expanded = isNarrowed || expandedLiabilities.has(g.key);
+                const toggle = () => setExpandedLiabilities(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; });
+                return { displayItems, isNarrowed, expanded, toggle };
+              };
+              // Dòng chữ "NCC Nợ (trả hàng)" — chỉ cho NCC vật tư còn khoản trả hàng chưa áp dụng hết
+              const creditNote = (g: any) => {
+                if (g.category !== 'Nhà Cung Cấp') return null;
+                const poItem = g.visibleItems.find((it: any) => it.purchaseOrderId);
+                const supplierId = poItem ? purchaseOrders.find(p => p.id === poItem.purchaseOrderId)?.supplierId : undefined;
+                const balance = supplierId ? supplierCreditBalance(supplierId) : 0;
+                if (balance <= 0) return null;
+                return <div className="text-[11px] text-rose-600 font-bold mt-0.5">↩️ NCC Nợ (trả hàng): {money(balance)}</div>;
+              };
+              // Nút thao tác của 1 khoản nợ (Đề Xuất Chi + Cấn trừ nợ) — dùng chung bảng + thẻ
+              const itemActions = (item: any, g: any) => (
+                <div className="flex flex-col items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenProposalFromLiability(item)}
+                    style={{ background: '#0d47c9', color: '#ffffff' }}
+                    className="text-[12px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    title="Tạo Đề Xuất Chi từ công nợ này"
+                    data-testid={`liab-propose-${item.id}`}
+                  >
+                    <FileText className="w-3.5 h-3.5" /> Đề Xuất Chi
+                  </button>
+                  {/* Cấn trừ nợ bằng khoản NCC Nợ (trả hàng) — chỉ hiện cho dòng gắn 1 đơn hàng cụ thể,
+                      còn công nợ, và NCC đó đang có khoản Nợ khả dụng. */}
+                  {item.purchaseOrderId && g.category === 'Nhà Cung Cấp' && (() => {
+                    const po = purchaseOrders.find(p => p.id === item.purchaseOrderId);
+                    if (!po || (po.congNo || 0) <= 0) return null;
+                    const balance = supplierCreditBalance(po.supplierId);
+                    if (balance <= 0) return null;
+                    // Gợi ý (không tự động) — đơn hàng công nợ cũ nhất của NCC này.
+                    const isSuggested = suggestedApplyOrderId(po.supplierId) === po.id;
+                    return (
+                      <div className="flex flex-col items-center gap-0.5">
+                        {isSuggested && <span className="text-[11px] font-bold text-amber-600">⭐ Ưu tiên (nợ cũ nhất)</span>}
+                        <button
+                          type="button"
+                          onClick={() => openApplyCreditModal(po)}
+                          className={`bg-white border border-rose-300 text-rose-700 hover:bg-rose-50 text-[12px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${isSuggested ? 'ring-2 ring-amber-400' : ''}`}
+                          title={isSuggested
+                            ? `Gợi ý ưu tiên cấn trừ vào đơn này (công nợ cũ nhất của NCC) — khả dụng ${balance.toLocaleString('vi-VN')}đ`
+                            : `Cấn trừ nợ bằng NCC Nợ (khả dụng ${balance.toLocaleString('vi-VN')}đ)`}
+                        >
+                          <Undo2 className="w-3.5 h-3.5" /> Cấn trừ nợ
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+              // Số Đầu kỳ của 1 khoản nợ chi tiết
+              const itemOpening = (item: any) => (item.openingDebt ?? (item.isOpeningDebt ? item.value : 0)) || 0;
+              const tot = liabilityPageInfo.totals;
+              return (
               <div className="space-y-4">
-                
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-850 pb-3">
-                  <div>
-                    <span className="font-bold text-slate-300 uppercase tracking-widest text-[11px] block">
-                      Danh sách công nợ phải trả
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                {/* Hàng tiêu đề: tên mục + nút lấy công nợ đầu kỳ */}
+                <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+                  <span className="font-extrabold text-slate-900 text-sm">Danh sách công nợ phải trả</span>
                   <button
                     type="button"
                     onClick={handleUpdateOpeningLiabilities}
-                    className="bg-amber-600 hover:bg-amber-550 text-white font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 cursor-pointer border border-amber-500 transition-colors"
+                    className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-[#bcd0ff] text-[#0d47c9] hover:bg-[#f3f7ff] cursor-pointer"
                     title="Lấy Công Nợ đầu kỳ > 0 từ Thầu Phụ & NCC Vật tư đưa vào cột Số Dư Đầu Kỳ"
+                    data-testid="liab-opening"
                   >
-                    <Database className="w-3 h-3" />
+                    <Database className="w-4 h-4" />
                     Cập nhật Công Nợ Đầu Kỳ
                   </button>
+                </div>
+
+                {/* 3 ô tổng (tính trên toàn bộ danh sách đã lọc, không chỉ trang hiện tại) */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-testid="liab-tiles">
+                  <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                    <div className="text-[12px] text-slate-500 font-bold">Tổng giá trị</div>
+                    <div className="text-[18px] font-black text-slate-900 font-mono mt-0.5">{money(tot.tongGiaTri)}</div>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                    <div className="text-[12px] text-slate-500 font-bold">Đã trả</div>
+                    <div className="text-[18px] font-black text-emerald-700 font-mono mt-0.5">-{money(tot.paid)}</div>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3">
+                    <div className="text-[12px] text-slate-500 font-bold">Còn phải trả</div>
+                    <div className="text-[18px] mt-0.5">{remainCell(tot.remaining)}</div>
                   </div>
                 </div>
 
@@ -10031,18 +10204,28 @@ export default function FinanceManagement({
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-end gap-2 bg-slate-900/50 border border-slate-850 rounded-xl px-3 py-2.5">
+                {/* Bộ lọc ô sáng kèm ô tìm kiếm (thanh tiêu đề chung đã ẩn cho tab này) */}
+                <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="liab-filters">
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Từ ngày</label>
-                    <input type="date" value={liabilityFilters.fromDate} onChange={(e) => updateLiabilityFilter({ fromDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                    <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input type="text" data-testid="liab-search" placeholder="Đơn vị, mã đơn, ghi chú…" value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="h-9 w-56 bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Đến ngày</label>
-                    <input type="date" value={liabilityFilters.toDate} onChange={(e) => updateLiabilityFilter({ toDate: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer" />
+                    <label className="text-[11px] text-slate-500 font-bold">Từ ngày</label>
+                    <input type="date" value={liabilityFilters.fromDate} onChange={(e) => updateLiabilityFilter({ fromDate: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Phân Loại</label>
-                    <select value={liabilityFilters.category} onChange={(e) => updateLiabilityFilter({ category: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                    <label className="text-[11px] text-slate-500 font-bold">Đến ngày</label>
+                    <input type="date" value={liabilityFilters.toDate} onChange={(e) => updateLiabilityFilter({ toDate: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer" />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-slate-500 font-bold">Phân loại</label>
+                    <select value={liabilityFilters.category} onChange={(e) => updateLiabilityFilter({ category: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
                       <option value="">Tất cả</option>
                       <option value="Thầu Phụ">Thầu Phụ</option>
                       <option value="Nhà Cung Cấp">Nhà Cung Cấp</option>
@@ -10050,14 +10233,14 @@ export default function FinanceManagement({
                     </select>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9px] uppercase tracking-wider text-slate-500 font-bold">Trạng thái</label>
-                    <select value={liabilityFilters.status} onChange={(e) => updateLiabilityFilter({ status: e.target.value })} className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-[11px] outline-none focus:border-orange-500 cursor-pointer">
+                    <label className="text-[11px] text-slate-500 font-bold">Trạng thái</label>
+                    <select value={liabilityFilters.status} onChange={(e) => updateLiabilityFilter({ status: e.target.value })} className="h-9 bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9] cursor-pointer">
                       <option value="">Tất cả</option>
                       <option value="con_no">Còn nợ</option>
                       <option value="da_thu">Đã tất toán</option>
                     </select>
                   </div>
-                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updateLiabilityFilter({ category: '', status: '', fromDate: `${y}-01-01`, toDate: `${y}-12-31` }); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[10px] font-bold px-2.5 py-1.5 rounded-lg cursor-pointer">Đặt lại</button>
+                  <button type="button" onClick={() => { const y = new Date().getFullYear(); updateLiabilityFilter({ category: '', status: '', fromDate: `${y}-01-01`, toDate: `${y}-12-31` }); setSearchTerm(''); }} className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đặt lại</button>
                 </div>
 
                 {/* Tổng hợp NCC Nợ (trả hàng) khả dụng — hiển thị LUÔN, KHÔNG phụ
@@ -10092,21 +10275,22 @@ export default function FinanceManagement({
                   );
                 })()}
 
-                <div className="overflow-x-auto text-[10.5px]">
-                  <table className="w-full text-left text-slate-300">
-                    <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800">
+                {/* MÁY TÍNH: bảng theo đơn vị, bấm mũi tên xổ danh sách khoản nợ */}
+                <div className="hidden md:block overflow-x-auto bg-white border border-slate-200 rounded-2xl" data-testid="liab-table">
+                  <table className="w-full text-left text-slate-700 text-[13px]">
+                    <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
                       <tr>
-                        <th className="px-3 py-2.5">Tên Đơn Vị</th>
-                        <th className="px-3 py-2.5">Phân Loại</th>
-                        <th className="px-3 py-2.5">Dự Án</th>
-                        <th className="px-3 py-2.5">Công Việc</th>
-                        <th className="px-3 py-2.5 text-right">Công Nợ Đầu Kỳ</th>
-                        <th className="px-3 py-2.5 text-right">Phát Sinh</th>
+                        <th className="px-3 py-2.5">Tên đơn vị</th>
+                        <th className="px-3 py-2.5">Phân loại</th>
+                        <th className="px-3 py-2.5">Dự án</th>
+                        <th className="px-3 py-2.5">Công việc</th>
+                        <th className="px-3 py-2.5 text-right">Công nợ đầu kỳ</th>
+                        <th className="px-3 py-2.5 text-right">Phát sinh</th>
                         <th className="px-3 py-2.5 text-right">Tổng giá trị</th>
-                        <th className="px-3 py-2.5 text-right">Đã Trả</th>
-                        <th className="px-3 py-2.5 text-right text-rose-400 font-bold">Còn lại</th>
+                        <th className="px-3 py-2.5 text-right">Đã trả</th>
+                        <th className="px-3 py-2.5 text-right">Còn lại</th>
                         <th className="px-3 py-2.5">Ghi chú</th>
-                        <th className="px-3 py-2.5 text-center">Hành động</th>
+                        <th className="px-3 py-2.5 text-center">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -10118,194 +10302,69 @@ export default function FinanceManagement({
                         </tr>
                       ) : (
                         liabilityPageInfo.pageItems.map((g: any) => {
-                          // Khi từ khóa tìm kiếm khớp trực tiếp vào 1/vài dòng chi tiết cụ thể
-                          // (VD: mã đơn hàng PO-... từ nút "Xem Công Nợ Trả" ở Điều phối vật
-                          // tư) — CHỈ hiện đúng (các) dòng khớp thay vì cả 15 khoản nợ của NCC
-                          // (trước đây search chỉ lọc ở CẤP NHÓM nên luôn hiện nguyên nhóm, gây
-                          // cảm giác "tìm không ra"). Nếu từ khóa khớp tên/loại NCC (tìm kiếm
-                          // thông thường theo NCC) thì vẫn giữ hành vi cũ — hiện đủ mọi khoản nợ.
-                          const kw = (searchTerm || '').toLowerCase().trim();
-                          const nameOrCategoryMatches = !!kw && `${g.name || ''} ${g.category || ''}`.toLowerCase().includes(kw);
-                          const itemMatches = kw && !nameOrCategoryMatches
-                            ? g.visibleItems.filter((it: any) => (it.notes || '').toLowerCase().includes(kw))
-                            : null;
-                          const displayItems = itemMatches && itemMatches.length > 0 ? itemMatches : g.visibleItems;
-                          const isNarrowed = displayItems !== g.visibleItems;
-                          const expanded = isNarrowed || expandedLiabilities.has(g.key);
-                          const toggle = () => setExpandedLiabilities(prev => { const n = new Set(prev); n.has(g.key) ? n.delete(g.key) : n.add(g.key); return n; });
+                          const { displayItems, isNarrowed, expanded, toggle } = groupMeta(g);
                           return (
                             <React.Fragment key={g.key}>
-                              {/* Dòng Đơn vị (tổng hợp) */}
-                              <tr className="border-b border-slate-800 bg-slate-800/40 hover:bg-slate-800/70 font-sans">
+                              {/* Dòng đơn vị (tổng hợp) */}
+                              <tr className="border-b border-slate-200 bg-slate-50 hover:bg-slate-100 font-sans" data-testid={`liab-group-${g.key}`}>
                                 <td className="px-3 py-3">
                                   <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={toggle}
-                                      className="text-slate-400 hover:text-white text-[10px] w-4 cursor-pointer"
-                                      title={expanded ? 'Thu gọn' : 'Xem chi tiết khoản nợ'}
-                                    >
-                                      {expanded ? '▼' : '▶'}
-                                    </button>
+                                    <button onClick={toggle} className="text-slate-500 hover:text-slate-900 text-[12px] w-4 cursor-pointer" title={expanded ? 'Thu gọn' : 'Xem chi tiết khoản nợ'}>{expanded ? '▼' : '▶'}</button>
                                     <div>
-                                      <button
-                                        onClick={toggle}
-                                        className="font-extrabold text-slate-100 text-left hover:underline cursor-pointer"
-                                        title="Click để xem chi tiết các khoản nợ"
-                                      >
-                                        {g.name}
-                                      </button>
-                                      <div className="text-[9px] text-slate-400 mt-0.5">
+                                      <button onClick={toggle} className="font-extrabold text-slate-900 text-left hover:underline cursor-pointer" title="Bấm để xem chi tiết các khoản nợ">{g.name}</button>
+                                      <div className="text-[11px] text-slate-500 mt-0.5">
                                         {isNarrowed ? `${displayItems.length}/${g.visibleItems.length} khoản nợ (đang lọc theo tìm kiếm)` : `${g.visibleItems.length} khoản nợ`}
                                       </div>
-                                      {/* NCC Nợ (trả hàng chưa áp dụng hết) — chỉ hiện cho NCC vật tư */}
-                                      {g.category === 'Nhà Cung Cấp' && (() => {
-                                        const poItem = g.visibleItems.find((it: any) => it.purchaseOrderId);
-                                        const supplierId = poItem ? purchaseOrders.find(p => p.id === poItem.purchaseOrderId)?.supplierId : undefined;
-                                        const balance = supplierId ? supplierCreditBalance(supplierId) : 0;
-                                        if (balance <= 0) return null;
-                                        return (
-                                          <div className="text-[9px] text-rose-400 font-bold mt-0.5">
-                                            ↩️ NCC Nợ (trả hàng): {balance.toLocaleString('vi-VN')} đ
-                                          </div>
-                                        );
-                                      })()}
+                                      {creditNote(g)}
                                     </div>
                                   </div>
                                 </td>
-                                <td className="px-3 py-3">
-                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                    g.category === 'Thầu Phụ' ? 'bg-white text-emerald-700 border border-emerald-600' :
-                                    g.category === 'Nhà Cung Cấp' ? 'bg-white text-purple-700 border border-purple-600' :
-                                    'bg-slate-700/40 text-slate-300 border border-slate-600/40'
-                                  }`}>
-                                    {g.category}
-                                  </span>
-                                </td>
-                                {/* Dòng tổng hợp gộp nhiều khoản nợ có thể thuộc nhiều Dự án/Công việc khác
-                                    nhau nên không hiện tên cụ thể ở đây — chỉ hiện ở dòng chi tiết bên dưới. */}
-                                <td className="px-3 py-3 text-slate-500 italic">—</td>
-                                <td className="px-3 py-3 text-slate-500 italic">—</td>
-                                <td className="px-3 py-3 text-right font-mono font-bold text-amber-400">
-                                  {g.openingDebt > 0 ? `${g.openingDebt.toLocaleString('vi-VN')} đ` : '—'}
-                                </td>
-                                <td className="px-3 py-3 text-right font-mono font-bold text-slate-100">
-                                  {g.value.toLocaleString('vi-VN')} đ
-                                </td>
-                                <td className="px-3 py-3 text-right font-mono font-bold text-violet-400">
-                                  {g.tongGiaTri.toLocaleString('vi-VN')} đ
-                                </td>
-                                <td className="px-3 py-3 text-right font-mono text-emerald-400">
-                                  -{g.paid.toLocaleString('vi-VN')} đ
-                                </td>
-                                <td className={`px-3 py-3 text-right font-mono font-extrabold ${g.remaining < 0 ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50'}`}>
-                                  {g.remaining >= 0 ? `${g.remaining.toLocaleString('vi-VN')} đ` : `-${Math.abs(g.remaining).toLocaleString('vi-VN')} đ`}
-                                </td>
-                                <td className="px-3 py-3 text-slate-400 italic max-w-xs truncate" title={g.notes}>
-                                  {g.notes}
-                                </td>
-                                <td className="px-3 py-3">
-                                  <div className="flex items-center justify-center gap-2">
-                                    {/* Dòng tổng hợp không có nút thao tác — thao tác ở dòng chi tiết */}
-                                  </div>
-                                </td>
+                                <td className="px-3 py-3">{catPill(g.category)}</td>
+                                {/* Dòng tổng hợp gộp nhiều khoản nợ có thể thuộc nhiều Dự án/Công việc khác nhau nên không
+                                    hiện tên cụ thể ở đây — chỉ hiện ở dòng chi tiết bên dưới. */}
+                                <td className="px-3 py-3 text-slate-400 italic">—</td>
+                                <td className="px-3 py-3 text-slate-400 italic">—</td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-amber-700">{g.openingDebt > 0 ? money(g.openingDebt) : '—'}</td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-slate-900">{money(g.value)}</td>
+                                <td className="px-3 py-3 text-right font-mono font-bold text-violet-700">{money(g.tongGiaTri)}</td>
+                                <td className="px-3 py-3 text-right font-mono text-emerald-700 font-bold">-{money(g.paid)}</td>
+                                <td className={`px-3 py-3 text-right ${g.remaining < 0 ? 'bg-emerald-50' : 'bg-rose-50'}`}>{remainCell(g.remaining)}</td>
+                                <td className="px-3 py-3 text-slate-500 italic max-w-xs truncate" title={g.notes}>{g.notes}</td>
+                                <td className="px-3 py-3"></td>{/* Dòng tổng hợp không có nút thao tác — thao tác ở dòng chi tiết */}
                               </tr>
 
                               {/* Chi tiết từng khoản nợ khi mở rộng */}
-                              {expanded && displayItems.map((item: any) => (
-                                <tr key={item.id} className="border-b border-slate-850/60 bg-slate-900/30 hover:bg-slate-900/60 font-sans">
-                                  <td className="px-3 py-2.5 pl-9">
-                                    <div className="font-semibold text-slate-200 text-[11px]">{item.notes || item.name}</div>
-                                  </td>
-                                  <td className="px-3 py-2.5 text-[10px] text-slate-400 italic">—</td>
-                                  <td className="px-3 py-2.5 text-[10.5px] text-slate-300">{item.projectName || '—'}</td>
-                                  <td className="px-3 py-2.5 text-[10.5px] text-slate-300">{item.taskName || '—'}</td>
-                                  <td className="px-3 py-2.5 text-right font-mono font-bold text-amber-400">
-                                    {(() => {
-                                      const od = (item.openingDebt ?? (item.isOpeningDebt ? item.value : 0)) || 0;
-                                      return od > 0 ? `${od.toLocaleString('vi-VN')} đ` : '—';
-                                    })()}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-200">
-                                    {item.value.toLocaleString('vi-VN')} đ
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right font-mono text-slate-500 text-[10px] italic">—</td>
-                                  <td className="px-3 py-2.5 text-right font-mono text-emerald-400">
-                                    -{item.paid.toLocaleString('vi-VN')} đ
-                                  </td>
-                                  <td className="px-3 py-2.5 text-right font-mono font-black text-slate-400">
-                                    {item.remaining >= 0 ? `${item.remaining.toLocaleString('vi-VN')} đ` : `-${Math.abs(item.remaining).toLocaleString('vi-VN')} đ`}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-slate-400 text-[10px] max-w-xs truncate" title={item.notes}>
-                                    {item.notes || '-'}
-                                  </td>
-                                  <td className="px-3 py-2.5 text-center">
-                                    <div className="flex flex-col items-center gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenProposalFromLiability(item)}
-                                        className="bg-violet-600 hover:bg-violet-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto"
-                                        title="Tạo Đề Xuất Chi từ công nợ này"
-                                      >
-                                        <FileText className="w-3 h-3" /> Đề Xuất Chi
-                                      </button>
-                                      {/* Cấn trừ nợ bằng khoản NCC Nợ (trả hàng) — chỉ hiện cho dòng gắn 1
-                                          đơn hàng cụ thể, còn công nợ, và NCC đó đang có khoản Nợ khả dụng. */}
-                                      {item.purchaseOrderId && g.category === 'Nhà Cung Cấp' && (() => {
-                                        const po = purchaseOrders.find(p => p.id === item.purchaseOrderId);
-                                        if (!po || (po.congNo || 0) <= 0) return null;
-                                        const balance = supplierCreditBalance(po.supplierId);
-                                        if (balance <= 0) return null;
-                                        // Gợi ý (không tự động) — đơn hàng công nợ cũ nhất của NCC này.
-                                        const isSuggested = suggestedApplyOrderId(po.supplierId) === po.id;
-                                        return (
-                                          <div className="flex flex-col items-center gap-0.5">
-                                            {isSuggested && (
-                                              <span className="text-[8.5px] font-extrabold text-amber-400 flex items-center gap-0.5">
-                                                ⭐ Ưu tiên (nợ cũ nhất)
-                                              </span>
-                                            )}
-                                            <button
-                                              type="button"
-                                              onClick={() => openApplyCreditModal(po)}
-                                              className={`bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap mx-auto ${isSuggested ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-slate-900' : ''}`}
-                                              title={isSuggested
-                                                ? `Gợi ý ưu tiên cấn trừ vào đơn này (công nợ cũ nhất của NCC) — khả dụng ${balance.toLocaleString('vi-VN')}đ`
-                                                : `Cấn trừ nợ bằng NCC Nợ (khả dụng ${balance.toLocaleString('vi-VN')}đ)`}
-                                            >
-                                              <Undo2 className="w-3 h-3" /> Cấn trừ nợ
-                                            </button>
-                                          </div>
-                                        );
-                                      })()}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
+                              {expanded && displayItems.map((item: any) => {
+                                const od = itemOpening(item);
+                                return (
+                                  <tr key={item.id} className="border-b border-slate-100 bg-white hover:bg-slate-50 font-sans">
+                                    <td className="px-3 py-2.5 pl-10"><div className="font-semibold text-slate-800">{item.notes || item.name}</div></td>
+                                    <td className="px-3 py-2.5 text-slate-400 italic">—</td>
+                                    <td className="px-3 py-2.5 text-slate-700">{item.projectName || '—'}</td>
+                                    <td className="px-3 py-2.5 text-slate-700">{item.taskName || '—'}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-bold text-amber-700">{od > 0 ? money(od) : '—'}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-800">{money(item.value)}</td>
+                                    <td className="px-3 py-2.5 text-right text-slate-400 italic">—</td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-emerald-700">-{money(item.paid)}</td>
+                                    <td className="px-3 py-2.5 text-right">{remainCell(item.remaining, false)}</td>
+                                    <td className="px-3 py-2.5 text-slate-500 max-w-xs truncate" title={item.notes}>{item.notes || '-'}</td>
+                                    <td className="px-3 py-2.5 text-center">{itemActions(item, g)}</td>
+                                  </tr>
+                                );
+                              })}
                             </React.Fragment>
                           );
                         })
                       )}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t-2 border-slate-700 bg-slate-900/80 font-sans">
-                        <td className="px-3 py-3 font-extrabold text-white text-[11px] uppercase tracking-wider" colSpan={4}>
-                          Tổng cộng ({liabilityPageInfo.total} đơn vị)
-                        </td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-amber-400">
-                          {liabilityPageInfo.totals.openingDebt > 0 ? `${liabilityPageInfo.totals.openingDebt.toLocaleString('vi-VN')} đ` : '—'}
-                        </td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-slate-100">
-                          {liabilityPageInfo.totals.value.toLocaleString('vi-VN')} đ
-                        </td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-violet-400">
-                          {liabilityPageInfo.totals.tongGiaTri.toLocaleString('vi-VN')} đ
-                        </td>
-                        <td className="px-3 py-3 text-right font-mono font-black text-emerald-400">
-                          -{liabilityPageInfo.totals.paid.toLocaleString('vi-VN')} đ
-                        </td>
-                        <td className={`px-3 py-3 text-right font-mono font-black ${liabilityPageInfo.totals.remaining < 0 ? 'text-emerald-700 bg-emerald-50' : 'text-rose-700 bg-rose-50'}`}>
-                          {liabilityPageInfo.totals.remaining >= 0 ? `${liabilityPageInfo.totals.remaining.toLocaleString('vi-VN')} đ` : `-${Math.abs(liabilityPageInfo.totals.remaining).toLocaleString('vi-VN')} đ`}
-                        </td>
+                      <tr className="border-t-2 border-slate-200 bg-slate-50 font-sans">
+                        <td className="px-3 py-3 font-extrabold text-slate-900 text-[12px] uppercase tracking-wide" colSpan={4}>Tổng cộng ({liabilityPageInfo.total} đơn vị)</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-amber-700">{tot.openingDebt > 0 ? money(tot.openingDebt) : '—'}</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-slate-900">{money(tot.value)}</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-violet-700">{money(tot.tongGiaTri)}</td>
+                        <td className="px-3 py-3 text-right font-mono font-black text-emerald-700">-{money(tot.paid)}</td>
+                        <td className={`px-3 py-3 text-right ${tot.remaining < 0 ? 'bg-emerald-50' : 'bg-rose-50'}`}>{remainCell(tot.remaining)}</td>
                         <td className="px-3 py-3"></td>
                         <td className="px-3 py-3"></td>
                       </tr>
@@ -10313,28 +10372,88 @@ export default function FinanceManagement({
                   </table>
                 </div>
 
-                {/* Phân trang + Tổng cộng (tính trên toàn bộ danh sách lọc, không chỉ trang hiện tại) */}
-                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[10px] text-slate-400">
-                  <div className="flex items-center gap-2">
-                    <span>Hiển thị</span>
-                    <select value={liabilityPageSize} onChange={(e) => { setLiabilityPageSize(Number(e.target.value)); setLiabilityPage(1); }} className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-200 outline-none cursor-pointer">
-                      <option value={5}>5</option>
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
-                      <option value={-1}>Tất cả</option>
-                    </select>
-                    <span>khoản nợ/trang</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span>Trang {liabilityPageInfo.safePage}/{liabilityPageInfo.totalPages} · {liabilityPageInfo.total} đơn vị</span>
-                    <button type="button" disabled={liabilityPageInfo.safePage <= 1} onClick={() => setLiabilityPage(p => Math.max(1, p - 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">‹ Trước</button>
-                    <button type="button" disabled={liabilityPageInfo.safePage >= liabilityPageInfo.totalPages} onClick={() => setLiabilityPage(p => Math.min(liabilityPageInfo.totalPages, p + 1))} className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 cursor-pointer">Sau ›</button>
-                  </div>
+                {/* ĐIỆN THOẠI: mỗi đơn vị 1 thẻ, bấm để xổ danh sách khoản nợ */}
+                <div className="md:hidden space-y-3" data-testid="liab-cards">
+                  {filteredLiabilities.length === 0 && (
+                    <div className="bg-white border border-slate-200 rounded-2xl px-4 py-8 text-center text-slate-500 italic text-[13px]">
+                      {mergedLiabilities.length === 0 ? 'Chưa có dữ liệu công nợ phải trả.' : 'Không tìm thấy công nợ phải trả khớp bộ lọc.'}
+                    </div>
+                  )}
+                  {liabilityPageInfo.pageItems.map((g: any) => {
+                    const { displayItems, isNarrowed, expanded, toggle } = groupMeta(g);
+                    return (
+                      <div key={`card:${g.key}`} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                        <button type="button" onClick={toggle} className="w-full text-left px-4 py-3 flex items-start gap-2 cursor-pointer">
+                          <span className="text-slate-500 text-[12px] mt-1">{expanded ? '▼' : '▶'}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-extrabold text-slate-900 text-[14px] break-words">{g.name}</span>
+                            <span className="block text-[12px] text-slate-500">
+                              {isNarrowed ? `${displayItems.length}/${g.visibleItems.length} khoản nợ (đang lọc)` : `${g.visibleItems.length} khoản nợ`}
+                            </span>
+                            {creditNote(g)}
+                          </span>
+                          {catPill(g.category)}
+                        </button>
+                        <div className="px-4 pb-3 grid grid-cols-2 gap-x-3 gap-y-2 text-[12px]">
+                          {g.openingDebt > 0 && (<div><div className="text-slate-500 font-semibold">Công nợ đầu kỳ</div><div className="font-mono font-bold text-amber-700">{money(g.openingDebt)}</div></div>)}
+                          <div><div className="text-slate-500 font-semibold">Phát sinh</div><div className="font-mono font-bold text-slate-900">{money(g.value)}</div></div>
+                          <div><div className="text-slate-500 font-semibold">Tổng giá trị</div><div className="font-mono font-bold text-violet-700">{money(g.tongGiaTri)}</div></div>
+                          <div><div className="text-slate-500 font-semibold">Đã trả</div><div className="font-mono font-bold text-emerald-700">-{money(g.paid)}</div></div>
+                        </div>
+                        <div className={`px-4 py-2.5 border-t border-slate-100 flex items-center justify-between gap-2 ${g.remaining < 0 ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+                          <span className="text-[12px] font-bold text-slate-600">Còn lại</span>
+                          <span className="text-[14px]">{remainCell(g.remaining)}</span>
+                        </div>
+                        {expanded && (
+                          <div className="border-t border-slate-100 divide-y divide-slate-100 bg-slate-50/60">
+                            {displayItems.map((item: any) => {
+                              const od = itemOpening(item);
+                              return (
+                                <div key={`ccard:${item.id}`} className="px-4 py-3 space-y-2">
+                                  <div className="font-semibold text-slate-800 text-[13px] break-words">{item.notes || item.name}</div>
+                                  {(item.projectName || item.taskName) && (
+                                    <div className="text-[12px] text-slate-500">{[item.projectName, item.taskName].filter(Boolean).join(' · ')}</div>
+                                  )}
+                                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[12px]">
+                                    {od > 0 && <div><span className="text-slate-500">Đầu kỳ: </span><b className="font-mono text-amber-700">{money(od)}</b></div>}
+                                    <div><span className="text-slate-500">Phát sinh: </span><b className="font-mono text-slate-800">{money(item.value)}</b></div>
+                                    <div><span className="text-slate-500">Đã trả: </span><b className="font-mono text-emerald-700">-{money(item.paid)}</b></div>
+                                    <div><span className="text-slate-500">Còn lại: </span>{remainCell(item.remaining, false)}</div>
+                                  </div>
+                                  <div className="flex justify-end">{itemActions(item, g)}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* Tổng cộng trên điện thoại (bảng đã có hàng tổng ở máy tính) */}
+                  {filteredLiabilities.length > 0 && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-[12px] space-y-1">
+                      <div className="font-extrabold text-slate-900 uppercase tracking-wide">Tổng cộng ({liabilityPageInfo.total} đơn vị)</div>
+                      <div className="flex justify-between"><span className="text-slate-500">Tổng giá trị</span><b className="font-mono">{money(tot.tongGiaTri)}</b></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Đã trả</span><b className="font-mono text-emerald-700">-{money(tot.paid)}</b></div>
+                      <div className="flex justify-between items-start"><span className="text-slate-500">Còn phải trả</span>{remainCell(tot.remaining)}</div>
+                    </div>
+                  )}
                 </div>
 
+                {/* Phân trang theo đơn vị — thanh dùng chung (Hiển thị a–b / tổng, Trước/Sau, Số dòng/trang) */}
+                <TablePagination
+                  total={liabilityPageInfo.total}
+                  page={liabilityPageInfo.safePage}
+                  pageSize={liabilityPageSize}
+                  onPage={setLiabilityPage}
+                  onPageSize={(s) => { setLiabilityPageSize(s); setLiabilityPage(1); }}
+                  unit="đơn vị"
+                  testId="liab-pager"
+                />
+
               </div>
-            )}
+              );
+            })()}
 
             {/* ── Modal: Sửa phiếu thu (Nhập Thu thủ công) ──────────────── */}
             {editingReceipt && (
