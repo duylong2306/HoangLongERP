@@ -5685,7 +5685,7 @@ export default function FinanceManagement({
 
             {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi, Đơn Hàng, Nhập Thu và Nhập Chi (tab đã làm lại: tên tab đã có trên thanh tab,
                 ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
-            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && activeSubTab !== 'cong_no_phai_tra' && activeSubTab !== 'quy_tien_mat' && (
+            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && activeSubTab !== 'cong_no_phai_tra' && activeSubTab !== 'quy_tien_mat' && !(activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'khach_hang') && (
               <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
@@ -7509,164 +7509,100 @@ export default function FinanceManagement({
 
             {/* TAB 3: KHÁCH HÀNG */}
             {activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'khach_hang' && (() => {
+              // Tìm theo tên / SĐT / mã; lọc theo loại (Cá nhân / Tổ chức)
+              const kw = searchTerm.toLowerCase();
               const filteredCustomers = customers.filter(c => {
                 const matchSearch =
-                  c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  c.name.toLowerCase().includes(kw) ||
                   (c.phone && c.phone.includes(searchTerm)) ||
-                  c.id.toLowerCase().includes(searchTerm.toLowerCase());
+                  c.id.toLowerCase().includes(kw);
                 const matchType = customerTypeFilter === 'all' || (c.type || 'individual') === customerTypeFilter;
                 return matchSearch && matchType;
               });
-
-              const limitCust = pageSizeCust === -1 ? filteredCustomers.length : pageSizeCust;
-              const startIndexCust = (pageCust - 1) * limitCust;
-              const endIndexCust = startIndexCust + limitCust;
-              const paginatedCustomers = filteredCustomers.slice(startIndexCust, endIndexCust);
+              // Phân trang: kẹp trang hiện tại để không vượt quá tổng trang sau khi lọc
+              const limitCust = pageSizeCust === -1 ? Math.max(1, filteredCustomers.length) : pageSizeCust;
               const totalPagesCust = Math.ceil(filteredCustomers.length / limitCust) || 1;
+              const safePageCust = Math.min(Math.max(1, pageCust), totalPagesCust);
+              const paginatedCustomers = filteredCustomers.slice((safePageCust - 1) * limitCust, safePageCust * limitCust);
+              // Số khách theo loại (hiện trên chip lọc)
+              const countOf = (t: 'individual' | 'organization') => customers.filter(c => (c.type || 'individual') === t).length;
+              const typeChips: ['all' | 'individual' | 'organization', string, number][] = [
+                ['all', 'Tất cả', customers.length], ['individual', 'Cá nhân', countOf('individual')], ['organization', 'Tổ chức', countOf('organization')],
+              ];
+              const money = (n: number) => `${(n || 0).toLocaleString('vi-VN')} đ`;
+              const typePill = (t?: string) => (
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold ${t === 'organization' ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{t === 'organization' ? 'Tổ chức' : 'Cá nhân'}</span>
+              );
+              const iconBtn = 'h-9 w-9 rounded-xl flex items-center justify-center bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer';
+              // Mở hộp Sửa khách hàng (dùng cho nút Sửa ở khung chi tiết)
+              const startEdit = (c: Customer) => {
+                if (!canEdit) {
+                  addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền CHỈNH SỬA khách hàng.', type: 'error' });
+                  return;
+                }
+                setEditingCustId(c.id);
+                setCustName(c.name);
+                setCustPhone(c.phone || '');
+                setCustAddress(c.address || '');
+                setCustRep(c.representative || c.name);
+                setCustTaxId(c.taxOrIdNumber || '');
+                setCustNotes(c.notes || '');
+                setCustOpeningDebt(c.openingDebt || 0);
+                setIsCustRepManuallyEdited(true);
+                setShowAddCustomerModal(true);
+              };
 
               return (
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center border-b border-slate-850 pb-2">
-                    <span className="font-bold text-slate-300 uppercase tracking-wide text-[11px]">
-                      Sổ khách hàng ({filteredCustomers.length})
-                    </span>
-
-                    <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowAddCustomerModal(true)}
-                      className="bg-orange-600 hover:bg-orange-550 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-md"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Thêm KH Mới
-                    </button>
-                      <button
-                        type="button"
-                        onClick={handleExportCustomerExcel}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-md"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Xuất Excel
+                  {/* Hàng tiêu đề: tên mục + nút icon Xuất/Nhập Excel + nút Thêm (xanh LoLo) */}
+                  <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+                    <span className="font-extrabold text-slate-900 text-sm">Sổ khách hàng <span className="text-slate-500 font-bold">({filteredCustomers.length})</span></span>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={handleExportCustomerExcel} className={iconBtn} title="Xuất Excel khách hàng" data-testid="customer-export"><Download className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => customerFileInputRef.current?.click()} className={iconBtn} title="Nhập Excel khách hàng" data-testid="customer-import"><FileUp className="w-4 h-4" /></button>
+                      <input ref={customerFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportCustomerExcel} />
+                      <button type="button" onClick={() => setShowAddCustomerModal(true)} data-testid="customer-add"
+                        style={{ background: '#0d47c9', color: '#ffffff' }}
+                        className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 cursor-pointer">
+                        <Plus className="w-4 h-4" />
+                        Thêm khách hàng
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => customerFileInputRef.current?.click()}
-                        className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-md"
-                      >
-                        <FileUp className="w-3.5 h-3.5" />
-                        Nhập Excel
-                      </button>
-                      <input
-                        ref={customerFileInputRef}
-                        type="file"
-                        accept=".xlsx,.xls"
-                        className="hidden"
-                        onChange={handleImportCustomerExcel}
-                      />
                     </div>
                   </div>
 
-                  {/* Filter: Loại khách hàng */}
-                  <div className="flex items-center gap-2 text-[10px]">
-                    <span className="text-slate-400 font-bold uppercase tracking-wide">Lọc theo loại:</span>
-                    <select
-                      value={customerTypeFilter}
-                      onChange={(e) => setCustomerTypeFilter(e.target.value as 'all' | 'individual' | 'organization')}
-                      className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none cursor-pointer focus:border-orange-500 font-bold"
-                    >
-                      <option value="all">Tất cả</option>
-                      <option value="individual">Cá nhân</option>
-                      <option value="organization">Tổ chức</option>
-                    </select>
+                  {/* Bộ lọc ô sáng kèm ô tìm kiếm (thanh tiêu đề chung đã ẩn cho tab này) + chip loại khách */}
+                  <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="customer-filters">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input type="text" data-testid="customer-search" placeholder="Tên, số điện thoại, mã KH…" value={searchTerm}
+                          onChange={(e) => { setSearchTerm(e.target.value); setPageCust(1); }}
+                          className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5" data-testid="customer-type-chips">
+                      {typeChips.map(([k, label, n]) => {
+                        const on = customerTypeFilter === k;
+                        return (
+                          <button key={k} type="button" data-testid={`customer-chip-${k}`} onClick={() => { setCustomerTypeFilter(k); setPageCust(1); }}
+                            className={`h-9 px-3 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 border cursor-pointer ${on ? 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                            {label}
+                            <span className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-black inline-flex items-center justify-center ${on ? 'bg-[#0d47c9]' : 'bg-slate-400'}`} style={{ color: '#ffffff' }}>{n}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
 
-                    {/* Left Table Panel */}
-                    <div className={`${selectedCustDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
-                      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
-                        <table className="w-full text-left text-xs border-collapse">
-                          <thead>
-                            <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-extrabold uppercase text-[10px] tracking-wider">
-                              <th className="p-3 w-10 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={custSelectedRows.size > 0 && paginatedCustomers.length > 0 && paginatedCustomers.every(c => custSelectedRows.has(c.id))}
-                                  onChange={(e) => handleCustSelectAll(e.target.checked, paginatedCustomers)}
-                                  className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer accent-amber-500"
-                                />
-                              </th>
-                              <th className="p-3 pl-4">Mã KH</th>
-                              <th className="p-3">Tên Khách Hàng</th>
-                              <th className="p-3">Địa Chỉ</th>
-                              <th className="p-3">SĐT</th>
-                              <th className="p-3 text-right">Công Nợ đầu kỳ</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/60">
-                            {paginatedCustomers.length === 0 ? (
-                              <tr>
-                                <td colSpan={6} className="p-8 text-center text-slate-500 italic">
-                                  Không tìm thấy khách hàng nào phù hợp.
-                                </td>
-                              </tr>
-                            ) : (
-                              paginatedCustomers.map(c => (
-                                <tr
-                                  key={c.id}
-                                  onClick={() => setSelectedCustDetail(c)}
-                                  className={`hover:bg-slate-800/40 cursor-pointer transition-colors ${
-                                    custSelectedRows.has(c.id) ? 'bg-amber-50' : ''
-                                  } ${
-                                    selectedCustDetail?.id === c.id ? 'bg-orange-50 border-l-2 border-orange-500' : ''
-                                  }`}
-                                >
-                                  {/* Select */}
-                                  <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                                    <input
-                                      type="checkbox"
-                                      checked={custSelectedRows.has(c.id)}
-                                      onChange={(e) => handleCustRowSelect(c.id, e.target.checked)}
-                                      className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer accent-amber-500"
-                                    />
-                                  </td>
-
-                                  {/* Customer ID */}
-                                  <td className="p-3 pl-4 font-mono font-bold text-orange-400 text-[10px] uppercase">
-                                    {c.id}
-                                  </td>
-
-                                  {/* Customer Name */}
-                                  <td className="p-3">
-                                    <div className="font-extrabold text-white text-[12.5px]">
-                                      {c.name}
-                                    </div>
-                                  </td>
-
-                                  {/* Address */}
-                                  <td className="p-3 text-slate-300">
-                                    {c.address || '—'}
-                                  </td>
-
-                                  {/* Phone */}
-                                  <td className="p-3 whitespace-nowrap font-mono text-slate-300">
-                                    {c.phone || '—'}
-                                  </td>
-
-                                  {/* Opening Debt */}
-                                  <td className="p-3 text-right font-mono font-bold text-amber-400">
-                                    {(c.openingDebt || 0).toLocaleString('vi-VN')} đ
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
+                    {/* Danh sách (trái) */}
+                    <div className={`${selectedCustDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-3 transition-all duration-300`}>
+                      {/* Thanh xóa hàng loạt: chỉ hiện khi có dòng được tích */}
                       {custSelectedRows.size > 0 && (
-                        <div className="bg-slate-950 px-4 py-2 border-t border-slate-850 flex items-center gap-2 text-[10px]">
-                          <span className="text-amber-500 font-bold">Đã chọn: {custSelectedRows.size}</span>
+                        <div className="bg-[#f3f7ff] border border-[#bcd0ff] rounded-2xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-[13px]" data-testid="customer-bulk">
+                          <span className="text-[#0d47c9] font-bold">Đã chọn {custSelectedRows.size} khách hàng</span>
                           <button
                             onClick={() => {
                               if (!window.confirm(`⚠️ Bạn có chắc chắn muốn xóa ${custSelectedRows.size} khách hàng đã chọn không?\nHành động này không thể hoàn tác.`)) return;
@@ -7679,214 +7615,178 @@ export default function FinanceManagement({
                               addToast({ title: '✅ Đã xóa', message: `Đã xóa ${custSelectedRows.size} khách hàng.`, type: 'success' });
                               setCustSelectedRows(new Set());
                             }}
-                            className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
+                            className="h-9 px-3.5 rounded-xl bg-white border border-rose-300 text-rose-600 hover:bg-rose-50 font-bold inline-flex items-center gap-1.5 cursor-pointer"
                           >
-                            <Trash2 className="w-3 h-3" /> Xóa
+                            <Trash2 className="w-3.5 h-3.5" /> Xóa
                           </button>
-                          <button
-                            onClick={() => setCustSelectedRows(new Set())}
-                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors"
-                          >
-                            Hủy chọn
-                          </button>
+                          <button onClick={() => setCustSelectedRows(new Set())} className="h-9 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold cursor-pointer">Hủy chọn</button>
                         </div>
                       )}
 
-                      {/* Pagination block */}
-                      <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-900/60 p-3 rounded-xl border border-slate-800 gap-3 text-[11px] text-slate-400">
-                        <div className="flex items-center gap-2">
-                          <span>Số dòng hiển thị:</span>
-                          <select
-                            value={pageSizeCust}
-                            onChange={(e) => {
-                              setPageSizeCust(Number(e.target.value));
-                              setPageCust(1);
-                            }}
-                            className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none cursor-pointer focus:border-orange-500 font-bold"
-                          >
-                            <option value={5}>5 dòng</option>
-                            <option value={10}>10 dòng</option>
-                            <option value={20}>20 dòng</option>
-                            <option value={-1}>Tất cả</option>
-                          </select>
-                          <span>trong tổng số {filteredCustomers.length} dòng</span>
-                        </div>
+                      {/* MÁY TÍNH: bảng */}
+                      <div className="hidden md:block bg-white border border-slate-200 rounded-2xl overflow-x-auto" data-testid="customer-table">
+                        <table className="w-full text-left text-slate-700 text-[13px]">
+                          <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
+                            <tr>
+                              <th className="px-3 py-2.5 w-10 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={custSelectedRows.size > 0 && paginatedCustomers.length > 0 && paginatedCustomers.every(c => custSelectedRows.has(c.id))}
+                                  onChange={(e) => handleCustSelectAll(e.target.checked, paginatedCustomers)}
+                                  className="w-4 h-4 cursor-pointer accent-[#0d47c9]"
+                                />
+                              </th>
+                              <th className="px-3 py-2.5">Mã KH</th>
+                              <th className="px-3 py-2.5">Tên khách hàng</th>
+                              <th className="px-3 py-2.5">Địa chỉ</th>
+                              <th className="px-3 py-2.5">SĐT</th>
+                              <th className="px-3 py-2.5 text-right">Công nợ đầu kỳ</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {paginatedCustomers.length === 0 ? (
+                              <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-500 italic">Không tìm thấy khách hàng nào phù hợp.</td></tr>
+                            ) : paginatedCustomers.map(c => (
+                              <tr key={c.id} onClick={() => setSelectedCustDetail(c)} data-testid={`customer-row-${c.id}`}
+                                className={`cursor-pointer transition-colors ${selectedCustDetail?.id === c.id ? 'bg-[#e8efff]' : custSelectedRows.has(c.id) ? 'bg-[#f3f7ff]' : 'hover:bg-slate-50'}`}>
+                                <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                                  <input type="checkbox" checked={custSelectedRows.has(c.id)} onChange={(e) => handleCustRowSelect(c.id, e.target.checked)} className="w-4 h-4 cursor-pointer accent-[#0d47c9]" />
+                                </td>
+                                <td className="px-3 py-2.5 font-mono font-bold text-[#0d47c9] text-[12px] uppercase">{c.id}</td>
+                                <td className="px-3 py-2.5">
+                                  <div className="font-extrabold text-slate-900">{c.name}</div>
+                                  <div className="mt-0.5">{typePill(c.type)}</div>
+                                </td>
+                                <td className="px-3 py-2.5 text-slate-600">{c.address || '—'}</td>
+                                <td className="px-3 py-2.5 whitespace-nowrap font-mono text-slate-700">{c.phone || '—'}</td>
+                                <td className="px-3 py-2.5 text-right font-mono font-bold text-amber-700">{money(c.openingDebt || 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
 
-                        {pageSizeCust !== -1 && totalPagesCust > 1 && (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={pageCust === 1}
-                              onClick={() => setPageCust(prev => Math.max(prev - 1, 1))}
-                              className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-slate-300 hover:text-white disabled:opacity-35 disabled:pointer-events-none font-bold transition-all cursor-pointer"
-                            >
-                              ◀ Trước
-                            </button>
-                            <span className="font-mono text-slate-300 px-1">
-                              Trang {pageCust} / {totalPagesCust}
-                            </span>
-                            <button
-                              type="button"
-                              disabled={pageCust === totalPagesCust}
-                              onClick={() => setPageCust(prev => Math.min(prev + 1, totalPagesCust))}
-                              className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-slate-300 hover:text-white disabled:opacity-35 disabled:pointer-events-none font-bold transition-all cursor-pointer"
-                            >
-                              Sau ▶
-                            </button>
-                          </div>
+                      {/* ĐIỆN THOẠI: mỗi khách hàng 1 thẻ, bấm để xem chi tiết */}
+                      <div className="md:hidden space-y-3" data-testid="customer-cards">
+                        {paginatedCustomers.length === 0 && (
+                          <div className="bg-white border border-slate-200 rounded-2xl px-4 py-8 text-center text-slate-500 italic text-[13px]">Không tìm thấy khách hàng nào phù hợp.</div>
                         )}
+                        {paginatedCustomers.map(c => (
+                          <div key={`card:${c.id}`} onClick={() => setSelectedCustDetail(c)}
+                            className={`bg-white border rounded-2xl p-4 space-y-2 cursor-pointer ${custSelectedRows.has(c.id) ? 'border-[#bcd0ff] bg-[#f3f7ff]' : 'border-slate-200'}`}>
+                            <div className="flex items-start gap-2.5">
+                              <span onClick={(e) => e.stopPropagation()} className="pt-0.5">
+                                <input type="checkbox" checked={custSelectedRows.has(c.id)} onChange={(e) => handleCustRowSelect(c.id, e.target.checked)} className="w-4 h-4 cursor-pointer accent-[#0d47c9]" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="font-extrabold text-slate-900 text-[14px] break-words">{c.name}</div>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="font-mono text-[12px] text-[#0d47c9] font-bold uppercase">{c.id}</span>
+                                  {typePill(c.type)}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-[12px] text-slate-600 space-y-1 pl-6">
+                              {c.phone && <div>📞 <a href={`tel:${c.phone}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[#0d47c9] font-bold">{c.phone}</a></div>}
+                              {c.address && <div>📍 {c.address}</div>}
+                              <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-500">Công nợ đầu kỳ</span><b className="font-mono text-amber-700">{money(c.openingDebt || 0)}</b></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Phân trang — thanh dùng chung */}
+                      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                        <TablePagination total={filteredCustomers.length} page={safePageCust} pageSize={pageSizeCust}
+                          onPage={setPageCust} onPageSize={(sz) => { setPageSizeCust(sz); setPageCust(1); }}
+                          unit="khách hàng" testId="customer-pager" />
                       </div>
                     </div>
 
-                    {/* Right Detail Panel */}
+                    {/* Khung chi tiết: máy tính = cột phải dính; điện thoại/máy tính bảng = hộp nổi phủ màn hình */}
                     {selectedCustDetail && (() => {
                       const linkedProjs = projects.filter(p => p.customerId === selectedCustDetail.id);
                       const totalVal = linkedProjs.reduce((s, p) => s + p.contractValue, 0);
+                      const field = (label: string, val: React.ReactNode) => (
+                        <div><span className="text-slate-500 block text-[12px] font-bold">{label}</span><div className="text-slate-900 font-semibold mt-0.5 break-words">{val}</div></div>
+                      );
                       return (
-                        <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-in fade-in zoom-in-95 duration-200 space-y-4">
-                          <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-                            <div>
-                              <span className="font-mono text-[9px] text-orange-400 font-black uppercase tracking-wider">
-                                {selectedCustDetail.id}
-                              </span>
-                              <h3 className="font-extrabold text-white text-sm mt-0.5 animate-pulse-once">
-                                Chi tiết Hồ sơ khách hàng
-                              </h3>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedCustDetail(null)}
-                              className="text-slate-400 hover:text-white bg-slate-850 p-1.5 rounded-lg transition-colors cursor-pointer"
-                              title="Đóng xem chi tiết"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-
-                          <div className="space-y-3.5 text-xs text-left">
-                            <div className="p-3.5 bg-slate-950 rounded-xl space-y-2.5">
-                              <div>
-                                <span className="text-slate-500 block text-[9.5px] uppercase font-bold">Tên khách hàng</span>
-                                <strong className="text-white text-md block font-extrabold">{selectedCustDetail.name}</strong>
+                        <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-slate-900/40 xl:static xl:z-auto xl:bg-transparent xl:block xl:col-span-5"
+                          onClick={() => setSelectedCustDetail(null)} data-testid="customer-detail">
+                          <div className="w-full max-w-lg xl:max-w-none bg-white border border-slate-200 rounded-t-2xl sm:rounded-2xl p-5 max-h-[90vh] overflow-y-auto xl:sticky xl:top-4 space-y-4 shadow-xl xl:shadow-none"
+                            onClick={(e) => e.stopPropagation()}>
+                            <div className="flex justify-between items-start gap-3 border-b border-slate-100 pb-3">
+                              <div className="min-w-0">
+                                <span className="font-mono text-[12px] text-[#0d47c9] font-black uppercase">{selectedCustDetail.id}</span>
+                                <h3 className="font-extrabold text-slate-900 text-[15px] mt-0.5 break-words">{selectedCustDetail.name}</h3>
+                                <div className="mt-1">{typePill(selectedCustDetail.type)}</div>
                               </div>
-                              <div>
-                                <span className="text-slate-500 block text-[9.5px] uppercase font-bold">Người đại diện</span>
-                                <span className="text-slate-350 font-bold block mt-0.5">{selectedCustDetail.representative || selectedCustDetail.name}</span>
-                              </div>
+                              <button type="button" onClick={() => setSelectedCustDetail(null)} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer" title="Đóng xem chi tiết"><X className="w-4 h-4" /></button>
                             </div>
 
-                            <div className="p-3.5 bg-slate-950/45 border border-slate-850 rounded-xl space-y-2.5">
-                              <div>
-                                <span className="text-slate-500 block text-[9.5px] uppercase font-bold">📞 Số điện thoại</span>
-                                <span className="text-slate-200 font-mono font-bold block mt-0.5">{selectedCustDetail.phone || 'Chưa cập nhật'}</span>
+                            <div className="space-y-3 text-[13px] text-left">
+                              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                                {field('Người đại diện', selectedCustDetail.representative || selectedCustDetail.name)}
+                                {field('📞 Số điện thoại', <span className="font-mono">{selectedCustDetail.phone || 'Chưa cập nhật'}</span>)}
+                                {field('📍 Địa chỉ', selectedCustDetail.address || 'Trống')}
+                                {field('📄 Mã số thuế / CMND', <span className="font-mono">{selectedCustDetail.taxOrIdNumber || 'Trống'}</span>)}
                               </div>
-                              <div>
-                                <span className="text-slate-500 block text-[9.5px] uppercase font-bold">📍 Địa chỉ bàn mộc</span>
-                                <span className="text-slate-300 block mt-0.5 font-medium leading-relaxed">{selectedCustDetail.address || 'Trống'}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-500 block text-[9.5px] uppercase font-bold">📄 Mã số thuế / CMND</span>
-                                <span className="text-white font-mono font-bold block mt-0.5">{selectedCustDetail.taxOrIdNumber || 'Trống'}</span>
-                              </div>
-                            </div>
 
-                            <div className="p-3.5 bg-orange-50 border border-orange-200 rounded-xl space-y-2">
-                              <div className="flex justify-between text-[11px]">
-                                <span className="text-slate-400">Số dự án thầu phí:</span>
-                                <span className="font-mono font-extrabold text-white">{linkedProjs.length} dự án</span>
+                              <div className="p-3.5 bg-white border border-slate-200 rounded-xl space-y-1.5">
+                                <div className="flex justify-between"><span className="text-slate-500">Số dự án:</span><b className="font-mono text-slate-900">{linkedProjs.length} dự án</b></div>
+                                <div className="flex justify-between"><span className="text-slate-500">Tổng giá trị hợp đồng:</span><b className="font-mono text-[#0d47c9]">{money(totalVal)}</b></div>
+                                <div className="flex justify-between"><span className="text-slate-500">Công nợ đầu kỳ:</span><b className="font-mono text-amber-700">{money(selectedCustDetail.openingDebt || 0)}</b></div>
                               </div>
-                              <div className="flex justify-between text-[11px]">
-                                <span className="text-slate-400">Tổng giá trị hợp đồng:</span>
-                                <span className="font-mono font-extrabold text-orange-400">{totalVal.toLocaleString('vi-VN')} đ</span>
-                              </div>
-                              <div className="flex justify-between text-[11px]">
-                                <span className="text-slate-400">Công nợ đầu kỳ:</span>
-                                <span className="font-mono font-extrabold text-amber-400">{(selectedCustDetail.openingDebt || 0).toLocaleString('vi-VN')} đ</span>
-                              </div>
-                            </div>
 
-                            {selectedCustDetail.notes && (
-                              <div className="p-3 bg-slate-950/20 border border-slate-800 rounded-xl italic text-slate-400 leading-normal">
-                                {selectedCustDetail.notes}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="pt-3.5 border-t border-slate-800 flex justify-between items-center gap-2">
-                            <div className="flex gap-1.5">
-                              {selectedCustDetail.phone && (
-                                <a
-                                  href={`tel:${selectedCustDetail.phone}`}
-                                  className="bg-emerald-600 hover:bg-emerald-550 text-white font-bold p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow"
-                                  title="Gọi điện liên hệ"
-                                >
-                                  <Phone className="w-3.5 h-3.5" />
-                                </a>
+                              {selectedCustDetail.notes && (
+                                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-slate-700 leading-normal">{selectedCustDetail.notes}</div>
                               )}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!canEdit) {
-                                    addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền CHỈNH SỬA khách hàng.', type: 'error' });
-                                    return;
-                                  }
-                                  setEditingCustId(selectedCustDetail.id);
-                                  setCustName(selectedCustDetail.name);
-                                  setCustPhone(selectedCustDetail.phone || '');
-                                  setCustAddress(selectedCustDetail.address || '');
-                                  setCustRep(selectedCustDetail.representative || selectedCustDetail.name);
-                                  setCustTaxId(selectedCustDetail.taxOrIdNumber || '');
-                                  setCustNotes(selectedCustDetail.notes || '');
-                                  setCustOpeningDebt(selectedCustDetail.openingDebt || 0);
-                                  setIsCustRepManuallyEdited(true);
-                                  setShowAddCustomerModal(true);
-                                }}
-                                className={`p-2 rounded-lg transition-all ${canEdit ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 cursor-pointer' : 'text-slate-400 border border-slate-200 cursor-not-allowed opacity-50'}`}
-                                title="Sửa thông tin khách hàng"
-                              >
-                                <Edit className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!canDelete) {
-                                    addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA khách hàng.', type: 'error' });
-                                    return;
-                                  }
-                                  const confirmDelete = window.confirm(
-                                    `⚠️ CẢNH BÁO XÓA KHÁCH HÀNG!\n\nBạn có chắc chắn muốn xóa vĩnh viễn khách hàng:\n"${selectedCustDetail.name}" (Mã: ${selectedCustDetail.id})?\n\nThao tác này sẽ xóa sạch dữ liệu khách hàng này khỏi hệ thống quản lý tài chính và các thầu mộc liên kết.`
-                                  );
-                                  if (confirmDelete) {
-                                    if (onDeleteCustomer) {
-                                      onDeleteCustomer(selectedCustDetail.id);
-                                      // Xóa luôn dòng Công nợ đầu kỳ snapshot của KH này (nếu có).
-                                      dbService.accountingReceivables.delete(`opbal_cust_${selectedCustDetail.id}`).catch(() => {});
-                                      setSelectedCustDetail(null);
-                                      addToast({ title: '✅ Thành công', message: `🗑️ Đã xóa thành công khách hàng.`, type: 'success' });
-                                    } else {
-                                      const index = customers.findIndex(item => item.id === selectedCustDetail.id);
-                                      if (index !== -1) {
-                                        customers.splice(index, 1);
+                            </div>
+
+                            <div className="pt-3 border-t border-slate-100 flex justify-between items-center gap-2">
+                              <div className="flex gap-1.5">
+                                {selectedCustDetail.phone && (
+                                  <a href={`tel:${selectedCustDetail.phone}`} className="p-2 rounded-xl bg-white border border-slate-200 text-emerald-700 hover:bg-emerald-50 flex items-center justify-center" title="Gọi điện liên hệ"><Phone className="w-4 h-4" /></a>
+                                )}
+                                <button type="button" onClick={() => startEdit(selectedCustDetail)} data-testid="customer-edit"
+                                  className={`p-2 rounded-xl border ${canEdit ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer' : 'text-slate-400 border-slate-200 cursor-not-allowed opacity-50'}`} title="Sửa thông tin khách hàng">
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!canDelete) {
+                                      addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA khách hàng.', type: 'error' });
+                                      return;
+                                    }
+                                    const confirmDelete = window.confirm(
+                                      `⚠️ CẢNH BÁO XÓA KHÁCH HÀNG!\n\nBạn có chắc chắn muốn xóa vĩnh viễn khách hàng:\n"${selectedCustDetail.name}" (Mã: ${selectedCustDetail.id})?\n\nThao tác này sẽ xóa sạch dữ liệu khách hàng này khỏi hệ thống quản lý tài chính và các thầu mộc liên kết.`
+                                    );
+                                    if (confirmDelete) {
+                                      if (onDeleteCustomer) {
+                                        onDeleteCustomer(selectedCustDetail.id);
+                                        // Xóa luôn dòng Công nợ đầu kỳ snapshot của KH này (nếu có).
+                                        dbService.accountingReceivables.delete(`opbal_cust_${selectedCustDetail.id}`).catch(() => {});
                                         setSelectedCustDetail(null);
-                                        addToast({ title: '✅ Thành công', message: '🗑️ Đã xóa thành công khách hàng (Local).', type: 'success' });
+                                        addToast({ title: '✅ Thành công', message: `🗑️ Đã xóa thành công khách hàng.`, type: 'success' });
+                                      } else {
+                                        const index = customers.findIndex(item => item.id === selectedCustDetail.id);
+                                        if (index !== -1) {
+                                          customers.splice(index, 1);
+                                          setSelectedCustDetail(null);
+                                          addToast({ title: '✅ Thành công', message: '🗑️ Đã xóa thành công khách hàng (Local).', type: 'success' });
+                                        }
                                       }
                                     }
-                                  }
-                                }}
-                                className={`p-2 rounded-lg transition-all ${canDelete ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 cursor-pointer' : 'text-slate-400 border border-slate-200 cursor-not-allowed opacity-50'}`}
-                                title="Xóa khách hàng này"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                                  }}
+                                  className={`p-2 rounded-xl border ${canDelete ? 'bg-white border-rose-300 text-rose-600 hover:bg-rose-50 cursor-pointer' : 'text-slate-400 border-slate-200 cursor-not-allowed opacity-50'}`}
+                                  title="Xóa khách hàng này"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <button type="button" onClick={() => setSelectedCustDetail(null)} className="h-9 px-4 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đóng chi tiết</button>
                             </div>
-
-                            <button
-                              type="button"
-                              onClick={() => setSelectedCustDetail(null)}
-                              className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold px-4 py-2 rounded-xl text-xs transition-colors cursor-pointer"
-                            >
-                              Đóng chi tiết
-                            </button>
                           </div>
                         </div>
                       );
@@ -7898,19 +7798,19 @@ export default function FinanceManagement({
 
             {/* MODAL: THÊM / SỬA KHÁCH HÀNG */}
             {showAddCustomerModal && (
-              <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-[9999] p-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-slate-200 text-xs text-left animate-in fade-in zoom-in-95 duration-200">
-                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[9999] p-4">
+                <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[92vh] overflow-y-auto p-5 space-y-4 shadow-xl text-slate-800 text-[13px] text-left animate-in fade-in zoom-in-95 duration-200">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                     <div className="flex items-center gap-2">
-                      <Users className="w-5 h-5 text-orange-500" />
-                      <h3 className="font-extrabold text-white text-sm">
+                      <span className="w-8 h-8 rounded-lg bg-[#e8efff] text-[#0d47c9] inline-flex items-center justify-center"><Users className="w-4 h-4" /></span>
+                      <h3 className="font-extrabold text-slate-900 text-sm">
                         {editingCustId ? 'Cập nhật thông tin khách hàng' : 'Thêm Khách hàng mới'}
                       </h3>
                     </div>
                     <button
                       type="button"
                       onClick={handleCloseCustomerModal}
-                      className="text-slate-400 hover:text-white cursor-pointer"
+                      className="text-slate-500 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -7919,17 +7819,17 @@ export default function FinanceManagement({
                   <form onSubmit={handleCreateCustomerSubmit} className="space-y-3">
                     {/* Auto Generated Locked Code */}
                     <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Mã khách hàng tự sinh (Khóa nhập liệu)</label>
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Mã khách hàng tự sinh (Khóa nhập liệu)</label>
                       <input
                         type="text"
                         disabled
                         value={editingCustId ? editingCustId : (custName ? `KH_${getAbbreviation(custName)}_...` : 'KH_[Chữ viết tắt]_[Mã duy nhất]')}
-                        className="w-full bg-slate-950 border border-slate-850 rounded px-2.5 py-1.5 text-orange-400 font-mono font-bold cursor-not-allowed outline-none"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[#0d47c9] font-mono font-bold cursor-not-allowed outline-none"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-350 font-bold mb-1">Tên khách hàng <span className="text-red-500">*</span></label>
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Tên khách hàng <span className="text-red-500">*</span></label>
                       <input
                         type="text"
                         required
@@ -7942,12 +7842,12 @@ export default function FinanceManagement({
                             setCustRep(val);
                           }
                         }}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white outline-none focus:border-orange-500"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-[#0d47c9]"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-350 font-bold mb-1">Người đại diện (Mặc định là Tên Khách hàng)</label>
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Người đại diện (Mặc định là Tên Khách hàng)</label>
                       <input
                         type="text"
                         placeholder="Nhập tên người đại diện..."
@@ -7956,12 +7856,12 @@ export default function FinanceManagement({
                           setCustRep(e.target.value);
                           setIsCustRepManuallyEdited(true);
                         }}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white outline-none focus:border-orange-500 font-medium"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-[#0d47c9]"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-350 font-bold mb-1">Số điện thoại (* kiểu số)</label>
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Số điện thoại (* kiểu số)</label>
                       <input
                         type="text"
                         required
@@ -7970,23 +7870,23 @@ export default function FinanceManagement({
                         placeholder="ví dụ: 0912345678"
                         value={custPhone}
                         onChange={(e) => setCustPhone(e.target.value.replace(/[^0-9]/g, ''))}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white outline-none font-mono focus:border-orange-500"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none font-mono focus:border-[#0d47c9]"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-350 font-bold mb-1">Địa chỉ</label>
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Địa chỉ</label>
                       <input
                         type="text"
                         placeholder="Địa chỉ liên hệ / Nhà thô thầu..."
                         value={custAddress}
                         onChange={(e) => setCustAddress(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white outline-none focus:border-orange-500"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-[#0d47c9]"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-350 font-bold mb-1">MST / CMND/CCCD (* kiểu số)</label>
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">MST / CMND/CCCD (* kiểu số)</label>
                       <input
                         type="text"
                         pattern="[0-9]*"
@@ -7994,44 +7894,45 @@ export default function FinanceManagement({
                         placeholder="ví dụ: 0314456789"
                         value={custTaxId}
                         onChange={(e) => setCustTaxId(e.target.value.replace(/[^0-9]/g, ''))}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white outline-none font-mono focus:border-orange-500"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none font-mono focus:border-[#0d47c9]"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-350 font-bold mb-1">Ghi chú lưu ý</label>
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Ghi chú lưu ý</label>
                       <textarea
                         rows={2}
                         placeholder="Thông tin ghi chú..."
                         value={custNotes}
                         onChange={(e) => setCustNotes(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none focus:border-orange-500"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-[#0d47c9]"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-350 font-bold mb-1">Công nợ đầu kỳ (VNĐ)</label>
+                      <label className="block text-slate-600 font-bold text-[12px] mb-1">Công nợ đầu kỳ (VNĐ)</label>
                       <input
                         type="number"
                         min={0}
                         value={custOpeningDebt || ''}
                         onChange={(e) => setCustOpeningDebt(Number(e.target.value))}
                         placeholder="Công nợ đầu kỳ (nếu có)..."
-                        className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white outline-none font-mono focus:border-orange-500"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none font-mono focus:border-[#0d47c9]"
                       />
                     </div>
 
-                    <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                    <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                       <button
                         type="button"
                         onClick={handleCloseCustomerModal}
-                        className="bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold px-3 py-1.5 rounded cursor-pointer"
+                        className="h-9 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold cursor-pointer"
                       >
                         Hủy bỏ
                       </button>
                       <button
                         type="submit"
-                        className="bg-orange-600 hover:bg-orange-550 text-white font-bold px-4 py-1.5 rounded cursor-pointer shadow-md"
+                        style={{ background: '#0d47c9', color: '#ffffff' }}
+                        className="h-9 px-4 rounded-xl font-bold cursor-pointer"
                       >
                         Lưu thông tin
                       </button>
