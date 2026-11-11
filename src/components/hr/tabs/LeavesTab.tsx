@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import TablePagination, { hrGlobalSize } from '../../TablePagination';
 import { Trash2, CalendarClock, Search, RotateCcw, X } from 'lucide-react';
 import { findPairedAbsenceReport, groupPendingAbsencePairs } from '../../../lib/leaveRequests';
 import { parseLateNotice } from '../../../lib/leaveNotice';
@@ -348,33 +349,9 @@ export default function LeavesTab({
                 ))}
               </div>
 
-              {/* Chân bảng: số lượng + phân trang + số dòng mỗi trang */}
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-200 text-xs text-slate-500">
-                <span>{visibleLeaves.length} đơn</span>
-                {pageSizeNum > 0 && visibleLeaves.length > pageSizeNum && (
-                  <div className="flex items-center gap-1.5">
-                    <button type="button" disabled={leavePage === 1} aria-label="Trang trước"
-                      onClick={() => setLeavePage(prev => Math.max(prev - 1, 1))}
-                      className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Trước</button>
-                    <span className="px-1">Trang <strong>{leavePage}</strong> / {totalPages}</span>
-                    <button type="button" disabled={leavePage >= totalPages} aria-label="Trang sau"
-                      onClick={() => setLeavePage(prev => Math.min(prev + 1, totalPages))}
-                      className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Sau</button>
-                  </div>
-                )}
-                <label className="flex items-center gap-1.5">
-                  <span>Hiển thị</span>
-                  <select value={globalPageSize.toString()}
-                    onChange={(e) => { const val = e.target.value; setGlobalPageSize(val === 'all' ? 'all' : parseInt(val, 10)); localStorage.setItem('hl_global_page_size', val); }}
-                    className="h-8 bg-white border border-slate-200 text-slate-700 px-2 rounded-lg text-xs cursor-pointer outline-none font-bold">
-                    <option value="5">5 dòng</option>
-                    <option value="10">10 dòng</option>
-                    <option value="20">20 dòng</option>
-                    <option value="50">50 dòng</option>
-                    <option value="all">Tất cả</option>
-                  </select>
-                </label>
-              </div>
+              {/* Chân bảng: thanh phân trang chung */}
+              <TablePagination total={visibleLeaves.length} page={leavePage} onPage={setLeavePage}
+                {...hrGlobalSize(globalPageSize, setGlobalPageSize)} unit="đơn" testId="leaves-pager" />
             </div>
           </div>
 

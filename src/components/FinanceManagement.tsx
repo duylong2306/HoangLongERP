@@ -6134,25 +6134,10 @@ export default function FinanceManagement({
                     </div>
                   </div>
 
-                  {/* Phân trang & Tổng cộng */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[12px] text-slate-500">
-                    <div className="flex items-center gap-2">
-                      <span>
-                        Tổng: <span className="text-[#0d47c9] font-black font-mono">{poGrandCount}</span> đơn ·{' '}
-                        <span className="text-[#0d47c9] font-black font-mono">{totalPages}</span> trang
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span>Dòng / trang:</span>
-                      <select value={poPageSize} onChange={(e) => { setPoPageSize(Number(e.target.value)); setPoPage(1); }} className="h-9 bg-white border border-slate-200 rounded-xl px-2 text-[13px] text-slate-800 outline-none cursor-pointer">
-                        {[5, 10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                        <option value={-1}>Tất cả</option>
-                      </select>
-                      <button type="button" disabled={poPage <= 1} onClick={() => setPoPage(p => Math.max(1, p - 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">‹ Trước</button>
-                      <span>Trang {poPage} / {totalPages}</span>
-                      <button type="button" disabled={poPage >= totalPages} onClick={() => setPoPage(p => Math.min(totalPages, p + 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">Sau ›</button>
-                    </div>
-                  </div>
+                  {/* Phân trang — thanh dùng chung */}
+                  <TablePagination total={poGrandCount} page={poPage} pageSize={poPageSize}
+                    onPage={setPoPage} onPageSize={(s) => { setPoPageSize(s); setPoPage(1); }}
+                    unit="đơn hàng" sizes={[5, 10, 20, 50, 100]} testId="po-pager" />
 
                   </div>
                   )}
@@ -6418,24 +6403,9 @@ export default function FinanceManagement({
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[12px] text-slate-500">
-                          <div className="flex items-center gap-2">
-                            <span>
-                              Tổng: <span className="text-rose-600 font-black font-mono">{matchedReturns.length}</span> chứng từ ·{' '}
-                              <span className="text-rose-600 font-black font-mono">{returnsTotalPages}</span> trang
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span>Dòng / trang:</span>
-                            <select value={returnsPageSize} onChange={(e) => { setReturnsPageSize(Number(e.target.value)); setReturnsPage(1); }} className="h-9 bg-white border border-slate-200 rounded-xl px-2 text-[13px] text-slate-800 outline-none cursor-pointer">
-                              {[5, 10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                              <option value={-1}>Tất cả</option>
-                            </select>
-                            <button type="button" disabled={returnsPage <= 1} onClick={() => setReturnsPage(p => Math.max(1, p - 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">‹ Trước</button>
-                            <span>Trang {returnsPage} / {returnsTotalPages}</span>
-                            <button type="button" disabled={returnsPage >= returnsTotalPages} onClick={() => setReturnsPage(p => Math.min(returnsTotalPages, p + 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">Sau ›</button>
-                          </div>
-                        </div>
+                        <TablePagination total={matchedReturns.length} page={returnsPage} pageSize={returnsPageSize}
+                          onPage={setReturnsPage} onPageSize={(sz) => { setReturnsPageSize(sz); setReturnsPage(1); }}
+                          unit="chứng từ" sizes={[5, 10, 20, 50, 100]} testId="returns-pager" />
                       </div>
                     );
                   })()}
@@ -6741,44 +6711,15 @@ export default function FinanceManagement({
                           );
                         };
 
-                        // Thanh phân trang từng cột (giống Điều phối vật tư)
-                        const ProposalPaginationBar = ({ page, totalPages, pageSize, onPage, onPageSize, total }: {
-                          page: number; totalPages: number; pageSize: number;
+                        // Thanh phân trang từng cột — dùng thanh phân trang chung (kiểu gọn cho cột hẹp):
+                        // "Hiển thị a–b / tổng", Trước / Trang x/y / Sau, "Số dòng/trang".
+                        const ProposalPaginationBar = ({ page, pageSize, onPage, onPageSize, total }: {
+                          page: number; totalPages?: number; pageSize: number;
                           onPage: (p: number) => void; onPageSize: (s: number) => void; total: number;
                         }) => (
-                          <div className="flex items-center justify-between gap-1 px-2.5 py-2 border-t border-slate-200/80 bg-white/60 shrink-0">
-                            <div className="flex items-center gap-1">
-                              <span className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wide">Dòng/trang</span>
-                              <select
-                                value={pageSize}
-                                onChange={(e) => onPageSize(Number(e.target.value))}
-                                className="bg-white border border-slate-200 rounded px-1 py-0.5 text-[9px] font-bold text-slate-600 outline-none cursor-pointer"
-                              >
-                                {PROPOSAL_COL_PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-                                <option value={-1}>Tất cả</option>
-                              </select>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                disabled={page <= 1}
-                                onClick={() => onPage(page - 1)}
-                                className="p-1 rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all"
-                              >
-                                <ChevronLeft className="w-3 h-3" />
-                              </button>
-                              <span className="text-[9.5px] font-mono font-bold text-slate-600 whitespace-nowrap">
-                                {total > 0 ? `Trang ${page}/${totalPages}` : '0 dòng'}
-                              </span>
-                              <button
-                                type="button"
-                                disabled={page >= totalPages}
-                                onClick={() => onPage(page + 1)}
-                                className="p-1 rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all"
-                              >
-                                <ChevronRight className="w-3 h-3" />
-                              </button>
-                            </div>
+                          <div className="shrink-0 bg-white/60">
+                            <TablePagination compact total={total} page={page} pageSize={pageSize} onPage={onPage} onPageSize={onPageSize}
+                              unit="đề xuất" sizes={PROPOSAL_COL_PAGE_SIZES} testId="proposal-col-pager" />
                           </div>
                         );
 
@@ -8884,24 +8825,9 @@ export default function FinanceManagement({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[12px] text-slate-500">
-                  <div className="flex items-center gap-2">
-                    <span>Hiển thị</span>
-                    <select value={recPageSize} onChange={(e) => { setRecPageSize(Number(e.target.value)); setRecPage(1); }} className="h-9 bg-white border border-slate-200 rounded-xl px-2 text-[13px] text-slate-800 outline-none cursor-pointer">
-                      <option value={5}>5</option>
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
-                      <option value={-1}>Tất cả</option>
-                    </select>
-                    <span>chủ đầu tư/trang</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span>Trang {recPageInfo.safePage}/{recPageInfo.totalPages} · {receiptGroups.length} chủ đầu tư</span>
-                    <button type="button" disabled={recPageInfo.safePage <= 1} onClick={() => setRecPage(p => Math.max(1, p - 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">‹ Trước</button>
-                    <button type="button" disabled={recPageInfo.safePage >= recPageInfo.totalPages} onClick={() => setRecPage(p => Math.min(recPageInfo.totalPages, p + 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">Sau ›</button>
-                  </div>
-                </div>
+                <TablePagination total={receiptGroups.length} page={recPageInfo.safePage} pageSize={recPageSize}
+                  onPage={setRecPage} onPageSize={(sz) => { setRecPageSize(sz); setRecPage(1); }}
+                  unit="chủ đầu tư" testId="receipt-pager" />
               </div>
               );
             })()}
@@ -9478,24 +9404,9 @@ export default function FinanceManagement({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-[12px] text-slate-500">
-                  <div className="flex items-center gap-2">
-                    <span>Hiển thị</span>
-                    <select value={payPageSize} onChange={(e) => { setPayPageSize(Number(e.target.value)); setPayPage(1); }} className="h-9 bg-white border border-slate-200 rounded-xl px-2 text-[13px] text-slate-800 outline-none cursor-pointer">
-                      <option value={5}>5</option>
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
-                      <option value={-1}>Tất cả</option>
-                    </select>
-                    <span>đối tượng chi/trang</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span>Trang {payPageInfo.safePage}/{payPageInfo.totalPages} · {paymentGroups.length} đối tượng chi</span>
-                    <button type="button" disabled={payPageInfo.safePage <= 1} onClick={() => setPayPage(p => Math.max(1, p - 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">‹ Trước</button>
-                    <button type="button" disabled={payPageInfo.safePage >= payPageInfo.totalPages} onClick={() => setPayPage(p => Math.min(payPageInfo.totalPages, p + 1))} className="h-9 px-3 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 cursor-pointer">Sau ›</button>
-                  </div>
-                </div>
+                <TablePagination total={paymentGroups.length} page={payPageInfo.safePage} pageSize={payPageSize}
+                  onPage={setPayPage} onPageSize={(sz) => { setPayPageSize(sz); setPayPage(1); }}
+                  unit="đối tượng chi" testId="payment-pager" />
               </div>
             
               );

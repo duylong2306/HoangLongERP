@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import TablePagination, { hrGlobalSize } from '../../TablePagination';
 import { Calculator, Download, Pencil, Search, Lock } from 'lucide-react';
 import { PayrollItem } from '../hrTypes';
 import { countStandardMismatch } from '../hrCalculations';
@@ -401,33 +402,10 @@ export default function PayrollTab({
           </div>
         )}
 
-        {/* Chân bảng: số lượng + phân trang + số dòng mỗi trang */}
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-200 text-xs text-slate-500">
-          <span>{filteredPayroll.length} nhân viên · kỳ {payrollMonth}/{payrollYear} · công chuẩn {standardWorkDays} ngày</span>
-          {pageSizeNum > 0 && filteredPayroll.length > pageSizeNum && (
-            <div className="flex items-center gap-1.5">
-              <button type="button" disabled={payrollPage === 1} aria-label="Trang trước"
-                onClick={() => setPayrollPage(prev => Math.max(prev - 1, 1))}
-                className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Trước</button>
-              <span className="px-1">Trang <strong>{payrollPage}</strong> / {totalPages}</span>
-              <button type="button" disabled={payrollPage >= totalPages} aria-label="Trang sau"
-                onClick={() => setPayrollPage(prev => Math.min(prev + 1, totalPages))}
-                className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Sau</button>
-            </div>
-          )}
-          <label className="flex items-center gap-1.5">
-            <span>Hiển thị</span>
-            <select value={globalPageSize.toString()}
-              onChange={(e) => { const val = e.target.value; setGlobalPageSize(val === 'all' ? 'all' : parseInt(val, 10)); localStorage.setItem('hl_global_page_size', val); }}
-              className="h-8 bg-white border border-slate-200 text-slate-700 px-2 rounded-lg text-xs cursor-pointer outline-none font-bold">
-              <option value="5">5 dòng</option>
-              <option value="10">10 dòng</option>
-              <option value="20">20 dòng</option>
-              <option value="50">50 dòng</option>
-              <option value="all">Tất cả</option>
-            </select>
-          </label>
-        </div>
+        {/* Chân bảng: dòng tóm tắt kỳ lương + thanh phân trang chung (Hiển thị a–b / tổng, Trước/Sau, Số dòng/trang) */}
+        <div className="px-3 pt-2.5 text-xs text-slate-500">{filteredPayroll.length} nhân viên · kỳ {payrollMonth}/{payrollYear} · công chuẩn {standardWorkDays} ngày</div>
+        <TablePagination total={filteredPayroll.length} page={payrollPage} onPage={setPayrollPage}
+          {...hrGlobalSize(globalPageSize, setGlobalPageSize)} unit="nhân viên" testId="payroll-pager" />
       </div>
 
       {/* Chốt kỳ lương: Khóa kỳ là nút chính (xanh LoLo), Tải toàn bộ là nút phụ — chỉ tải được sau khi khóa kỳ */}

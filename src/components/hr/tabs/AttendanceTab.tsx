@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import TablePagination, { hrGlobalSize } from '../../TablePagination';
 import { Lock, Unlock, Pencil, FileUp, Download, Trash2, AlertTriangle, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { readHrmConfigFromStorage, getAttendanceStatusText, getMissingAttendanceReport } from '../hrCalculations';
 import MissingAttendanceReport from './MissingAttendanceReport';
@@ -573,37 +574,9 @@ export default function AttendanceTab({
               ))}
             </div>
 
-            {/* Chân bảng: số lượng + phân trang + số dòng mỗi trang */}
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-200 text-xs text-slate-500">
-              <span>{filteredAttendance.length} bản ghi</span>
-              {pageSizeNum > 0 && filteredAttendance.length > pageSizeNum && (
-                <div className="flex items-center gap-1.5">
-                  <button type="button" disabled={attendancePage === 1} aria-label="Trang trước"
-                    onClick={() => setAttendancePage(prev => Math.max(prev - 1, 1))}
-                    className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Trước</button>
-                  <span className="px-1">Trang <strong>{attendancePage}</strong> / {totalPages}</span>
-                  <button type="button" disabled={attendancePage >= totalPages} aria-label="Trang sau"
-                    onClick={() => setAttendancePage(prev => Math.min(prev + 1, totalPages))}
-                    className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Sau</button>
-                </div>
-              )}
-              <label className="flex items-center gap-1.5">
-                <span>Hiển thị</span>
-                <select value={globalPageSize.toString()}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setGlobalPageSize(val === 'all' ? 'all' : parseInt(val, 10));
-                    localStorage.setItem('hl_global_page_size', val);
-                  }}
-                  className="h-8 bg-white border border-slate-200 text-slate-700 px-2 rounded-lg text-xs cursor-pointer outline-none font-bold">
-                  <option value="5">5 dòng</option>
-                  <option value="10">10 dòng</option>
-                  <option value="20">20 dòng</option>
-                  <option value="50">50 dòng</option>
-                  <option value="all">Tất cả</option>
-                </select>
-              </label>
-            </div>
+            {/* Chân bảng: thanh phân trang chung */}
+            <TablePagination total={filteredAttendance.length} page={attendancePage} onPage={setAttendancePage}
+              {...hrGlobalSize(globalPageSize, setGlobalPageSize)} unit="bản ghi" testId="attendance-pager" />
           </div>
         </>
       )}

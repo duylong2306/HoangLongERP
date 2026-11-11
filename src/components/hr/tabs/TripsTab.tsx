@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import TablePagination, { hrGlobalSize } from '../../TablePagination';
 import { Download, Trash2, Check, X, Search, ChevronDown, Pencil, Plus, RotateCcw } from 'lucide-react';
 import { CTPStatus, ctpStatusLabel } from '../../../lib/travelExpenseStatus';
 
@@ -495,26 +496,10 @@ export default function TripsTab({
               })}
             </div>
 
-            {/* Chân bảng: số lượng + phân trang + số dòng mỗi trang */}
-            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-200 text-xs text-slate-500">
-              <span>{visibleItems.length} khoản</span>
-              {totalPages > 1 && (
-                <div className="flex items-center gap-1.5">
-                  <button type="button" disabled={currentPage <= 1} aria-label="Trang trước" onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Trước</button>
-                  <span className="px-1">Trang <strong>{currentPage}</strong> / {totalPages}</span>
-                  <button type="button" disabled={currentPage >= totalPages} aria-label="Trang sau" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Sau</button>
-                </div>
-              )}
-              <label className="flex items-center gap-1.5">
-                <span>Hiển thị</span>
-                <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
-                  className="h-8 bg-white border border-slate-200 text-slate-700 px-2 rounded-lg text-xs cursor-pointer outline-none font-bold">
-                  {[5, 10, 20, 50, 100].map(n => <option key={n} value={n}>{n} dòng</option>)}
-                </select>
-              </label>
-            </div>
+            {/* Chân bảng: thanh phân trang chung */}
+            <TablePagination total={visibleItems.length} page={currentPage} onPage={setCurrentPage}
+              pageSize={pageSize} onPageSize={(sz) => { setPageSize(sz); setCurrentPage(1); }}
+              unit="khoản" sizes={[5, 10, 20, 50, 100]} testId="trips-pager" />
           </>
         )}
       </div>

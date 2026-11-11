@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import TablePagination, { hrGlobalSize } from '../../TablePagination';
 import { Search, Check, CheckSquare, Trash2, RotateCcw, UserPlus, Users, X, Plus, Download, FileUp, Pencil } from 'lucide-react';
 import { Role, EmployeeProfile } from '../hrTypes';
 import { SalaryScale } from '../../../types';
@@ -621,45 +622,9 @@ export default function ProfilesTab({
                 ))}
               </div>
 
-              {/* Chân bảng: số lượng + số dòng mỗi trang + phân trang */}
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-t border-slate-200 text-xs text-slate-500">
-                <span>{filteredEmployees.length} nhân viên</span>
-                {(() => {
-                  const totalFiltered = filteredEmployees.length;
-                  if (globalPageSize === 'all' || totalFiltered <= (globalPageSize as number)) return null;
-                  const totalPages = Math.ceil(totalFiltered / (globalPageSize as number));
-                  return (
-                    <div className="flex items-center gap-1.5">
-                      <button type="button" disabled={profilePage === 1} aria-label="Trang trước"
-                        onClick={(e) => { e.stopPropagation(); setProfilePage(prev => Math.max(prev - 1, 1)); }}
-                        className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Trước</button>
-                      <span className="px-1">Trang <strong>{profilePage}</strong> / {totalPages}</span>
-                      <button type="button" disabled={profilePage >= totalPages} aria-label="Trang sau"
-                        onClick={(e) => { e.stopPropagation(); setProfilePage(prev => Math.min(prev + 1, totalPages)); }}
-                        className="h-8 px-2.5 rounded-lg bg-white border border-slate-200 text-slate-600 font-bold disabled:opacity-30 disabled:pointer-events-none cursor-pointer">Sau</button>
-                    </div>
-                  );
-                })()}
-                <label className="flex items-center gap-1.5">
-                  <span>Hiển thị</span>
-                  <select
-                    value={globalPageSize.toString()}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      const newSize = val === 'all' ? 'all' : parseInt(val, 10);
-                      setGlobalPageSize(newSize);
-                      localStorage.setItem('hl_global_page_size', val);
-                    }}
-                    className="h-8 bg-white border border-slate-200 text-slate-700 px-2 rounded-lg text-xs cursor-pointer outline-none font-bold"
-                  >
-                    <option value="5">5 dòng</option>
-                    <option value="10">10 dòng</option>
-                    <option value="20">20 dòng</option>
-                    <option value="50">50 dòng</option>
-                    <option value="all">Tất cả</option>
-                  </select>
-                </label>
-              </div>
+              {/* Chân bảng: thanh phân trang chung (luôn hiện, kể cả khi danh sách ngắn) */}
+              <TablePagination total={filteredEmployees.length} page={profilePage} onPage={setProfilePage}
+                {...hrGlobalSize(globalPageSize, setGlobalPageSize)} unit="nhân viên" testId="profiles-pager" />
             </div>
           );
         })()}
