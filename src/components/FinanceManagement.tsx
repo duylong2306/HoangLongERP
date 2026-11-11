@@ -5685,7 +5685,7 @@ export default function FinanceManagement({
 
             {/* Header / Sub-tab Title — ẨN ở tab Đề Xuất Chi, Đơn Hàng, Nhập Thu và Nhập Chi (tab đã làm lại: tên tab đã có trên thanh tab,
                 ô tìm kiếm chuyển vào hàng bộ lọc của chính tab). Các tab chưa làm lại vẫn dùng thanh này. */}
-            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && activeSubTab !== 'cong_no_phai_tra' && activeSubTab !== 'quy_tien_mat' && !(activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'khach_hang') && (
+            {activeSubTab !== 'de_xuat_thu_chi' && activeSubTab !== 'don_hang' && activeSubTab !== 'nhap_thu' && activeSubTab !== 'nhap_chi' && activeSubTab !== 'cong_no_phai_thu' && activeSubTab !== 'cong_no_phai_tra' && activeSubTab !== 'quy_tien_mat' && !(activeSubTab === 'du_lieu_ke_toan' && (duLieuTab === 'khach_hang' || duLieuTab === 'danh_muc_san_pham')) && (
               <>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-850 pb-4 mb-5 gap-3 shrink-0">
               <div>
@@ -7942,81 +7942,112 @@ export default function FinanceManagement({
               </div>
             )}
 
-            {/* TAB: DANH MỤC SẢN PHẨM KẾ TOÁN */}
+            {/* TAB: DANH MỤC SẢN PHẨM KẾ TOÁN — thiết kế kiểu LoLo (bộ lọc ô sáng kèm ô tìm kiếm, bảng máy tính + thẻ điện thoại, thanh phân trang dùng chung) */}
             {activeSubTab === 'du_lieu_ke_toan' && duLieuTab === 'danh_muc_san_pham' && (() => {
-              const filteredAccProds = accProducts.filter(p => {
-                const s = searchTerm.toLowerCase().trim();
-                return s === '' || p.id.toLowerCase().includes(s) || p.tenSanPham.toLowerCase().includes(s);
-              });
-              const limitAP = pageSizeAccProd === -1 ? filteredAccProds.length : pageSizeAccProd;
-              const startAP = (pageAccProd - 1) * limitAP;
-              const paginatedAccProds = filteredAccProds.slice(startAP, startAP + limitAP);
+              // Tìm theo mã hoặc tên sản phẩm
+              const kw = searchTerm.toLowerCase().trim();
+              const filteredAccProds = accProducts.filter(p => kw === '' || p.id.toLowerCase().includes(kw) || p.tenSanPham.toLowerCase().includes(kw));
+              // Phân trang: kẹp trang hiện tại để không vượt quá tổng trang sau khi lọc
+              const limitAP = pageSizeAccProd === -1 ? Math.max(1, filteredAccProds.length) : pageSizeAccProd;
               const totalPagesAP = Math.ceil(filteredAccProds.length / limitAP) || 1;
+              const safePageAP = Math.min(Math.max(1, pageAccProd), totalPagesAP);
+              const startAP = (safePageAP - 1) * limitAP;
+              const paginatedAccProds = filteredAccProds.slice(startAP, startAP + limitAP);
+              const iconBtn = 'h-9 w-9 rounded-xl flex items-center justify-center bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer';
+              const money = (n: number) => `${(n || 0).toLocaleString('vi-VN')} đ`;
+              // Nút Sửa + Xóa (Xóa cần bấm xác nhận 2 bước ngay trên dòng) — dùng chung cho bảng và thẻ
+              const rowActions = (p: AccountingProductItem) => (
+                <div className="flex items-center justify-end gap-1.5">
+                  <button type="button" onClick={() => handleAccProdEdit(p)} title="Sửa" data-testid={`accprod-edit-${p.id}`}
+                    className="h-8 w-8 rounded-lg flex items-center justify-center bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"><Edit className="w-3.5 h-3.5" /></button>
+                  {accProdDeleteId === p.id ? (
+                    <>
+                      <button type="button" onClick={() => handleAccProdDelete(p.id)} title="Xác nhận xóa" data-testid={`accprod-confirm-delete-${p.id}`}
+                        className="h-8 w-8 rounded-lg flex items-center justify-center bg-rose-600 border border-rose-600 cursor-pointer" style={{ color: '#ffffff' }}><Check className="w-3.5 h-3.5" /></button>
+                      <button type="button" onClick={() => setAccProdDeleteId(null)} title="Hủy"
+                        className="h-8 w-8 rounded-lg flex items-center justify-center bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => setAccProdDeleteId(p.id)} title="Xóa" data-testid={`accprod-delete-${p.id}`}
+                      className="h-8 w-8 rounded-lg flex items-center justify-center bg-white border border-rose-300 text-rose-600 hover:bg-rose-50 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                  )}
+                </div>
+              );
 
               return (
                 <div className="space-y-4">
-                  {/* Header + Action buttons */}
-                  <div className="flex justify-between items-center border-b border-slate-850 pb-2">
-                    <span className="font-bold text-slate-300 uppercase tracking-wide text-[11px]">
-                      Danh mục sản phẩm ({filteredAccProds.length})
-                    </span>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => { resetAccProdForm(); setAccProdFormMode('add'); setShowAccProdForm(true); }}
-                        className="bg-orange-600 hover:bg-orange-550 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-md">
-                        <Plus className="w-3.5 h-3.5" /> Thêm SP
-                      </button>
-                      <button type="button" onClick={handleAccProdExportExcel}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-md">
-                        <Download className="w-3.5 h-3.5" /> Xuất Excel
-                      </button>
-                      <button type="button" onClick={() => accProdFileInputRef.current?.click()}
-                        className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 shadow-md">
-                        <FileUp className="w-3.5 h-3.5" /> Nhập Excel
-                      </button>
+                  {/* Hàng tiêu đề: tên mục + nút icon Xuất/Nhập Excel + nút Thêm (xanh LoLo) */}
+                  <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+                    <span className="font-extrabold text-slate-900 text-sm">Danh mục sản phẩm <span className="text-slate-500 font-bold">({filteredAccProds.length})</span></span>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={handleAccProdExportExcel} className={iconBtn} title="Xuất Excel danh mục sản phẩm" data-testid="accprod-export"><Download className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => accProdFileInputRef.current?.click()} className={iconBtn} title="Nhập Excel danh mục sản phẩm" data-testid="accprod-import"><FileUp className="w-4 h-4" /></button>
                       <input ref={accProdFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleAccProdImportExcel} />
+                      <button type="button" data-testid="accprod-add" onClick={() => { resetAccProdForm(); setAccProdFormMode('add'); setShowAccProdForm(true); }}
+                        style={{ background: '#0d47c9', color: '#ffffff' }}
+                        className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 cursor-pointer">
+                        <Plus className="w-4 h-4" />
+                        Thêm sản phẩm
+                      </button>
                     </div>
                   </div>
 
-                  {/* Add / Edit Form Modal */}
+                  {/* Bộ lọc ô sáng kèm ô tìm kiếm (thanh tiêu đề chung đã ẩn cho tab này) */}
+                  <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="accprod-filters">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input type="text" data-testid="accprod-search" placeholder="Mã hoặc tên sản phẩm…" value={searchTerm}
+                          onChange={(e) => { setSearchTerm(e.target.value); setPageAccProd(1); }}
+                          className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Hộp Thêm / Sửa sản phẩm */}
                   {showAccProdForm && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowAccProdForm(false)}>
-                      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-4">
-                          <h3 className="text-white font-extrabold text-sm uppercase tracking-wide">
-                            {accProdFormMode === 'edit' ? `Sửa sản phẩm ${accProdEditId}` : 'Thêm sản phẩm mới'}
-                          </h3>
-                          <button onClick={() => { setShowAccProdForm(false); resetAccProdForm(); }}
-                            className="text-slate-400 hover:text-white transition-colors cursor-pointer"><X className="w-5 h-5" /></button>
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setShowAccProdForm(false)} data-testid="accprod-modal">
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-xl w-full max-w-md max-h-[92vh] overflow-y-auto p-5 space-y-4 text-slate-800 text-[13px] text-left animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="w-8 h-8 rounded-lg bg-[#e8efff] text-[#0d47c9] inline-flex items-center justify-center"><Package className="w-4 h-4" /></span>
+                            <h3 className="font-extrabold text-slate-900 text-sm">
+                              {accProdFormMode === 'edit' ? `Sửa sản phẩm ${accProdEditId}` : 'Thêm sản phẩm mới'}
+                            </h3>
+                          </div>
+                          <button type="button" onClick={() => { setShowAccProdForm(false); resetAccProdForm(); }}
+                            className="text-slate-500 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"><X className="w-4 h-4" /></button>
                         </div>
-                        <form onSubmit={handleAccProdSubmit} className="space-y-4">
+                        <form onSubmit={handleAccProdSubmit} className="space-y-3">
                           <div>
-                            <label className="block text-[11px] font-bold text-slate-400 mb-1">Mã sản phẩm</label>
+                            <label className="block text-slate-600 font-bold text-[12px] mb-1">Mã sản phẩm</label>
                             <input type="text" disabled value={accProdFormMode === 'edit' ? (accProdEditId || '') : '(Tự sinh)'}
-                              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs cursor-not-allowed opacity-60" />
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[#0d47c9] font-mono font-bold cursor-not-allowed outline-none" />
                           </div>
                           <div>
-                            <label className="block text-[11px] font-bold text-slate-400 mb-1">Tên sản phẩm <span className="text-red-400">*</span></label>
+                            <label className="block text-slate-600 font-bold text-[12px] mb-1">Tên sản phẩm <span className="text-red-500">*</span></label>
                             <input type="text" value={accProdTenSP} onChange={e => setAccProdTenSP(e.target.value)}
-                              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 focus:outline-none"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-[#0d47c9]"
                               placeholder="Nhập tên sản phẩm..." autoFocus />
                           </div>
                           <div>
-                            <label className="block text-[11px] font-bold text-slate-400 mb-1">Đơn giá (đ)</label>
+                            <label className="block text-slate-600 font-bold text-[12px] mb-1">Đơn giá (đ)</label>
                             <input type="number" value={accProdDonGia} onChange={e => setAccProdDonGia(e.target.value)}
-                              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 focus:outline-none"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono outline-none focus:border-[#0d47c9]"
                               placeholder="0" min="0" />
                           </div>
                           <div>
-                            <label className="block text-[11px] font-bold text-slate-400 mb-1">Đơn vị tính</label>
+                            <label className="block text-slate-600 font-bold text-[12px] mb-1">Đơn vị tính</label>
                             <input type="text" value={accProdDonViTinh} onChange={e => setAccProdDonViTinh(e.target.value)}
-                              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:border-orange-500 focus:outline-none"
+                              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-[#0d47c9]"
                               placeholder="Cái, Mét, KG..." />
                           </div>
-                          <div className="flex gap-2 justify-end pt-2">
+                          <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                             <button type="button" onClick={() => { setShowAccProdForm(false); resetAccProdForm(); }}
-                              className="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition-colors">Hủy</button>
-                            <button type="submit"
-                              className="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition-colors shadow-md">
+                              className="h-9 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold cursor-pointer">Hủy bỏ</button>
+                            <button type="submit" style={{ background: '#0d47c9', color: '#ffffff' }}
+                              className="h-9 px-4 rounded-xl font-bold cursor-pointer">
                               {accProdFormMode === 'edit' ? 'Cập nhật' : 'Thêm mới'}
                             </button>
                           </div>
@@ -8025,73 +8056,61 @@ export default function FinanceManagement({
                     </div>
                   )}
 
-                  {/* Table */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-extrabold uppercase text-[10px] tracking-wider">
-                            <th className="p-3 w-10 text-center">STT</th>
-                            <th className="p-3 w-[120px]">Mã SP</th>
-                            <th className="p-3">Tên sản phẩm</th>
-                            <th className="p-3 w-[140px] text-right">Đơn giá (đ)</th>
-                            <th className="p-3 w-[100px] text-center sticky right-0 bg-slate-950 z-10 shadow-[-3px_0_6px_rgba(0,0,0,0.3)] border-l border-slate-800">Thao tác</th>
+                  {/* MÁY TÍNH: bảng */}
+                  <div className="hidden md:block bg-white border border-slate-200 rounded-2xl overflow-x-auto" data-testid="accprod-table">
+                    <table className="w-full text-left text-slate-700 text-[13px]">
+                      <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="px-3 py-2.5 w-12 text-center">STT</th>
+                          <th className="px-3 py-2.5 w-[130px]">Mã SP</th>
+                          <th className="px-3 py-2.5">Tên sản phẩm</th>
+                          <th className="px-3 py-2.5 w-[110px]">Đơn vị tính</th>
+                          <th className="px-3 py-2.5 w-[150px] text-right">Đơn giá</th>
+                          <th className="px-3 py-2.5 w-[130px] text-right">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {paginatedAccProds.length === 0 ? (
+                          <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-500 italic">Chưa có sản phẩm nào. Nhấn "Thêm sản phẩm" hoặc biểu tượng nhập Excel để bắt đầu.</td></tr>
+                        ) : paginatedAccProds.map((p, idx) => (
+                          <tr key={p.id} data-testid={`accprod-row-${p.id}`} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-3 py-2.5 text-center text-slate-500 font-mono text-[12px]">{startAP + idx + 1}</td>
+                            <td className="px-3 py-2.5 font-mono font-bold text-[#0d47c9] text-[12px]">{p.id}</td>
+                            <td className="px-3 py-2.5 font-extrabold text-slate-900">{p.tenSanPham}</td>
+                            <td className="px-3 py-2.5 text-slate-600">{p.donViTinh || '—'}</td>
+                            <td className="px-3 py-2.5 text-right font-mono font-bold text-emerald-700">{money(p.donGia)}</td>
+                            <td className="px-3 py-2.5">{rowActions(p)}</td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {paginatedAccProds.length > 0 ? paginatedAccProds.map((p, idx) => (
-                            <tr key={p.id} className={`border-b border-slate-800 hover:bg-slate-800/50 transition-colors ${idx % 2 === 1 ? 'bg-slate-900/50' : ''}`}>
-                              <td className="p-3 text-center text-slate-500 text-[10px] font-mono">{startAP + idx + 1}</td>
-                              <td className="p-3 font-mono font-bold text-orange-400 text-[11px]">{p.id}</td>
-                              <td className="p-3 font-extrabold text-white text-[11px]">{p.tenSanPham}</td>
-                              <td className="p-3 text-right font-mono text-emerald-400 text-[11px]">{p.donGia.toLocaleString('vi-VN')}</td>
-                              <td className="p-3 text-center sticky right-0 bg-slate-900/95 z-10 shadow-[-3px_0_6px_rgba(0,0,0,0.3)] border-l border-slate-800">
-                                <div className="flex items-center justify-center gap-1">
-                                  <button onClick={() => handleAccProdEdit(p)} title="Sửa"
-                                    className="p-1.5 text-sky-400 hover:text-sky-300 hover:bg-sky-950 rounded-lg transition-colors cursor-pointer"><Edit className="w-3.5 h-3.5" /></button>
-                                  {accProdDeleteId === p.id ? (
-                                    <div className="flex items-center gap-1">
-                                      <button onClick={() => handleAccProdDelete(p.id)} title="Xác nhận xóa"
-                                        className="p-1.5 text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors cursor-pointer"><Check className="w-3.5 h-3.5" /></button>
-                                      <button onClick={() => setAccProdDeleteId(null)} title="Hủy"
-                                        className="p-1.5 text-slate-400 hover:text-slate-300 rounded-lg transition-colors cursor-pointer"><X className="w-3.5 h-3.5" /></button>
-                                    </div>
-                                  ) : (
-                                    <button onClick={() => setAccProdDeleteId(p.id)} title="Xóa"
-                                      className="p-1.5 text-red-500/60 hover:text-red-400 hover:bg-red-950 rounded-lg transition-colors cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          )) : (
-                            <tr><td colSpan={5} className="p-8 text-center text-slate-500 text-xs">Chưa có sản phẩm nào. Nhấn "Thêm SP" hoặc "Nhập Excel" để bắt đầu.</td></tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                    {/* Pagination */}
-                    {filteredAccProds.length > 0 && (
-                      <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-950">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-slate-500 font-bold">Hiển thị:</span>
-                          <select value={pageSizeAccProd} onChange={e => { setPageSizeAccProd(Number(e.target.value)); setPageAccProd(1); }}
-                            className="bg-slate-800 text-[10px] font-bold text-orange-400 border border-slate-700 rounded px-2 py-1 cursor-pointer outline-none">
-                            <option value={5} className="bg-slate-900">5</option>
-                            <option value={10} className="bg-slate-900">10</option>
-                            <option value={20} className="bg-slate-900">20</option>
-                            <option value={50} className="bg-slate-900">50</option>
-                            <option value={-1} className="bg-slate-900">Tất cả</option>
-                          </select>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button disabled={pageAccProd <= 1} onClick={() => setPageAccProd(p => p - 1)}
-                            className="p-1 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-                          <span className="text-[10px] text-slate-400 font-bold">{pageAccProd}/{totalPagesAP}</span>
-                          <button disabled={pageAccProd >= totalPagesAP} onClick={() => setPageAccProd(p => p + 1)}
-                            className="p-1 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"><ChevronRight className="w-4 h-4" /></button>
-                        </div>
-                      </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* ĐIỆN THOẠI: mỗi sản phẩm 1 thẻ */}
+                  <div className="md:hidden space-y-3" data-testid="accprod-cards">
+                    {paginatedAccProds.length === 0 && (
+                      <div className="bg-white border border-slate-200 rounded-2xl px-4 py-8 text-center text-slate-500 italic text-[13px]">Chưa có sản phẩm nào.</div>
                     )}
+                    {paginatedAccProds.map(p => (
+                      <div key={`card:${p.id}`} className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2">
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-slate-900 text-[14px] break-words">{p.tenSanPham}</div>
+                          <span className="font-mono text-[12px] text-[#0d47c9] font-bold">{p.id}</span>
+                        </div>
+                        <div className="text-[12px] text-slate-600 space-y-1 border-t border-slate-100 pt-2">
+                          <div className="flex justify-between"><span className="text-slate-500">Đơn vị tính</span><b className="text-slate-800">{p.donViTinh || '—'}</b></div>
+                          <div className="flex justify-between"><span className="text-slate-500">Đơn giá</span><b className="font-mono text-emerald-700">{money(p.donGia)}</b></div>
+                        </div>
+                        {rowActions(p)}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Phân trang — thanh dùng chung */}
+                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                    <TablePagination total={filteredAccProds.length} page={safePageAP} pageSize={pageSizeAccProd}
+                      onPage={setPageAccProd} onPageSize={(sz) => { setPageSizeAccProd(sz); setPageAccProd(1); }}
+                      unit="sản phẩm" testId="accprod-pager" />
                   </div>
                 </div>
               );
