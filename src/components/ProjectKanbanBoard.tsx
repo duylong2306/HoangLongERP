@@ -7,6 +7,7 @@ import { exportProjectLogExcel } from '../lib/projectEventsExport';
 import ProjectActivityModal from './ProjectActivityModal';
 import { Project, ProjectStatus, Customer, Employee, Task, TaskUpdatePayload, TaskPriority, TaskStatus, ProjectDoc, Receipt, Payment, Quote, SubcontractorAdvanceProposal, ArchivedQuote, SubTaskMission, SubTaskMissionTemplate, Supplier, ChatMessage } from '../types';
 import ProjectProgressCard from './kanban/ProjectProgressCard';
+import { getProjectDaysLeft, compareByDaysLeft } from '../lib/projectDeadline';
 import { computeProjectProgress } from '../lib/projectProgress';
 import { getDefaultColumns, getColumnStyleDetails, getProjectColumnId, getAbbrev, addColumnReducer, deleteColumnReducer, updateColumnReducer, updateColumnAutomationReducer, ensureColumnsHaveAutomationDefaults, KanbanColumn, AVAILABLE_CARD_COLORS } from '../lib/kanbanLogic';
 import { useNotification } from '../context';
@@ -17,7 +18,7 @@ import {
   HelpCircle, ChevronLeft, ChevronRight, CheckCircle2, Award, Zap, Briefcase, FileText, Save, Link,
   Users, Mail, Percent, ListTodo, RotateCcw, Calculator, Sliders, Type, MoreVertical,
   ZoomIn, ZoomOut, Lock
-, Scale} from 'lucide-react';
+, Scale, Clock} from 'lucide-react';
 // MODULE NHẬP (Imports)
 // -----------------------
 // ./TaskDetailModal         → Modal chi tiết công việc (Task)
@@ -3117,7 +3118,13 @@ export default function ProjectKanbanBoard({
         <div className="flex gap-4 min-w-[1280px] h-auto items-stretch" id="kanban_columns_row">
           {columns.map((col) => {
             // Find projects mapped to this column
-            const colProjects = sectorProjects.filter(p => getProjectColumnId(p, columns) === col.id);
+            // Thẻ trong cột SẮP THEO SỐ NGÀY CÒN LẠI TĂNG DẦN: dự án trễ hạn lên đầu, rồi sắp hết hạn;
+            // dự án đã hoàn thành / chưa có hạn xuống cuối (sort ổn định nên giữ thứ tự cũ giữa các thẻ bằng nhau).
+            const colProjects = sectorProjects
+              .filter(p => getProjectColumnId(p, columns) === col.id)
+              .map(p => ({ p, left: getProjectDaysLeft(p) }))
+              .sort((a, b) => compareByDaysLeft(a.left, b.left))
+              .map(x => x.p);
             const kbSize = getKbColPageSize(col.id);
             const kbTotal = kbColTotalPages(col.id, colProjects.length);
             const kbPageClamped = Math.min(getKbColPage(col.id), kbTotal);
@@ -3238,6 +3245,7 @@ export default function ProjectKanbanBoard({
                       const projTasks = tasksByProjectId.get(p.id) || [];
                       const doneTasks = projTasks.filter(t => t.status === 'completed');
                       const isSelected = selectedProjectId === p.id;
+                      const daysLeft = getProjectDaysLeft(p); // null = đã hoàn thành / chưa có hạn
 
                       return (
                         <div
@@ -3299,6 +3307,15 @@ export default function ProjectKanbanBoard({
                                 <User className="w-3 h-3 text-slate-400 shrink-0 select-none" />
                                 <span className="text-slate-600 font-semibold truncate flex-1">PM: {pmName}</span>
                               </div>
+                              {/* Số ngày còn lại (nhỏ): đỏ khi trễ hạn, cam khi ≤ 7 ngày, xám còn lại */}
+                              {daysLeft !== null && (
+                                <div className="flex items-center gap-1 min-w-0" data-testid={`project-days-left-${p.id}`}>
+                                  <Clock className={`w-3 h-3 shrink-0 select-none ${daysLeft < 0 ? 'text-rose-500' : daysLeft <= 7 ? 'text-amber-500' : 'text-slate-400'}`} />
+                                  <span className={`font-semibold truncate ${daysLeft < 0 ? 'text-rose-600' : daysLeft <= 7 ? 'text-amber-600' : 'text-slate-500'}`}>
+                                    {daysLeft < 0 ? `Trễ ${Math.abs(daysLeft)} ngày` : daysLeft === 0 ? 'Hạn hôm nay' : `Còn ${daysLeft} ngày`}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
