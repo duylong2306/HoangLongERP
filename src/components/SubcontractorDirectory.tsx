@@ -13,8 +13,10 @@ import {
   Trash2,
   Briefcase,
   Download,
-  FileUp
+  FileUp,
+  Phone
 } from 'lucide-react';
+import TablePagination from './TablePagination';
 
 /**
  * DANH SÁCH THẦU PHỤ — bảng riêng (accounting_subcontractors), tách khỏi
@@ -433,680 +435,443 @@ export default function SubcontractorDirectory({
     e.target.value = '';
   };
 
+  // ── Giao diện kiểu LoLo (xanh #0d47c9, ô sáng, bo xl): bộ lọc kèm ô tìm kiếm, bảng máy tính + thẻ điện thoại, thanh phân trang dùng chung ──
+  const iconBtn = 'h-9 w-9 rounded-xl flex items-center justify-center bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer';
+  const inputCls = 'w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-slate-900 outline-none focus:border-[#0d47c9]';
+  const labelCls = 'block text-slate-600 font-bold text-[12px] mb-1';
+  const money = (n: number) => `${(n || 0).toLocaleString('vi-VN')} đ`;
+  // Số thầu phụ theo từng lĩnh vực (hiện trên chip lọc)
+  const countOfField = (f: string) => suppliers.filter(s => (s.field || '') === f).length;
+  const fieldChips: [string, string, number][] = [['all', 'Tất cả', suppliers.length], ...supFields.map(f => [f, f, countOfField(f)] as [string, string, number])];
+
+  // Mở hộp Sửa thầu phụ (đổ dữ liệu của thầu phụ đang xem chi tiết vào form)
+  const startEditSup = (sup: SupplierPartner) => {
+    if (!canEdit) {
+      addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA thông tin thầu phụ.', type: 'error' });
+      return;
+    }
+    setEditingSupId(sup.id);
+    setFormSupName(sup.name);
+    setFormSupRep(sup.representative || sup.name);
+    setFormSupGender(sup.gender || 'Nam');
+    setFormSupBirthDate(sup.birthDate || '');
+    setFormSupCccd(sup.cccd || sup.taxCode || '');
+    setFormSupCccdDate(sup.cccdDate || '');
+    setFormSupCccdPlace(sup.cccdPlace || '');
+    setFormSupEmail(sup.email || '');
+    setFormSupBankAccount(sup.bankAccount || sup.bankNo || '');
+    setFormSupBankName(sup.bankName || '');
+    setFormSupPhone(sup.phone);
+    setFormSupField(sup.field || '');
+    setFormSupAddress(sup.address || sup.region || '');
+    setFormSupTaxCode(sup.taxCode || '');
+    setFormSupNote(sup.note || '');
+    setFormSupOpeningDebt(sup.openingDebt || 0);
+    setIsRepManuallyEdited(true);
+    setShowSupplierForm(true);
+  };
+  // Xóa 1 thầu phụ (có cảnh báo thêm lần nữa nếu đang liên kết hợp đồng)
+  const deleteSup = (sup: SupplierPartner, linkedCount: number) => {
+    if (!canDelete) {
+      addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA thầu phụ.', type: 'error' });
+      return;
+    }
+    let confirmMessage = `⚠️ CẢNH BÁO QUAN TRỌNG:\n\nHành động xóa này không thể hoàn tác!\nBạn có thực sự chắc chắn muốn xóa Thầu phụ "${sup.name}" (Mã: ${sup.id}) ra khỏi hệ thống danh mục không?`;
+    if (linkedCount > 0) {
+      confirmMessage = `🚨 CẢNH BÁO NGUY HIỂM CAO ĐỘ:\n\nThầu phụ "${sup.name}" đang liên kết với ${linkedCount} Hợp đồng thầu phụ đang lưu vết trong sổ sách kế toán!\n\nNếu xóa thầu phụ này, các hợp đồng liên quan sẽ bị lỗi hiển thị thầu phụ.\nBạn có THỰC SỰ CHẮC CHẮN MUỐN TIẾP TỤC XÓA và tự chịu trách nhiệm về tính toàn vẹn dữ liệu không?`;
+    }
+    if (!confirm(confirmMessage)) return;
+    if (linkedCount > 0 && !confirm(`XÁC NHẬN LẦN CUỐI:\n\nNhấn OK để thực sự xóa sạch thông tin của thầu phụ "${sup.name}".\nNhấn Cancel để hủy bỏ.`)) return;
+    setSuppliers(suppliers.filter(s => s.id !== sup.id));
+    dbService.accountingSubcontractors.delete(sup.id).catch(() => {});
+    // Xóa luôn dòng Công nợ đầu kỳ snapshot của Thầu Phụ này (nếu có).
+    dbService.accountingLiabilities.delete(`opbal_sub_${sup.id}`).catch(() => {});
+    setSelectedSupDetail(null);
+    addToast({ title: '✅ Thành công', message: `✅ Đã xóa thầu phụ "${sup.name}" thành công.`, type: 'success' });
+  };
+  // Chọn tất cả: chỉ các dòng của trang hiện tại
+  const pageAllSelected = paginatedSuppliers.length > 0 && paginatedSuppliers.every(s => selectedRows.has(s.id));
+  const togglePage = (checked: boolean) => {
+    setSelectedRows(prev => {
+      const next = new Set(prev);
+      paginatedSuppliers.forEach(s => (checked ? next.add(s.id) : next.delete(s.id)));
+      return next;
+    });
+  };
+  const fieldPill = (f?: string) => (
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full border text-[11px] font-bold bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]">{f || 'Chưa phân loại'}</span>
+  );
+
   return (
-    <div className="space-y-4 animate-fade-in" id="subcontractor_directory_panel">
-      {/* Toolbar & Search */}
-      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-slate-950/40 p-3 rounded-xl border border-slate-850">
-        <div className="relative flex-1 max-w-md">
-          <input
-            type="text"
-            placeholder="Tìm kiếm nhanh tên, lĩnh vực, số điện thoại thầu phụ..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs outline-none text-slate-100 placeholder-slate-500 focus:border-orange-500 transition-colors"
-          />
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide hidden sm:inline">Lĩnh vực:</span>
-          <select
-            value={fieldFilter}
-            onChange={(e) => setFieldFilter(e.target.value)}
-            className="bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 outline-none focus:border-orange-500 cursor-pointer"
-          >
-            <option value="all">Tất cả</option>
-            {supFields.map(f => (
-              <option key={f} value={f}>{f}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex justify-between items-center border-b border-slate-850 pb-0 sm:pb-2">
-          <button
-            type="button"
+    <div className="space-y-4" id="subcontractor_directory_panel">
+      {/* Hàng tiêu đề: tên mục + nút icon Xuất/Nhập Excel + nút Thêm (xanh LoLo) */}
+      <div className="flex flex-wrap justify-between items-center gap-2 pb-1">
+        <span className="font-extrabold text-slate-900 text-sm">Danh sách thầu phụ <span className="text-slate-500 font-bold">({filteredSuppliers.length})</span></span>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={handleExportSubcontractorExcel} className={iconBtn} title="Xuất Excel thầu phụ" data-testid="sub-export"><Download className="w-4 h-4" /></button>
+          <button type="button" onClick={() => subcontractorFileInputRef.current?.click()} className={iconBtn} title="Nhập Excel thầu phụ" data-testid="sub-import"><FileUp className="w-4 h-4" /></button>
+          <input ref={subcontractorFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportSubcontractorExcel} />
+          <button type="button" data-testid="sub-add"
             onClick={() => {
-              if (showSupplierForm && editingSupId) {
-                resetSupForm();
-                return;
-              }
               if (!canCreate) {
                 addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền KHỞI TẠO thầu phụ mới.', type: 'error' });
                 return;
               }
-              setShowSupplierForm(!showSupplierForm);
+              resetSupForm();
+              setShowSupplierForm(true);
             }}
-            className={`font-bold text-[10.5px] px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1 ${canCreate ? 'bg-orange-600 hover:bg-orange-550 text-white cursor-pointer active:scale-95' : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'}`}
-          >
-            {editingSupId ? '✏️ Đang sửa thầu phụ' : '+ Thêm thầu phụ mới'}
+            style={canCreate ? { background: '#0d47c9', color: '#ffffff' } : undefined}
+            className={`h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 ${canCreate ? 'cursor-pointer' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>
+            <Plus className="w-4 h-4" />
+            Thêm thầu phụ
           </button>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleExportSubcontractorExcel}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10.5px] px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-all"
-            >
-              <Download className="w-3 h-3" /> Xuất Excel
-            </button>
-            <button
-              type="button"
-              onClick={() => subcontractorFileInputRef.current?.click()}
-              className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10.5px] px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-all"
-            >
-              <FileUp className="w-3 h-3" /> Nhập Excel
-            </button>
-            <input
-              ref={subcontractorFileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              className="hidden"
-              onChange={handleImportSubcontractorExcel}
-            />
-          </div>
         </div>
       </div>
 
-      <div id="subcontractor_form_anchor" />
+      {/* Bộ lọc ô sáng kèm ô tìm kiếm + chip lĩnh vực */}
+      <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="sub-filters">
+        <div className="flex flex-col gap-1">
+          <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input type="text" data-testid="sub-search" placeholder="Tên, mã, người đại diện, SĐT…" value={searchTerm}
+              onChange={(e) => { setSearchTerm(e.target.value); setPageSup(1); }}
+              className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]" />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="sub-field-chips">
+          {fieldChips.map(([k, label, n]) => {
+            const on = fieldFilter === k;
+            return (
+              <button key={k} type="button" data-testid={`sub-chip-${k}`} onClick={() => { setFieldFilter(k); setPageSup(1); }}
+                className={`h-9 px-3 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 border cursor-pointer ${on ? 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                {label}
+                <span className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-black inline-flex items-center justify-center ${on ? 'bg-[#0d47c9]' : 'bg-slate-400'}`} style={{ color: '#ffffff' }}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
+      {/* Hộp Thêm / Sửa thầu phụ */}
       {showSupplierForm && (
-        <form onSubmit={handleAddSupplierSubmit} className="bg-slate-950/80 border border-slate-800 p-4.5 rounded-xl space-y-3 animate-in fade-in zoom-in-95 duration-200">
-          <h4 className="text-white font-bold text-xs uppercase tracking-wide border-b border-slate-800 pb-1 text-left">
-            {editingSupId ? `✏️ Cập nhật thông tin Thầu phụ: ${editingSupId}` : '🤝 Đăng ký Thầu phụ mới'}
-          </h4>
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[9999] p-4" data-testid="sub-modal">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto p-5 space-y-4 shadow-xl text-slate-800 text-[13px] text-left animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-lg bg-[#e8efff] text-[#0d47c9] inline-flex items-center justify-center"><Briefcase className="w-4 h-4" /></span>
+                <h3 className="font-extrabold text-slate-900 text-sm">
+                  {editingSupId ? `Cập nhật thông tin thầu phụ: ${editingSupId}` : 'Đăng ký thầu phụ mới'}
+                </h3>
+              </div>
+              <button type="button" onClick={() => { setShowSupplierForm(false); resetSupForm(); }}
+                className="text-slate-500 hover:bg-slate-100 p-1.5 rounded-lg cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
 
-          {/* Row 1: Tên thầu phụ, Họ tên Bên B, Giới tính */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[10.5px] text-left">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Tên Thầu Phụ <span className="text-red-400">*</span>:</label>
-              <input
-                type="text"
-                required
-                value={formSupName}
-                onChange={(e) => handleNameChange(e.target.value)}
-                placeholder="Nhập tên tổ đội / thầu phụ khoán..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Người Đại Diện / Bên B <span className="text-red-400">*</span>:</label>
-              <input
-                type="text"
-                required
-                value={formSupRep}
-                onChange={(e) => handleRepChange(e.target.value)}
-                placeholder="Họ tên người nhận khoán..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Giới tính Bên B:</label>
-              <select
-                value={formSupGender}
-                onChange={(e) => setFormSupGender(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              >
-                <option value="Nam">Nam</option>
-                <option value="Nữ">Nữ</option>
-              </select>
-            </div>
-          </div>
+            <form onSubmit={handleAddSupplierSubmit} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Tên thầu phụ <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formSupName} onChange={(e) => handleNameChange(e.target.value)}
+                    placeholder="Nhập tên tổ đội / thầu phụ khoán..." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Người đại diện / Bên B <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formSupRep} onChange={(e) => handleRepChange(e.target.value)}
+                    placeholder="Họ tên người nhận khoán..." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Giới tính Bên B</label>
+                  <select value={formSupGender} onChange={(e) => setFormSupGender(e.target.value)} className={inputCls}>
+                    <option value="Nam">Nam</option>
+                    <option value="Nữ">Nữ</option>
+                  </select>
+                </div>
+              </div>
 
-          {/* Row 2: Ngày sinh, Điện thoại, Email */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[10.5px] text-left">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Ngày sinh Bên B:</label>
-              <input
-                type="date"
-                value={formSupBirthDate}
-                onChange={(e) => setFormSupBirthDate(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Số Điện Thoại <span className="text-red-400">*</span>:</label>
-              <input
-                type="text"
-                required
-                value={formSupPhone}
-                onChange={(e) => setFormSupPhone(e.target.value)}
-                placeholder="Nhập số điện thoại..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Email Bên B:</label>
-              <input
-                type="email"
-                value={formSupEmail}
-                onChange={(e) => setFormSupEmail(e.target.value)}
-                placeholder="Email liên hệ..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Ngày sinh Bên B</label>
+                  <input type="date" value={formSupBirthDate} onChange={(e) => setFormSupBirthDate(e.target.value)} className={`${inputCls} font-mono`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Số điện thoại <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formSupPhone} onChange={(e) => setFormSupPhone(e.target.value)}
+                    placeholder="Nhập số điện thoại..." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Email Bên B</label>
+                  <input type="email" value={formSupEmail} onChange={(e) => setFormSupEmail(e.target.value)}
+                    placeholder="Email liên hệ..." className={`${inputCls} font-mono`} />
+                </div>
+              </div>
 
-          {/* Row 3: CCCD, Ngày cấp, Nơi cấp */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[10.5px] text-left">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Số CCCD Bên B:</label>
-              <input
-                type="text"
-                value={formSupCccd}
-                onChange={(e) => setFormSupCccd(e.target.value)}
-                placeholder="Nhập số CCCD..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Ngày cấp CCCD:</label>
-              <input
-                type="date"
-                value={formSupCccdDate}
-                onChange={(e) => setFormSupCccdDate(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Nơi cấp CCCD:</label>
-              <input
-                type="text"
-                value={formSupCccdPlace}
-                onChange={(e) => setFormSupCccdPlace(e.target.value)}
-                placeholder="Ví dụ: Cục Cảnh sát QLHC về TTXH..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Số CCCD Bên B</label>
+                  <input type="text" value={formSupCccd} onChange={(e) => setFormSupCccd(e.target.value)}
+                    placeholder="Nhập số CCCD..." className={`${inputCls} font-mono`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Ngày cấp CCCD</label>
+                  <input type="date" value={formSupCccdDate} onChange={(e) => setFormSupCccdDate(e.target.value)} className={`${inputCls} font-mono`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Nơi cấp CCCD</label>
+                  <input type="text" value={formSupCccdPlace} onChange={(e) => setFormSupCccdPlace(e.target.value)}
+                    placeholder="Ví dụ: Cục Cảnh sát QLHC về TTXH..." className={inputCls} />
+                </div>
+              </div>
 
-          {/* Row 4: Địa chỉ thường trú, Lĩnh vực */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10.5px] text-left">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Địa chỉ thường trú <span className="text-red-400">*</span>:</label>
-              <input
-                type="text"
-                required
-                value={formSupAddress}
-                onChange={(e) => setFormSupAddress(e.target.value)}
-                placeholder="Nhập địa chỉ đăng ký thường trú..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Lĩnh vực hoạt động:</label>
-              <input
-                type="text"
-                value={formSupField}
-                onChange={(e) => setFormSupField(e.target.value)}
-                placeholder="Ví dụ: Thợ dán mâm Acrylic, sắt móng thô..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Địa chỉ thường trú <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formSupAddress} onChange={(e) => setFormSupAddress(e.target.value)}
+                    placeholder="Nhập địa chỉ đăng ký thường trú..." className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Lĩnh vực hoạt động</label>
+                  <input type="text" value={formSupField} onChange={(e) => setFormSupField(e.target.value)}
+                    placeholder="Ví dụ: Thợ dán mâm Acrylic, sắt móng thô..." className={inputCls} />
+                </div>
+              </div>
 
-          {/* Row 5: MST cá nhân, Số tài khoản, Ngân hàng */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[10.5px] text-left">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">MST cá nhân Bên B:</label>
-              <input
-                type="text"
-                value={formSupTaxCode}
-                onChange={(e) => setFormSupTaxCode(e.target.value)}
-                placeholder="Nhập mã số thuế cá nhân..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Số tài khoản ngân hàng:</label>
-              <input
-                type="text"
-                value={formSupBankAccount}
-                onChange={(e) => setFormSupBankAccount(e.target.value)}
-                placeholder="Nhập số tài khoản..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500 font-mono"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Tên ngân hàng (Mở tại):</label>
-              <input
-                type="text"
-                value={formSupBankName}
-                onChange={(e) => setFormSupBankName(e.target.value)}
-                placeholder="Ví dụ: BIDV - Chi nhánh Lâm Đồng..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>MST cá nhân Bên B</label>
+                  <input type="text" value={formSupTaxCode} onChange={(e) => setFormSupTaxCode(e.target.value)}
+                    placeholder="Nhập mã số thuế cá nhân..." className={`${inputCls} font-mono`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Số tài khoản ngân hàng</label>
+                  <input type="text" value={formSupBankAccount} onChange={(e) => setFormSupBankAccount(e.target.value)}
+                    placeholder="Nhập số tài khoản..." className={`${inputCls} font-mono`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Tên ngân hàng (mở tại)</label>
+                  <input type="text" value={formSupBankName} onChange={(e) => setFormSupBankName(e.target.value)}
+                    placeholder="Ví dụ: BIDV - Chi nhánh Lâm Đồng..." className={inputCls} />
+                </div>
+              </div>
 
-          {/* Row 6: Công nợ đầu kỳ + Ghi chú */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10.5px] text-left">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Công nợ đầu kỳ (VNĐ):</label>
-              <input
-                type="number"
-                min={0}
-                value={formSupOpeningDebt || ''}
-                onChange={(e) => setFormSupOpeningDebt(Number(e.target.value))}
-                placeholder="Công nợ đầu kỳ (nếu có)..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none font-mono focus:border-orange-500"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Ghi chú:</label>
-              <input
-                type="text"
-                value={formSupNote}
-                onChange={(e) => setFormSupNote(e.target.value)}
-                placeholder="Ghi chú về kinh nghiệm, năng lực hoặc đội thợ..."
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none focus:border-orange-500"
-              />
-            </div>
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Công nợ đầu kỳ (VNĐ)</label>
+                  <input type="number" min={0} value={formSupOpeningDebt || ''} onChange={(e) => setFormSupOpeningDebt(Number(e.target.value))}
+                    placeholder="Công nợ đầu kỳ (nếu có)..." className={`${inputCls} font-mono`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Ghi chú</label>
+                  <input type="text" value={formSupNote} onChange={(e) => setFormSupNote(e.target.value)}
+                    placeholder="Ghi chú về kinh nghiệm, năng lực hoặc đội thợ..." className={inputCls} />
+                </div>
+              </div>
 
-          <div className="flex justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                setShowSupplierForm(false);
-                resetSupForm();
-              }}
-              className="bg-slate-850 hover:bg-slate-800 px-3 py-1.5 rounded-lg text-slate-300 font-bold cursor-pointer text-[10.5px]"
-            >
-              Hủy
-            </button>
-            <button type="submit" className="bg-orange-600 hover:bg-orange-550 text-white px-3.5 py-1.5 rounded-lg font-bold text-[10.5px] cursor-pointer">
-              {editingSupId ? 'Lưu cập nhật' : 'Thêm Thầu phụ'}
-            </button>
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button type="button" onClick={() => { setShowSupplierForm(false); resetSupForm(); }}
+                  className="h-9 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold cursor-pointer">Hủy bỏ</button>
+                <button type="submit" style={{ background: '#0d47c9', color: '#ffffff' }} className="h-9 px-4 rounded-xl font-bold cursor-pointer">
+                  {editingSupId ? 'Lưu cập nhật' : 'Thêm thầu phụ'}
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
+        </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        {/* Left Table Panel */}
-        <div className={`${selectedSupDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-4 transition-all duration-300`}>
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-extrabold uppercase text-[10px] tracking-wider font-sans">
-                  <th className="p-3 w-10 text-center">
-                    <input
-                      type="checkbox"
-                      checked={selectAll && filteredSuppliers.length > 0 && filteredSuppliers.every(s => selectedRows.has(s.id))}
-                      onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                    />
-                  </th>
-                  <th className="p-3 pl-4">Mã Thầu Phụ</th>
-                  <th className="p-3">Tên Thầu Phụ</th>
-                  <th className="p-3">Địa Chỉ</th>
-                  <th className="p-3">SĐT</th>
-                  <th className="p-3">Lĩnh vực</th>
-                  <th className="p-3 text-right">Công Nợ đầu kỳ</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {paginatedSuppliers.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-500 italic">
-                      Không tìm thấy thầu phụ nào phù hợp.
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedSuppliers.map(s => (
-                    <tr
-                      key={s.id}
-                      onClick={() => setSelectedSupDetail(s)}
-                      className={`hover:bg-slate-800/40 cursor-pointer transition-colors ${
-                        selectedSupDetail?.id === s.id ? 'bg-orange-50 border-l-2 border-orange-500' : ''
-                      } ${selectedRows.has(s.id) ? 'bg-amber-50' : ''}`}
-                    >
-                      {/* Checkbox */}
-                      <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={selectedRows.has(s.id)}
-                          onChange={(e) => { e.stopPropagation(); handleRowSelect(s.id, e.target.checked); }}
-                          className="w-4 h-4 text-amber-500 border-slate-600 rounded cursor-pointer"
-                        />
-                      </td>
-                      {/* Subcontractor ID */}
-                      <td className="p-3 pl-4 font-mono font-bold text-yellow-500 text-[10px] uppercase">
-                        {s.id}
-                      </td>
-
-                      {/* Subcontractor Name */}
-                      <td className="p-3">
-                        <div className="font-extrabold text-white text-[12.5px]">
-                          {s.name}
-                        </div>
-                        {s.representative && s.representative !== s.name && (
-                          <div className="text-[10px] text-slate-500 mt-0.5">
-                            ĐD: <span className="text-slate-350">{s.representative}</span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Address */}
-                      <td className="p-3 text-slate-300">
-                        {s.address || s.region || '—'}
-                      </td>
-
-                      {/* Phone */}
-                      <td className="p-3 whitespace-nowrap font-mono text-slate-300">
-                        {s.phone || '—'}
-                      </td>
-
-                      {/* Field */}
-                      <td className="p-3">
-                        <span className="text-orange-400 font-extrabold text-[11px] block">{s.field || 'Chưa phân loại'}</span>
-                      </td>
-
-                      {/* Opening Debt */}
-                      <td className="p-3 text-right font-mono font-bold text-amber-400">
-                        {(s.openingDebt || 0).toLocaleString('vi-VN')} đ
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+        {/* Danh sách (trái) */}
+        <div className={`${selectedSupDetail ? 'xl:col-span-7' : 'xl:col-span-12'} space-y-3 transition-all duration-300`}>
+          {/* Thanh xóa hàng loạt: chỉ hiện khi có dòng được tích */}
           {selectedRows.size > 0 && (
-            <div className="bg-slate-950 px-4 py-2 border-t border-slate-850 flex items-center gap-2 text-[10px]">
-              <span className="text-amber-500 font-bold">Đã chọn: {selectedRows.size}</span>
-              <button
-                onClick={handleBulkDelete}
-                className="bg-rose-650 hover:bg-rose-600 text-white font-bold px-2.5 py-1 rounded-lg cursor-pointer transition-colors flex items-center gap-1"
-              >
-                <Trash2 className="w-3 h-3" /> Xóa
+            <div className="bg-[#f3f7ff] border border-[#bcd0ff] rounded-2xl px-4 py-2.5 flex flex-wrap items-center gap-2 text-[13px]" data-testid="sub-bulk">
+              <span className="text-[#0d47c9] font-bold">Đã chọn {selectedRows.size} thầu phụ</span>
+              <button onClick={handleBulkDelete}
+                className="h-9 px-3.5 rounded-xl bg-white border border-rose-300 text-rose-600 hover:bg-rose-50 font-bold inline-flex items-center gap-1.5 cursor-pointer">
+                <Trash2 className="w-3.5 h-3.5" /> Xóa
               </button>
+              <button onClick={() => { setSelectedRows(new Set()); setSelectAll(false); }}
+                className="h-9 px-3.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold cursor-pointer">Hủy chọn</button>
             </div>
           )}
 
-          {/* Pagination block */}
-          <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-900/60 p-3 rounded-xl border border-slate-800 gap-3 text-[11px] text-slate-400">
-            <div className="flex items-center gap-2">
-              <span>Số dòng hiển thị:</span>
-              <select
-                value={pageSizeSup}
-                onChange={(e) => {
-                  setPageSizeSup(Number(e.target.value));
-                  setPageSup(1);
-                }}
-                className="bg-slate-950 border border-slate-800 rounded px-2.5 py-1 text-white outline-none cursor-pointer focus:border-orange-500 font-bold"
-              >
-                <option value={5}>5 dòng</option>
-                <option value={10}>10 dòng</option>
-                <option value={20}>20 dòng</option>
-                <option value={-1}>Tất cả</option>
-              </select>
-              <span>trong tổng số {filteredSuppliers.length} dòng</span>
-            </div>
+          {/* MÁY TÍNH: bảng */}
+          <div className="hidden md:block bg-white border border-slate-200 rounded-2xl overflow-x-auto" data-testid="sub-table">
+            <table className="w-full text-left text-slate-700 text-[13px]">
+              <thead className="bg-slate-50 text-slate-500 text-[12px] font-bold border-b border-slate-200">
+                <tr>
+                  <th className="px-3 py-2.5 w-10 text-center">
+                    <input type="checkbox" checked={pageAllSelected} onChange={(e) => togglePage(e.target.checked)} className="w-4 h-4 cursor-pointer accent-[#0d47c9]" />
+                  </th>
+                  <th className="px-3 py-2.5">Mã thầu phụ</th>
+                  <th className="px-3 py-2.5">Tên thầu phụ</th>
+                  <th className="px-3 py-2.5">Địa chỉ</th>
+                  <th className="px-3 py-2.5">SĐT</th>
+                  <th className="px-3 py-2.5">Lĩnh vực</th>
+                  <th className="px-3 py-2.5 text-right">Công nợ đầu kỳ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedSuppliers.length === 0 ? (
+                  <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500 italic">Không tìm thấy thầu phụ nào phù hợp.</td></tr>
+                ) : paginatedSuppliers.map(s => (
+                  <tr key={s.id} onClick={() => setSelectedSupDetail(s)} data-testid={`sub-row-${s.id}`}
+                    className={`cursor-pointer transition-colors ${selectedSupDetail?.id === s.id ? 'bg-[#e8efff]' : selectedRows.has(s.id) ? 'bg-[#f3f7ff]' : 'hover:bg-slate-50'}`}>
+                    <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedRows.has(s.id)} onChange={(e) => handleRowSelect(s.id, e.target.checked)} className="w-4 h-4 cursor-pointer accent-[#0d47c9]" />
+                    </td>
+                    <td className="px-3 py-2.5 font-mono font-bold text-[#0d47c9] text-[12px] uppercase">{s.id}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="font-extrabold text-slate-900">{s.name}</div>
+                      {s.representative && s.representative !== s.name && (
+                        <div className="text-[12px] text-slate-500 mt-0.5">ĐD: {s.representative}</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-600">{s.address || s.region || '—'}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap font-mono text-slate-700">{s.phone || '—'}</td>
+                    <td className="px-3 py-2.5">{fieldPill(s.field)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono font-bold text-amber-700">{money(s.openingDebt || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-            {pageSizeSup !== -1 && totalPagesSup > 1 && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={adjustedPageSup === 1}
-                  onClick={() => setPageSup(prev => Math.max(prev - 1, 1))}
-                  className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-slate-300 hover:text-white disabled:opacity-35 disabled:pointer-events-none font-bold transition-all cursor-pointer"
-                >
-                  ◀ Trước
-                </button>
-                <span className="font-mono text-slate-300 px-1">
-                  Trang {adjustedPageSup} / {totalPagesSup}
-                </span>
-                <button
-                  type="button"
-                  disabled={adjustedPageSup === totalPagesSup}
-                  onClick={() => setPageSup(prev => Math.min(prev + 1, totalPagesSup))}
-                  className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded text-slate-300 hover:text-white disabled:opacity-35 disabled:pointer-events-none font-bold transition-all cursor-pointer"
-                >
-                  Sau ▶
-                </button>
-              </div>
+          {/* ĐIỆN THOẠI: mỗi thầu phụ 1 thẻ, bấm để xem chi tiết */}
+          <div className="md:hidden space-y-3" data-testid="sub-cards">
+            {paginatedSuppliers.length === 0 && (
+              <div className="bg-white border border-slate-200 rounded-2xl px-4 py-8 text-center text-slate-500 italic text-[13px]">Không tìm thấy thầu phụ nào phù hợp.</div>
             )}
+            {paginatedSuppliers.map(s => (
+              <div key={`card:${s.id}`} onClick={() => setSelectedSupDetail(s)}
+                className={`bg-white border rounded-2xl p-4 space-y-2 cursor-pointer ${selectedRows.has(s.id) ? 'border-[#bcd0ff] bg-[#f3f7ff]' : 'border-slate-200'}`}>
+                <div className="flex items-start gap-2.5">
+                  <span onClick={(e) => e.stopPropagation()} className="pt-0.5">
+                    <input type="checkbox" checked={selectedRows.has(s.id)} onChange={(e) => handleRowSelect(s.id, e.target.checked)} className="w-4 h-4 cursor-pointer accent-[#0d47c9]" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-extrabold text-slate-900 text-[14px] break-words">{s.name}</div>
+                    <div className="flex items-center flex-wrap gap-2 mt-0.5">
+                      <span className="font-mono text-[12px] text-[#0d47c9] font-bold uppercase">{s.id}</span>
+                      {fieldPill(s.field)}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-[12px] text-slate-600 space-y-1 pl-6">
+                  {s.representative && s.representative !== s.name && <div>👤 {s.representative}</div>}
+                  {s.phone && <div>📞 <a href={`tel:${s.phone}`} onClick={(e) => e.stopPropagation()} className="font-mono text-[#0d47c9] font-bold">{s.phone}</a></div>}
+                  {(s.address || s.region) && <div>📍 {s.address || s.region}</div>}
+                  <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-500">Công nợ đầu kỳ</span><b className="font-mono text-amber-700">{money(s.openingDebt || 0)}</b></div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Phân trang — thanh dùng chung */}
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+            <TablePagination total={filteredSuppliers.length} page={adjustedPageSup} pageSize={pageSizeSup}
+              onPage={setPageSup} onPageSize={(sz) => { setPageSizeSup(sz); setPageSup(1); }}
+              unit="thầu phụ" testId="sub-pager" />
           </div>
         </div>
 
-        {/* Right Detail Panel */}
+        {/* Khung chi tiết: máy tính = cột phải dính; điện thoại/máy tính bảng = hộp nổi phủ màn hình */}
         {selectedSupDetail && (() => {
-          const linkedSubs = archivedQuotes.filter(sub => sub.subcontractorId === selectedSupDetail.id);
+          const sup = selectedSupDetail;
+          const linkedSubs = archivedQuotes.filter(q => q.subcontractorId === sup.id);
+          const field = (label: string, val: React.ReactNode) => (
+            <div><span className="text-slate-500 block text-[12px] font-bold">{label}</span><div className="text-slate-900 font-semibold mt-0.5 break-words">{val}</div></div>
+          );
+          const fmtDate = (d?: string) => (d ? new Date(d).toLocaleDateString('vi-VN') : 'Chưa cập nhật');
           return (
-            <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 sticky top-4 animate-in fade-in zoom-in-95 duration-200 space-y-4 text-left text-xs">
-              <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="p-2 rounded bg-amber-50 border border-amber-200 text-amber-600">
-                    <Briefcase className="w-4 h-4" />
-                  </span>
-                  <div>
-                    <span className="font-mono text-[9px] text-amber-600 font-extrabold uppercase tracking-wider">
-                      {selectedSupDetail.id.toUpperCase()}
-                    </span>
-                    <h3 className="font-extrabold text-white text-sm mt-0.5">
-                      Hồ sơ Thầu phụ khoán
-                    </h3>
+            <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-slate-900/40 xl:static xl:z-auto xl:bg-transparent xl:block xl:col-span-5"
+              onClick={() => setSelectedSupDetail(null)} data-testid="sub-detail">
+              <div className="w-full max-w-lg xl:max-w-none bg-white border border-slate-200 rounded-t-2xl sm:rounded-2xl p-5 max-h-[90vh] overflow-y-auto xl:sticky xl:top-4 space-y-4 shadow-xl xl:shadow-none text-left"
+                onClick={(e) => e.stopPropagation()}>
+                <div className="flex justify-between items-start gap-3 border-b border-slate-100 pb-3">
+                  <div className="min-w-0">
+                    <span className="font-mono text-[12px] text-[#0d47c9] font-black uppercase">{sup.id}</span>
+                    <h3 className="font-extrabold text-slate-900 text-[15px] mt-0.5 break-words">{sup.name}</h3>
+                    <div className="mt-1">{fieldPill(sup.field)}</div>
                   </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedSupDetail(null)}
-                  className="text-slate-400 hover:text-white bg-slate-850 p-1.5 rounded-lg transition-colors cursor-pointer"
-                  title="Đóng xem chi tiết"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div className="p-4 bg-slate-950/60 rounded-xl space-y-3 border border-slate-850">
-                  <div>
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Tên thầu phụ</span>
-                    <strong className="text-white text-sm block font-extrabold mt-1">{selectedSupDetail.name}</strong>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Người đại diện (Bên B)</span>
-                      <span className="text-white mt-1 block font-bold text-[11px]">{selectedSupDetail.representative || selectedSupDetail.name}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Giới tính</span>
-                      <span className="text-white mt-1 block font-medium text-[11px]">{selectedSupDetail.gender || 'Nam'}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ngày sinh</span>
-                      <span className="text-white mt-1 block font-mono text-[11px]">{selectedSupDetail.birthDate ? new Date(selectedSupDetail.birthDate).toLocaleDateString('vi-VN') : 'Chưa cập nhật'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số điện thoại</span>
-                      <span className="text-slate-200 mt-1 block font-mono font-bold text-[11px]">{selectedSupDetail.phone || 'Chưa cập nhật'}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-850/50">
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số CCCD</span>
-                      <span className="text-slate-300 mt-1 block font-mono text-[11px]">{selectedSupDetail.cccd || 'Chưa cập nhật'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ngày cấp</span>
-                      <span className="text-slate-300 mt-1 block font-mono text-[11.5px]">{selectedSupDetail.cccdDate ? new Date(selectedSupDetail.cccdDate).toLocaleDateString('vi-VN') : 'Chưa cập nhật'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Nơi cấp</span>
-                      <span className="text-slate-300 mt-1 block text-[11.5px] truncate" title={selectedSupDetail.cccdPlace}>{selectedSupDetail.cccdPlace || 'Chưa cập nhật'}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Địa chỉ thường trú</span>
-                      <span className="text-slate-300 mt-1 block font-medium flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-slate-400 inline shrink-0" /> <span className="truncate">{selectedSupDetail.address || 'Trống'}</span>
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Email Bên B</span>
-                      <span className="text-slate-300 mt-1 block font-mono text-[11px] truncate" title={selectedSupDetail.email}>{selectedSupDetail.email || 'Chưa cập nhật'}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">MST cá nhân</span>
-                      <span className="text-slate-300 mt-1 block font-mono text-[11px]">{selectedSupDetail.taxCode || 'Chưa cập nhật'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Lĩnh vực</span>
-                      <span className="inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700">
-                        {selectedSupDetail.field || 'Chưa phân loại'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-850/50">
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Số tài khoản</span>
-                      <span className="text-slate-300 mt-1 block font-mono text-[11px]">{selectedSupDetail.bankAccount || 'Chưa cập nhật'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Tại ngân hàng</span>
-                      <span className="text-slate-300 mt-1 block text-[11px] truncate" title={selectedSupDetail.bankName}>{selectedSupDetail.bankName || 'Chưa cập nhật'}</span>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-850/50">
-                    <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Ghi chú</span>
-                    <span className="text-slate-300 mt-1 block text-[10.5px] max-h-12 overflow-y-auto" title={selectedSupDetail.note}>
-                      {selectedSupDetail.note || 'Không có ghi chú'}
-                    </span>
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-850/50 flex justify-between text-[11px]">
-                    <span className="text-slate-400">Công nợ đầu kỳ:</span>
-                    <span className="font-mono font-extrabold text-amber-400">{(selectedSupDetail.openingDebt || 0).toLocaleString('vi-VN')} đ</span>
-                  </div>
+                  <button type="button" onClick={() => setSelectedSupDetail(null)} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer" title="Đóng xem chi tiết"><X className="w-4 h-4" /></button>
                 </div>
 
-                {/* Linked Contracts section */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center px-1">
-                    <span className="text-slate-400 font-bold uppercase text-[9px] tracking-wider">Hợp đồng thầu phụ liên quan ({linkedSubs.length})</span>
+                <div className="space-y-3 text-[13px]">
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                    <div className="grid grid-cols-2 gap-3">
+                      {field('Người đại diện (Bên B)', sup.representative || sup.name)}
+                      {field('Giới tính', sup.gender || 'Nam')}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {field('Ngày sinh', fmtDate(sup.birthDate))}
+                      {field('📞 Số điện thoại', <span className="font-mono">{sup.phone || 'Chưa cập nhật'}</span>)}
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {field('Số CCCD', <span className="font-mono">{sup.cccd || 'Chưa cập nhật'}</span>)}
+                      {field('Ngày cấp', fmtDate(sup.cccdDate))}
+                      {field('Nơi cấp', sup.cccdPlace || 'Chưa cập nhật')}
+                    </div>
+                    {field('📍 Địa chỉ thường trú', <span className="inline-flex items-start gap-1"><MapPin className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" />{sup.address || 'Trống'}</span>)}
+                    {field('Email Bên B', <span className="font-mono">{sup.email || 'Chưa cập nhật'}</span>)}
+                    <div className="grid grid-cols-2 gap-3">
+                      {field('MST cá nhân', <span className="font-mono">{sup.taxCode || 'Chưa cập nhật'}</span>)}
+                      {field('Số tài khoản', <span className="font-mono">{sup.bankAccount || 'Chưa cập nhật'}</span>)}
+                    </div>
+                    {field('Tại ngân hàng', sup.bankName || 'Chưa cập nhật')}
                   </div>
 
-                  {linkedSubs.length === 0 ? (
-                    <div className="p-3 bg-slate-950/30 rounded-xl text-center text-slate-500 italic">
-                      Chưa có hợp đồng giao khoán nào.
-                    </div>
-                  ) : (
-                    <div className="max-h-[160px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                      {linkedSubs.map(sub => {
-                        const projName = projectsList.find(p => p.id === sub.projectId)?.name || 'Dự án khác';
-                        return (
-                          <div key={sub.id} className="p-2.5 bg-slate-950/40 border border-slate-850 rounded-xl text-[11px] hover:bg-slate-950/80 transition-colors">
-                            <div className="flex justify-between font-mono font-bold text-[10px] text-orange-400">
-                              <span>{sub.code || sub.id}</span>
-                              <span className={`text-[8.5px] px-1.5 rounded uppercase ${
-                                (sub.status as string) === 'Hoàn thành'
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : 'bg-sky-50 text-sky-700 border border-sky-200'
-                              }`}>
-                                {sub.status || 'Chạy'}
-                              </span>
+                  <div className="p-3.5 bg-white border border-slate-200 rounded-xl">
+                    <div className="flex justify-between"><span className="text-slate-500">Công nợ đầu kỳ:</span><b className="font-mono text-amber-700">{money(sup.openingDebt || 0)}</b></div>
+                  </div>
+
+                  {sup.note && <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-slate-700 leading-normal">{sup.note}</div>}
+
+                  {/* Hợp đồng thầu phụ liên quan */}
+                  <div className="space-y-2">
+                    <span className="text-slate-500 font-bold text-[12px]">Hợp đồng thầu phụ liên quan ({linkedSubs.length})</span>
+                    {linkedSubs.length === 0 ? (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center text-slate-500 italic">Chưa có hợp đồng giao khoán nào.</div>
+                    ) : (
+                      <div className="max-h-[200px] overflow-y-auto space-y-2">
+                        {linkedSubs.map(q => {
+                          const projName = projectsList.find(p => p.id === q.projectId)?.name || 'Dự án khác';
+                          const done = (q.status as string) === 'Hoàn thành';
+                          return (
+                            <div key={q.id} className="p-2.5 bg-white border border-slate-200 rounded-xl text-[12px]">
+                              <div className="flex justify-between items-center gap-2 font-mono font-bold text-[#0d47c9]">
+                                <span>{q.code || q.id}</span>
+                                <span className={`px-2 py-0.5 rounded-full border text-[11px] font-bold ${done ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>{q.status || 'Chạy'}</span>
+                              </div>
+                              <p className="text-slate-900 font-semibold mt-1 line-clamp-1">{(q as any).scopeWork || 'Giao khoán thầu phụ'}</p>
+                              <div className="flex justify-between gap-2 text-slate-500 mt-1">
+                                <span className="truncate">DA: <b className="text-slate-700">{projName}</b></span>
+                                <b className="font-mono text-slate-800 whitespace-nowrap">{money(q.contractValue || 0)}</b>
+                              </div>
                             </div>
-                            <p className="text-white font-medium mt-1 line-clamp-1">{(sub as any).scopeWork || 'Giao khoán thầu phụ'}</p>
-                            <div className="flex justify-between text-[9.5px] text-slate-500 mt-1">
-                              <span className="truncate max-w-[120px]">DA: <strong className="text-slate-400">{projName}</strong></span>
-                              <strong className="text-slate-205 font-mono">{(sub.contractValue || 0).toLocaleString('vi-VN')} đ</strong>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Actions */}
-              <div className="pt-3 border-t border-slate-800 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!canEdit) {
-                      addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền SỬA thông tin thầu phụ.', type: 'error' });
-                      return;
-                    }
-                    setEditingSupId(selectedSupDetail.id);
-                    setFormSupName(selectedSupDetail.name);
-                    setFormSupRep(selectedSupDetail.representative || selectedSupDetail.name);
-                    setFormSupGender(selectedSupDetail.gender || 'Nam');
-                    setFormSupBirthDate(selectedSupDetail.birthDate || '');
-                    setFormSupCccd(selectedSupDetail.cccd || selectedSupDetail.taxCode || '');
-                    setFormSupCccdDate(selectedSupDetail.cccdDate || '');
-                    setFormSupCccdPlace(selectedSupDetail.cccdPlace || '');
-                    setFormSupEmail(selectedSupDetail.email || '');
-                    setFormSupBankAccount(selectedSupDetail.bankAccount || selectedSupDetail.bankNo || '');
-                    setFormSupBankName(selectedSupDetail.bankName || '');
-                    setFormSupPhone(selectedSupDetail.phone);
-                    setFormSupField(selectedSupDetail.field || '');
-                    setFormSupAddress(selectedSupDetail.address || selectedSupDetail.region || '');
-                    setFormSupTaxCode(selectedSupDetail.taxCode || '');
-                    setFormSupNote(selectedSupDetail.note || '');
-                    setFormSupOpeningDebt(selectedSupDetail.openingDebt || 0);
-                    setIsRepManuallyEdited(true);
-                    setShowSupplierForm(true);
-                    document.getElementById('subcontractor_form_anchor')?.scrollIntoView({ behavior: 'smooth' });
-                  }}
-                  className="bg-amber-600 hover:bg-amber-550 text-white font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                >
-                  <Edit className="w-3.5 h-3.5" /> Sửa thầu phụ
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!canDelete) {
-                      addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền XÓA thầu phụ.', type: 'error' });
-                      return;
-                    }
-
-                    const hasLinkedContracts = linkedSubs.length > 0;
-                    let confirmMessage = `⚠️ CẢNH BÁO QUAN TRỌNG:\n\nHành động xóa này không thể hoàn tác!\nBạn có thực sự chắc chắn muốn xóa Thầu phụ "${selectedSupDetail.name}" (Mã: ${selectedSupDetail.id}) ra khỏi hệ thống danh mục không?`;
-
-                    if (hasLinkedContracts) {
-                      confirmMessage = `🚨 CẢNH BÁO NGUY HIỂM CAO ĐỘ:\n\nThầu phụ "${selectedSupDetail.name}" đang liên kết với ${linkedSubs.length} Hợp đồng thầu phụ đang lưu vết trong sổ sách kế toán!\n\nNếu xóa thầu phụ này, các hợp đồng liên quan sẽ bị lỗi hiển thị thầu phụ.\nBạn có THỰC SỰ CHẮC CHẮN MUỐN TIẾP TỤC XÓA và tự chịu trách nhiệm về tính toàn vẹn dữ liệu không?`;
-                    }
-
-                    if (confirm(confirmMessage)) {
-                      if (hasLinkedContracts) {
-                        const secondConfirm = confirm(`XÁC NHẬN LẦN CUỐI:\n\nNhấn OK để thực sự xóa sạch thông tin của thầu phụ "${selectedSupDetail.name}".\nNhấn Cancel để hủy bỏ.`);
-                        if (!secondConfirm) return;
-                      }
-
-                      setSuppliers(suppliers.filter(s => s.id !== selectedSupDetail.id));
-                      dbService.accountingSubcontractors.delete(selectedSupDetail.id).catch(() => {});
-                      // Xóa luôn dòng Công nợ đầu kỳ snapshot của Thầu Phụ này (nếu có).
-                      dbService.accountingLiabilities.delete(`opbal_sub_${selectedSupDetail.id}`).catch(() => {});
-                      setSelectedSupDetail(null);
-                      addToast({ title: '✅ Thành công', message: `✅ Đã xóa thầu phụ "${selectedSupDetail.name}" thành công.`, type: 'success' });
-                    }
-                  }}
-                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold py-2 rounded-xl text-center flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Xóa thầu phụ
-                </button>
-              </div>
-
-              <div className="pt-1 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setSelectedSupDetail(null)}
-                  className="bg-slate-800 hover:bg-slate-755 text-slate-205 font-bold px-4 py-1.5 rounded-xl transition-colors cursor-pointer w-full text-center"
-                >
-                  Đóng chi tiết
-                </button>
+                <div className="pt-3 border-t border-slate-100 flex justify-between items-center gap-2">
+                  <div className="flex gap-1.5">
+                    {sup.phone && (
+                      <a href={`tel:${sup.phone}`} className="p-2 rounded-xl bg-white border border-slate-200 text-emerald-700 hover:bg-emerald-50 flex items-center justify-center" title="Gọi điện liên hệ"><Phone className="w-4 h-4" /></a>
+                    )}
+                    <button type="button" onClick={() => startEditSup(sup)} data-testid="sub-edit"
+                      className={`p-2 rounded-xl border ${canEdit ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer' : 'text-slate-400 border-slate-200 cursor-not-allowed opacity-50'}`} title="Sửa thông tin thầu phụ">
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button type="button" onClick={() => deleteSup(sup, linkedSubs.length)} data-testid="sub-delete"
+                      className={`p-2 rounded-xl border ${canDelete ? 'bg-white border-rose-300 text-rose-600 hover:bg-rose-50 cursor-pointer' : 'text-slate-400 border-slate-200 cursor-not-allowed opacity-50'}`} title="Xóa thầu phụ này">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => setSelectedSupDetail(null)} className="h-9 px-4 rounded-xl text-[13px] font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đóng chi tiết</button>
+                </div>
               </div>
             </div>
           );
