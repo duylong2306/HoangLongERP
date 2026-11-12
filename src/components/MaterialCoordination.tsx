@@ -3280,26 +3280,26 @@ export default function MaterialCoordination({
     {orderEditModal.open && orderEditDraft && (
       <div className="fixed inset-0 z-[9600] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }}>
         <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-          <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center shrink-0">
+          <div className="p-3 sm:p-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0">
             <div className="flex items-center gap-2 min-w-0">
-              <FileText className="w-5 h-5 text-indigo-600 shrink-0" />
-              <span className="font-black text-xs sm:text-sm text-slate-900 uppercase truncate">Sửa đơn hàng {orderEditDraft.id}</span>
+              <FileText className="w-5 h-5 text-[#0d47c9] shrink-0" />
+              <span className="font-extrabold text-xs sm:text-sm text-slate-900 truncate">Sửa đơn hàng {orderEditDraft.id}</span>
             </div>
-            <button type="button" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all shrink-0">
+            <button type="button" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500 cursor-pointer transition-all shrink-0">
               <X className="w-5 h-5" />
             </button>
           </div>
           <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1 relative">
-                <label className="block text-slate-500 font-bold text-[10px] uppercase">Nhà cung cấp</label>
+                <label className="block text-slate-500 font-bold text-[11px]">Nhà cung cấp</label>
                 <input
                   value={orderEditDraft.supplierName || ''}
                   onChange={(e) => { setOrderEditDraft((p: any) => ({ ...p, supplierName: e.target.value })); setOrderSupplierOpen(true); }}
                   onFocus={() => setOrderSupplierOpen(true)}
                   onBlur={() => setTimeout(() => setOrderSupplierOpen(false), 150)}
                   placeholder="Tìm kiếm nhà cung cấp..."
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-indigo-500"
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-[#0d47c9]"
                 />
                 {orderSupplierOpen && (
                   <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-52 overflow-y-auto">
@@ -3314,7 +3314,7 @@ export default function MaterialCoordination({
                             setOrderEditDraft((p: any) => ({ ...p, supplierName: s.name, supplierId: s.id }));
                             setOrderSupplierOpen(false);
                           }}
-                          className="w-full text-left px-3 py-2 text-[11px] hover:bg-indigo-50 text-slate-700 flex items-center gap-2 transition-all"
+                          className="w-full text-left px-3 py-2 text-[11px] hover:bg-[#e8efff] text-slate-700 flex items-center gap-2 transition-all"
                         >
                           <Store className="w-3.5 h-3.5 text-slate-400 shrink-0" /> {s.name}
                         </button>
@@ -3326,8 +3326,8 @@ export default function MaterialCoordination({
                 )}
               </div>
               <div className="space-y-1">
-                <label className="block text-slate-500 font-bold text-[10px] uppercase">Ghi chú</label>
-                <input value={orderEditDraft.notes || ''} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, notes: e.target.value }))} className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-indigo-500" />
+                <label className="block text-slate-500 font-bold text-[11px]">Ghi chú</label>
+                <input value={orderEditDraft.notes || ''} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, notes: e.target.value }))} className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-[#0d47c9]" />
               </div>
             </div>
             <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
@@ -3347,24 +3347,24 @@ export default function MaterialCoordination({
                           const qty = isNaN(num) ? 0 : Math.max(0.01, num);
                           setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, qty } : x) }));
                         }}
-                        className="w-14 bg-white border border-slate-300 rounded-lg p-1.5 text-[11px] text-right text-slate-800 outline-none"
+                        className="w-14 bg-white border border-slate-300 rounded-xl p-1.5 text-[11px] text-right text-slate-800 outline-none"
                       />
                       <span className="text-[9px] text-slate-400">{it.unit}</span>
                     </div>
-                    <input type="number" value={it.price || 0} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, price: Number(e.target.value) } : x) }))} className="w-20 sm:w-24 bg-white border border-slate-300 rounded-lg p-1.5 text-[11px] text-right text-slate-800 outline-none" />
-                    <span className="text-[10px] font-mono font-bold text-teal-600 min-w-[80px] text-right">{((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} ₫</span>
+                    <input type="number" value={it.price || 0} onChange={(e) => setOrderEditDraft((p: any) => ({ ...p, items: p.items.map((x: any, i: number) => i === idx ? { ...x, price: Number(e.target.value) } : x) }))} className="w-20 sm:w-24 bg-white border border-slate-300 rounded-xl p-1.5 text-[11px] text-right text-slate-800 outline-none" />
+                    <span className="text-[10px] font-mono font-bold text-[#0d47c9] min-w-[80px] text-right">{((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')} ₫</span>
                   </div>
                 </div>
               ))}
             </div>
             <div className="flex justify-between items-center pt-1">
               <span className="text-[11px] text-slate-500">Tổng cộng</span>
-              <span className="font-black text-base text-teal-700">{((orderEditDraft.items || []).reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0)).toLocaleString('vi-VN')} đ</span>
+              <span className="font-black text-base text-[#0d47c9]">{((orderEditDraft.items || []).reduce((s: number, it: any) => s + (it.qty || 0) * (it.price || 0), 0)).toLocaleString('vi-VN')} đ</span>
             </div>
           </div>
           <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2">
-            <button type="button" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2.5 rounded-lg cursor-pointer transition-all">Hủy</button>
-            <button type="button" onClick={saveOrderEdit} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-black py-2.5 rounded-lg cursor-pointer transition-all">Lưu thay đổi</button>
+            <button type="button" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }} className="flex-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-600 font-bold py-2.5 rounded-xl cursor-pointer transition-all">Hủy</button>
+            <button type="button" onClick={saveOrderEdit} className="flex-1 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-bold py-2.5 rounded-xl cursor-pointer transition-all">Lưu thay đổi</button>
           </div>
         </div>
       </div>
@@ -3379,12 +3379,12 @@ export default function MaterialCoordination({
       return (
         <div className="fixed inset-0 z-[9700] flex items-center justify-center p-0 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => setOrderDetailModal({ open: false, order: null })}>
           <div className="w-full max-w-3xl bg-white sm:rounded-2xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col h-full sm:h-auto sm:max-h-[94vh]" onClick={(e) => e.stopPropagation()}>
-            <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center gap-2">
+            <div className="p-3 sm:p-4 bg-white border-b border-slate-200 flex justify-between items-center gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                <FileText className="w-5 h-5 text-teal-600 shrink-0" />
-                <span className="font-black text-xs sm:text-sm text-slate-900 uppercase truncate">Đơn Hàng {od.id}</span>
+                <FileText className="w-5 h-5 text-[#0d47c9] shrink-0" />
+                <span className="font-extrabold text-xs sm:text-sm text-slate-900 truncate">Đơn Hàng {od.id}</span>
               </div>
-              <button type="button" onClick={() => setOrderDetailModal({ open: false, order: null })} className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all shrink-0"><X className="w-5 h-5" /></button>
+              <button type="button" onClick={() => setOrderDetailModal({ open: false, order: null })} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500 cursor-pointer transition-all shrink-0"><X className="w-5 h-5" /></button>
             </div>
             {/* Xem trước PDF Đơn Mua Hàng */}
             <div className="flex-1 overflow-auto bg-slate-300 p-2 sm:p-4" style={{ maxHeight: 'calc(100vh - 140px)' }}>
@@ -3402,7 +3402,7 @@ export default function MaterialCoordination({
                 <button type="button" disabled className="flex-1 bg-slate-100 text-slate-400 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               )}
               <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Printer className="w-3.5 h-4" /> In</button>
-              <button type="button" onClick={() => downloadOrderPdf(od)} className="flex-1 bg-teal-50 hover:bg-teal-100 text-teal-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF về máy rồi kéo thả vào Zalo để gửi"><Download className="w-3.5 h-4" /> <span className="hidden xs:inline">Tải PDF</span></button>
+              <button type="button" onClick={() => downloadOrderPdf(od)} className="flex-1 bg-[#e8efff] hover:bg-[#d6e2ff] text-[#0d47c9] text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF về máy rồi kéo thả vào Zalo để gửi"><Download className="w-3.5 h-4" /> <span className="hidden xs:inline">Tải PDF</span></button>
               <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Share2 className="w-3.5 h-4" /> Chia sẻ</button>
             </div>
           </div>
@@ -3423,16 +3423,16 @@ export default function MaterialCoordination({
             className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+            <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <Eye className="w-5 h-5 text-sky-600" />
-                <span className="font-black text-sm text-slate-900 uppercase">Chi tiết báo giá</span>
+                <Eye className="w-5 h-5 text-[#0d47c9]" />
+                <span className="font-extrabold text-sm text-slate-900">Chi tiết báo giá</span>
                 <span className="text-[10px] text-slate-400 font-mono ml-1">{quoteDetailModal.proposalCode}</span>
               </div>
               <button
                 type="button"
                 onClick={() => setQuoteDetailModal({ open: false, quote: null, proposalCode: '' })}
-                className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all"
+                className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500 cursor-pointer transition-all"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -3469,15 +3469,15 @@ export default function MaterialCoordination({
                         </td>
                         <td className="p-2 text-center font-mono text-slate-700">{it.qty} {it.unit}</td>
                         <td className="p-2 text-right font-mono text-slate-700">{it.price?.toLocaleString('vi-VN')} đ</td>
-                        <td className="p-2 text-right font-mono font-black text-teal-600">{it.totalPrice?.toLocaleString('vi-VN')} đ</td>
+                        <td className="p-2 text-right font-mono font-black text-[#0d47c9]">{it.totalPrice?.toLocaleString('vi-VN')} đ</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <div className="flex justify-between items-center bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
-                <span className="text-[10.5px] font-bold text-slate-600 uppercase">Tổng cộng</span>
-                <span className="font-black text-teal-600">{quoteTotal(q).toLocaleString('vi-VN')} đ</span>
+              <div className="flex justify-between items-center bg-[#e8efff] border border-[#bcd0ff] rounded-lg px-3 py-2">
+                <span className="text-[10.5px] font-bold text-slate-600">Tổng cộng</span>
+                <span className="font-black text-[#0d47c9]">{quoteTotal(q).toLocaleString('vi-VN')} đ</span>
               </div>
             </div>
           </div>
@@ -3500,16 +3500,16 @@ export default function MaterialCoordination({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="p-4 bg-teal-50 border-b border-teal-200 flex justify-between items-center">
+            <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <PackageCheck className="w-5 h-5 text-teal-600" />
-                <span className="font-black text-sm text-slate-900 uppercase">Nhận hàng</span>
-                <span className="font-mono font-extrabold text-[10px] text-teal-600 bg-white border border-teal-200 px-2 py-0.5 rounded ml-1">{order.id}</span>
+                <PackageCheck className="w-5 h-5 text-[#0d47c9]" />
+                <span className="font-extrabold text-sm text-slate-900">Nhận hàng</span>
+                <span className="font-mono font-extrabold text-[10px] text-[#0d47c9] bg-white border border-[#bcd0ff] px-2 py-0.5 rounded ml-1">{order.id}</span>
               </div>
               <button
                 type="button"
                 onClick={() => { setReceiveModal({ open: false, order: null, proposal: null }); setReceiveQuantities({}); }}
-                className="p-1.5 hover:bg-teal-100 rounded-full text-slate-600 cursor-pointer transition-all"
+                className="p-1.5 hover:bg-[#e8efff] rounded-full text-slate-600 cursor-pointer transition-all"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -3570,7 +3570,7 @@ export default function MaterialCoordination({
                                     const val = Math.max(0, Math.min(remain, Number(e.target.value) || 0));
                                     setReceiveQuantities(prev => ({ ...prev, [it.id]: val }));
                                   }}
-                                  className="w-20 text-center border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-mono font-bold outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500/30"
+                                  className="w-20 text-center border border-slate-300 rounded-lg px-2 py-1 text-[11px] font-mono font-bold outline-none focus:border-[#0d47c9] focus:ring-1 focus:ring-teal-500/30"
                                 />
                               )}
                             </td>
@@ -3582,7 +3582,7 @@ export default function MaterialCoordination({
                 </table>
               </div>
               {/* Summary */}
-              <div className="flex justify-between items-center bg-teal-50 border border-teal-100 rounded-lg px-3 py-2 text-[11px]">
+              <div className="flex justify-between items-center bg-[#e8efff] border border-[#bcd0ff] rounded-lg px-3 py-2 text-[11px]">
                 <span className="font-bold text-slate-600">Còn {totalRemain} vật tư chờ nhận</span>
                 <span className="text-slate-400">
                   Số lượng nhận lần này: {
@@ -3629,10 +3629,10 @@ export default function MaterialCoordination({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="p-4 bg-rose-50 border-b border-rose-200 flex justify-between items-center">
+            <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <Undo2 className="w-5 h-5 text-rose-600" />
-                <span className="font-black text-sm text-slate-900 uppercase">Trả hàng NCC</span>
+                <Undo2 className="w-5 h-5 text-[#0d47c9]" />
+                <span className="font-extrabold text-sm text-slate-900">Trả hàng NCC</span>
                 <span className="font-mono font-extrabold text-[10px] text-rose-600 bg-white border border-rose-200 px-2 py-0.5 rounded ml-1">{order.id}</span>
               </div>
               <button
@@ -3708,7 +3708,7 @@ export default function MaterialCoordination({
               </div>
               {/* Lý do */}
               <div className="space-y-1">
-                <label className="block text-slate-500 font-bold text-[10px] uppercase">Lý do trả hàng</label>
+                <label className="block text-slate-500 font-bold text-[11px]">Lý do trả hàng</label>
                 <textarea
                   value={returnReason}
                   onChange={(e) => setReturnReason(e.target.value)}
@@ -3969,15 +3969,15 @@ export default function MaterialCoordination({
           className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+          <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <Store className="w-5 h-5 text-amber-600" />
-              <span className="font-black text-sm text-slate-900 uppercase">{editingQuoteId ? 'Sửa báo giá nhà cung cấp' : 'Thêm báo giá nhà cung cấp'}</span>
+              <Store className="w-5 h-5 text-[#0d47c9]" />
+              <span className="font-extrabold text-sm text-slate-900">{editingQuoteId ? 'Sửa báo giá nhà cung cấp' : 'Thêm báo giá nhà cung cấp'}</span>
             </div>
             <button
               type="button"
               onClick={() => { setQuoteModal({ open: false, proposalId: '' }); setEditingQuoteId(''); }}
-              className="p-1.5 hover:bg-slate-200 rounded-full text-slate-600 cursor-pointer transition-all"
+              className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500 cursor-pointer transition-all"
             >
               <X className="w-5 h-5" />
             </button>
@@ -3989,7 +3989,7 @@ export default function MaterialCoordination({
               <div className="p-5 space-y-4">
                 {/* Quick add supplier */}
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-bold text-[10.5px] uppercase tracking-wider">Chọn NCC cho từng sản phẩm *</span>
+                  <span className="text-slate-500 font-bold text-[10.5px]">Chọn NCC cho từng sản phẩm *</span>
                   <button
                     type="button"
                     onClick={() => setShowQuickSupplier((v) => !v)}
@@ -4005,7 +4005,7 @@ export default function MaterialCoordination({
                       onChange={(e) => setQuickSupplierName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter' && !isImeComposing(e)) addQuickSupplier(); }}
                       placeholder="Tên nhà cung cấp mới..."
-                      className="flex-1 bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-slate-800 outline-none focus:border-sky-500"
+                      className="flex-1 bg-white border border-slate-300 rounded-xl p-1.5 text-xs text-slate-800 outline-none focus:border-[#0d47c9]"
                     />
                     <button
                       type="button"
@@ -4041,7 +4041,7 @@ export default function MaterialCoordination({
                               type="number"
                               value={quotePrices[it.id] ?? it.price ?? 0}
                               onChange={(e) => setQuotePrices((prev: Record<string, number>) => ({ ...prev, [it.id]: Number(e.target.value) }))}
-                              className="w-24 bg-white border border-slate-300 rounded-lg p-1.5 text-xs text-right text-slate-800 outline-none focus:border-teal-500"
+                              className="w-24 bg-white border border-slate-300 rounded-xl p-1.5 text-xs text-right text-slate-800 outline-none focus:border-[#0d47c9]"
                             />
                             <span className="text-[10px] text-slate-400">đ</span>
                           </div>
@@ -4056,14 +4056,14 @@ export default function MaterialCoordination({
                   <button
                     type="button"
                     onClick={() => { setQuoteModal({ open: false, proposalId: '' }); setEditingQuoteId(''); }}
-                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2.5 rounded-lg cursor-pointer transition-all"
+                    className="flex-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-600 font-bold py-2.5 rounded-xl cursor-pointer transition-all"
                   >
                     Hủy
                   </button>
                   <button
                     type="button"
                     onClick={addQuote}
-                    className="flex-1 bg-teal-600 hover:bg-teal-500 text-white font-black py-2.5 rounded-lg cursor-pointer transition-all"
+                    className="flex-1 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-black py-2.5 rounded-lg cursor-pointer transition-all"
                   >
                     {editingQuoteId ? 'Cập nhật báo giá' : 'Thêm báo giá'}
                   </button>
