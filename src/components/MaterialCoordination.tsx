@@ -2065,29 +2065,29 @@ export default function MaterialCoordination({
       {trashOpen && (
         <div className="fixed inset-0 z-[9500] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => setTrashOpen(false)}>
           <div className="w-full max-w-4xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 bg-rose-50 border-b border-rose-200 flex justify-between items-center">
+            <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <Trash2 className="w-5 h-5 text-rose-600" />
-                <span className="font-black text-sm text-slate-900 uppercase">Đề xuất đã HỦY</span>
-                <span className="text-[10.5px] font-mono font-black text-rose-600 bg-white border border-rose-200 rounded-full px-2 py-0.5">{cancelledProposals.length}</span>
+                <span className="p-1.5 rounded-lg bg-[#e8efff] text-[#0d47c9]"><Trash2 className="w-4 h-4" /></span>
+                <span className="font-extrabold text-base text-slate-900">Đề xuất đã hủy</span>
+                <span className="text-[11px] font-mono font-black text-[#0d47c9] bg-[#e8efff] border border-[#bcd0ff] rounded-full px-2 py-0.5">{cancelledProposals.length}</span>
               </div>
-              <button type="button" onClick={() => setTrashOpen(false)} className="p-1.5 hover:bg-rose-100 rounded-full text-slate-600 cursor-pointer">
+              <button type="button" onClick={() => setTrashOpen(false)} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-4">
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4 flex items-start gap-2 text-[11px] text-slate-600">
+              <div className="bg-[#f3f7ff] border border-[#bcd0ff] rounded-xl p-3 mb-4 flex items-start gap-2 text-[12px] text-slate-600">
                 <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                 <p>
-                  Các đề xuất bị HỦY sẽ <strong>tự động xóa vĩnh viễn sau 30 ngày</strong> kể từ lúc hủy. Bạn có thể khôi phục về một cột trong quy trình hoặc xóa ngay bây giờ.
+                  Các đề xuất bị hủy sẽ <strong>tự động xóa vĩnh viễn sau 30 ngày</strong> kể từ lúc hủy. Bạn có thể khôi phục về một cột trong quy trình hoặc xóa ngay bây giờ.
                 </p>
               </div>
 
               {cancelledProposals.length === 0 ? (
                 <div className="h-56 flex flex-col items-center justify-center text-center text-slate-500">
                   <Trash2 className="w-12 h-12 opacity-15 mb-3 text-rose-500" />
-                  <p className="text-[12px] font-bold text-slate-600 uppercase tracking-wide">Thùng rác trống</p>
+                  <p className="text-[13px] font-bold text-slate-600">Thùng rác trống</p>
                   <p className="text-[10.5px] text-slate-500 mt-1">Chưa có đề xuất nào bị hủy</p>
                 </div>
               ) : (
@@ -2100,20 +2100,20 @@ export default function MaterialCoordination({
                     const deletedAt = cancelledAtMs(p);
                     const progressPct = deletedAt ? Math.round(((Date.now() - deletedAt) / DAY_MS) * 100) : 0;
                     return (
-                      <div key={item.key} className="border border-rose-200 bg-rose-50/40 rounded-xl p-3 space-y-2.5">
+                      <div key={item.key} className="border border-slate-200 bg-white rounded-xl p-3 space-y-2.5">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-mono font-extrabold text-[10px] text-rose-600 bg-white border border-rose-200 px-1.5 py-0.5 rounded">{p.code || '—'}</span>
-                              <span className="font-black text-[12px] text-slate-800 truncate">{item.project.name}</span>
+                              <span className="font-mono font-extrabold text-[11px] text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">{p.code || '—'}</span>
+                              <span className="font-extrabold text-[13px] text-slate-900 truncate">{item.project.name}</span>
                             </div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">
+                            <div className="text-[11px] text-slate-500 mt-0.5">
                               {itemsCount} vật tư · Hủy lúc {formatVietnameseDateTime(p.updatedAt || p.createdAt)}
                             </div>
                           </div>
                           {/* Đếm ngược tự xóa */}
                           <div className="shrink-0 text-right">
-                            <div className="flex items-center gap-1 text-[10px] font-black text-rose-600">
+                            <div className="flex items-center gap-1 text-[11px] font-bold text-rose-600">
                               <Clock className="w-3 h-3" />
                               <span>{days} ngày trước khi tự xóa</span>
                             </div>
@@ -2124,12 +2124,12 @@ export default function MaterialCoordination({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="flex items-center gap-1.5 text-[10px] text-slate-600">
-                            <span className="font-black uppercase text-[9px] text-slate-400 tracking-wider">Khôi phục về:</span>
+                          <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                            <span className="font-bold text-slate-500">Khôi phục về:</span>
                             <select
                               value={restoreTargets[p.id] || 'waiting_order'}
                               onChange={(e) => setRestoreTargets(prev => ({ ...prev, [p.id]: e.target.value as ProposalStatus }))}
-                              className="bg-white border border-slate-300 rounded p-1 text-[10.5px] text-slate-800 outline-none"
+                              className="h-8 bg-white border border-slate-300 rounded-xl px-2 text-[12px] text-slate-800 outline-none focus:border-[#0d47c9]"
                             >
                               <option value="find_supplier">TÌM NHÀ CUNG CẤP</option>
                               <option value="waiting_approval">CHỜ DUYỆT</option>
@@ -2141,7 +2141,8 @@ export default function MaterialCoordination({
                           <button
                             type="button"
                             onClick={() => restoreProposal(p)}
-                            className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-all"
+                            style={{ color: '#ffffff' }}
+                            className="h-8 px-3 bg-[#0d47c9] hover:bg-[#0a3aa8] rounded-xl text-[12px] font-bold flex items-center gap-1 cursor-pointer transition-all"
                           >
                             <RefreshCcw className="w-3 h-3" /> Khôi phục
                           </button>
@@ -2149,7 +2150,7 @@ export default function MaterialCoordination({
                           <button
                             type="button"
                             onClick={() => deleteCancelledNow(p)}
-                            className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-[10px] font-extrabold flex items-center gap-1 cursor-pointer transition-all"
+                            className="h-8 px-3 bg-white hover:bg-rose-50 text-rose-600 border border-rose-300 rounded-xl text-[12px] font-bold flex items-center gap-1 cursor-pointer transition-all"
                           >
                             <Trash2 className="w-3 h-3" /> Xóa vĩnh viễn
                           </button>
