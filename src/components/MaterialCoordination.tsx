@@ -52,6 +52,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
+import TablePagination from './TablePagination';
 
 interface MaterialCoordinationProps {
   projects: Project[];
@@ -1858,42 +1859,14 @@ export default function MaterialCoordination({
   ];
 
   // ─── Thanh phân trang dùng chung (cột kanban + thùng rác) ────────────────
-  const PaginationBar = ({ page, totalPages, pageSize, onPage, onPageSize, total }: {
-    page: number; totalPages: number; pageSize: number;
+  // Dùng lại TablePagination (bản compact cho cột hẹp) để đồng bộ với các màn hình khác.
+  const PaginationBar = ({ page, pageSize, onPage, onPageSize, total }: {
+    page: number; totalPages?: number; pageSize: number;
     onPage: (p: number) => void; onPageSize: (s: number) => void; total: number;
   }) => (
-    <div className="flex items-center justify-between gap-1 px-2.5 py-2 border-t border-slate-200/80 bg-white/60 shrink-0">
-      <div className="flex items-center gap-1">
-        <span className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wide">Dòng/trang</span>
-        <select
-          value={pageSize}
-          onChange={(e) => onPageSize(Number(e.target.value))}
-          className="bg-white border border-slate-200 rounded px-1 py-0.5 text-[9px] font-bold text-slate-600 outline-none cursor-pointer"
-        >
-          {COL_PAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          disabled={page <= 1}
-          onClick={() => onPage(page - 1)}
-          className="p-1 rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all"
-        >
-          <ChevronLeft className="w-3 h-3" />
-        </button>
-        <span className="text-[9.5px] font-mono font-bold text-slate-600 whitespace-nowrap">
-          {total > 0 ? `Trang ${page}/${totalPages}` : '0 dòng'}
-        </span>
-        <button
-          type="button"
-          disabled={page >= totalPages}
-          onClick={() => onPage(page + 1)}
-          className="p-1 rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-all"
-        >
-          <ChevronRight className="w-3 h-3" />
-        </button>
-      </div>
+    <div className="shrink-0 bg-white/60">
+      <TablePagination compact total={total} page={page} pageSize={pageSize} onPage={onPage} onPageSize={onPageSize}
+        unit="đề xuất" sizes={COL_PAGE_SIZES} testId="material-col-pager" />
     </div>
   );
 
@@ -1904,74 +1877,84 @@ export default function MaterialCoordination({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600">
-                <Boxes className="w-5 h-5 animate-pulse" />
+              <span className="p-1.5 rounded-lg bg-[#e8efff] text-[#0d47c9]">
+                <Boxes className="w-5 h-5" />
               </span>
-              <h1 className="text-lg sm:text-xl md:text-2xl font-black text-slate-900 uppercase tracking-tight">
-                Điều Phối Cung Ứng Vật Tư
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900">
+                Điều phối cung ứng vật tư
               </h1>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-slate-500 hidden sm:block">Quy trình: TÌM NCC → CHỜ DUYỆT → CHỜ ĐẶT HÀNG → ĐẶT HÀNG THÀNH CÔNG → ĐÃ NHẬN HÀNG (đề xuất HỦY vào Thùng rác — tự xóa sau 30 ngày)</p>
+            <p className="text-[12px] text-slate-500 hidden sm:block">Quy trình: TÌM NCC → CHỜ DUYỆT → CHỜ ĐẶT HÀNG → ĐẶT HÀNG THÀNH CÔNG → ĐÃ NHẬN HÀNG (đề xuất HỦY vào Thùng rác — tự xóa sau 30 ngày)</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => { setQuickPropIsWarehouse(false); setQuickPropProject(''); setQuickPropItems([{ id: `item_${Date.now()}_0`, name: '', qty: 1, unit: 'cái', spec: '', price: 0, note: '' }]); setQuickPropModal(true); }}
-              className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl px-3 py-2 text-[11px] font-black shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+              data-testid="material-quick-proposal"
+              style={{ background: '#0d47c9', color: '#ffffff' }}
+              className="h-9 inline-flex items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-bold cursor-pointer"
             >
-              <Zap className="w-4 h-4" /> Tạo Đề Xuất Nhanh
+              <Zap className="w-4 h-4" /> Tạo đề xuất nhanh
             </button>
             <button
               type="button"
               title="Đề xuất mua hàng từ NCC để nhập vào Kho (không thuộc công trình nào)"
               onClick={() => { setQuickPropIsWarehouse(true); setQuickPropProject(WAREHOUSE_PROJECT_ID); setQuickPropItems([{ id: `item_${Date.now()}_0`, name: '', qty: 1, unit: 'cái', spec: '', price: 0, note: '' }]); setQuickPropModal(true); }}
-              className="flex items-center gap-1.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white rounded-xl px-3 py-2 text-[11px] font-black shadow-md shadow-teal-500/20 transition-all cursor-pointer"
+              data-testid="material-warehouse-proposal"
+              className="h-9 inline-flex items-center gap-1.5 rounded-xl px-3.5 text-[13px] font-bold bg-white border border-[#bcd0ff] text-[#0d47c9] hover:bg-[#f3f7ff] cursor-pointer"
             >
-              📦 Đề Xuất Kho
+              📦 Đề xuất kho
             </button>
-            <div className="text-[10px] font-mono bg-white border border-slate-200 rounded-lg p-2 text-slate-600 flex flex-col items-end">
-              <span>Tổng: <strong className="text-amber-600">{stats.total}</strong></span>
+            <div className="text-[12px] bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-slate-600 flex flex-col items-end">
+              <span>Tổng: <strong className="text-[#0d47c9]">{stats.total}</strong></span>
               <span className="hidden sm:inline">Tài khoản: <strong className="text-slate-800">{currentUser?.name || 'Hệ thống'}</strong></span>
             </div>
           </div>
         </div>
 
-        {/* FILTERS */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Tìm mã dự án, tên, vật tư..."
-              value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setColPage({}); }}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-slate-400 focus:bg-white transition-all font-sans"
-            />
+        {/* BỘ LỌC — ô sáng kiểu LoLo: ô tìm kiếm + trạng thái + nút Hủy (thùng rác) */}
+        <div className="flex flex-wrap items-end gap-3 p-4 bg-white border border-slate-200 rounded-2xl" data-testid="material-filters">
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] text-slate-500 font-bold">Tìm kiếm</label>
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                data-testid="material-search"
+                placeholder="Mã dự án, tên, vật tư…"
+                value={searchTerm}
+                onChange={(e) => { setSearchTerm(e.target.value); setColPage({}); }}
+                className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]"
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] text-slate-500 font-bold">Trạng thái</label>
             <select
               value={statusFilter}
+              data-testid="material-status"
               onChange={(e) => { setStatusFilter(e.target.value); setColPage({}); }}
-              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-[11px] text-slate-700 outline-none cursor-pointer focus:border-slate-400 font-sans font-bold"
+              className="h-9 w-56 max-w-full bg-white border border-slate-200 rounded-xl px-3 text-[13px] text-slate-800 outline-none cursor-pointer focus:border-[#0d47c9]"
             >
               <option value="all">Tất cả</option>
               {(Object.keys(STATUS_LABEL) as ProposalStatus[]).filter(s => s !== 'cancelled').map(s => (
                 <option key={s} value={s}>{STATUS_LABEL[s]}</option>
               ))}
             </select>
-            <button
-              type="button"
-              onClick={() => { setRestoreTargets({}); setTrashPage(1); setTrashOpen(true); }}
-              className="relative flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded-xl px-2.5 py-1.5 text-[11px] font-extrabold transition-all cursor-pointer"
-              title="Xem đề xuất đã HỦY"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Hủy</span>
-              <span className="font-mono font-black text-[10px] bg-white/80 border border-rose-200 rounded-full px-1.5 py-0.5">
-                {cancelledProposals.length}
-              </span>
-            </button>
           </div>
+          <button
+            type="button"
+            data-testid="material-trash"
+            onClick={() => { setRestoreTargets({}); setTrashPage(1); setTrashOpen(true); }}
+            className="h-9 inline-flex items-center gap-1.5 bg-white hover:bg-rose-50 border border-rose-300 text-rose-600 rounded-xl px-3 text-[13px] font-bold cursor-pointer"
+            title="Xem đề xuất đã HỦY"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Đã hủy</span>
+            <span className="min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-black inline-flex items-center justify-center bg-rose-500" style={{ color: '#ffffff' }}>
+              {cancelledProposals.length}
+            </span>
+          </button>
         </div>
 
         {/* KANBAN BOARD — 5 cột trên 1 hàng */}
@@ -1984,11 +1967,11 @@ export default function MaterialCoordination({
               const colPageClamped = Math.min(getColPage(col.id), colTotal);
               const pagedDocs = colDocs.slice((colPageClamped - 1) * colSize, colPageClamped * colSize);
               return (
-                <div key={col.id} className={`flex flex-col h-[400px] sm:h-[540px] lg:h-[680px] rounded-2xl sm:rounded-3xl bg-white/50 border ${col.borderColor} overflow-hidden shadow-lg sm:shadow-2xl relative transition-all duration-300 hover:shadow-xl hover:shadow-slate-100`}>
-                  <div className={`p-4 border-b border-slate-200/80 flex items-center justify-between ${col.bgColor}`}>
+                <div key={col.id} className={`flex flex-col h-[400px] sm:h-[540px] lg:h-[680px] rounded-2xl bg-white border ${col.borderColor} overflow-hidden relative`}>
+                  <div className={`px-3.5 py-3 border-b border-slate-200/80 flex items-center justify-between ${col.bgColor}`}>
                     <div className="flex items-center gap-2">
                       <col.icon className={`w-4.5 h-4.5 ${col.textColor}`} />
-                      <h3 className="font-extrabold text-[12.5px] uppercase tracking-wider text-slate-900">{col.title}</h3>
+                      <h3 className="font-extrabold text-[13px] text-slate-900">{col.title}</h3>
                     </div>
                     <span className={`text-[11px] font-mono font-black px-2.5 py-0.5 rounded-full ${col.textColor} bg-white/80 border border-slate-200/80`}>
                       {colDocs.length}
@@ -2014,12 +1997,12 @@ export default function MaterialCoordination({
                           <div
                             key={item.key}
                             onClick={() => handleSelectDoc(item.key)}
-                            className={`border rounded-xl p-2 cursor-pointer transition-all duration-200 space-y-1.5 relative group overflow-hidden ${
-                              isSelected ? 'bg-white border-amber-500/60 shadow-md ring-1 ring-amber-500/20' : 'bg-white border-slate-200 hover:border-amber-300 hover:bg-amber-50/40'
+                            className={`border rounded-xl p-3 cursor-pointer transition-colors space-y-2 relative group overflow-hidden ${
+                              isSelected ? 'bg-[#e8efff] border-[#bcd0ff]' : 'bg-white border-slate-200 hover:bg-slate-50'
                             }`}
                           >
-                            <div className="flex items-center justify-between text-[9px]">
-                              <span className={`font-mono font-extrabold px-1.5 py-0.5 rounded border ${
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className={`font-mono font-extrabold px-2 py-0.5 rounded-full border ${
                                 col.id === 'received'
                                   ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
                                   : col.id === 'ordered'
@@ -2030,17 +2013,17 @@ export default function MaterialCoordination({
                               } truncate max-w-[130px]`} title={item.doc.code || item.project.name}>
                                 {item.doc.code || item.project.code}
                               </span>
-                              <span className="font-mono font-black text-slate-500 text-[9px] bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                              <span className="font-bold text-slate-600 text-[11px] bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
                                 📦 {materialsCount} VT
                               </span>
                             </div>
 
                             <div>
-                              <h4 className={`font-extrabold text-[11.5px] leading-snug transition-colors line-clamp-2 ${isSelected ? 'text-amber-600' : 'text-slate-800 group-hover:text-amber-600'}`}>
+                              <h4 className={`font-extrabold text-[13px] leading-snug line-clamp-2 ${isSelected ? 'text-[#0d47c9]' : 'text-slate-900'}`}>
                                 {item.project.name}
                               </h4>
                               {isProposal && maCount >= 0 && (
-                                <p className="text-[8.5px] text-slate-400 mt-0.5">
+                                <p className="text-[11px] text-slate-500 mt-0.5">
                                   {maCount}/{items.length} dòng có mã MUA · {item.doc.createdByName || ''}
                                 </p>
                               )}
@@ -2049,15 +2032,15 @@ export default function MaterialCoordination({
                                 const hasShortage = relatedPOs.some((o: any) => (o.items || []).some((it: any) => (it.receivedQty || 0) > 0 && (it.receivedQty || 0) < (it.qty || 0)));
                                 if (!hasShortage) return null;
                                 return (
-                                  <p className="text-[8.5px] text-amber-600 font-black mt-0.5 flex items-center gap-1">
+                                  <p className="text-[11px] text-amber-700 font-bold mt-0.5 flex items-center gap-1">
                                     ⚠️ Giao thiếu hàng
                                   </p>
                                 );
                               })()}
                             </div>
 
-                            <div className="flex items-center justify-end text-[9px] text-slate-500 pt-0.5">
-                              <span className="font-mono text-slate-400">{formatVietnameseDateTime(item.doc.createdAt)}</span>
+                            <div className="flex items-center justify-end text-[11px] text-slate-500">
+                              <span className="font-mono text-slate-500">{formatVietnameseDateTime(item.doc.createdAt)}</span>
                             </div>
 
                             </div>
