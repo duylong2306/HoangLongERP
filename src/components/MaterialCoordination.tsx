@@ -2183,18 +2183,18 @@ export default function MaterialCoordination({
             {/* Drawer Header */}
             <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 shrink-0 flex justify-between items-center gap-2">
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                <div className="w-8 h-8 sm:w-9 sm:h-9 bg-teal-500 rounded-lg flex items-center justify-center shadow-md shrink-0">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 bg-[#0d47c9] rounded-xl flex items-center justify-center shrink-0">
                   <Boxes className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                    <span className="font-mono font-extrabold text-[10px] text-teal-600 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                    <span className="font-mono font-extrabold text-[10px] text-[#0d47c9] bg-[#e8efff] px-2 py-0.5 rounded border border-[#bcd0ff]">
                       {activeDetail.doc.code || 'MAT-NEW'}
                     </span>
-                    <span className={`font-bold text-[9px] sm:text-[9.5px] uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded ${
+                    <span className={`font-bold text-[9px] sm:text-[9.5px]r px-1.5 sm:px-2 py-0.5 rounded ${
                       resolveStatus(activeDetail) === 'cancelled' ? 'bg-rose-100 text-rose-700 border border-rose-200'
                       : resolveStatus(activeDetail) === 'received' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                      : 'bg-teal-100 text-teal-700 border border-teal-200'
+                      : 'bg-[#e8efff] text-[#0d47c9] border border-[#bcd0ff]'
                     }`}>
                       {STATUS_LABEL[resolveStatus(activeDetail)]}
                     </span>
@@ -2210,7 +2210,7 @@ export default function MaterialCoordination({
                 <button
                   type="button"
                   onClick={() => setShowRightPane(v => !v)}
-                  className="lg:hidden p-1.5 bg-teal-50 hover:bg-teal-100 text-teal-600 rounded-lg border border-teal-200 cursor-pointer transition-all"
+                  className="lg:hidden p-1.5 bg-[#e8efff] hover:bg-[#d6e2ff] text-[#0d47c9] rounded-lg border border-[#bcd0ff] cursor-pointer transition-all"
                   title={showRightPane ? 'Ẩn công cụ' : 'Hiện công cụ'}
                 >
                   {showRightPane ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
@@ -2231,7 +2231,7 @@ export default function MaterialCoordination({
               <div className="flex-1 p-3 sm:p-5 space-y-4 sm:space-y-5 overflow-y-auto h-full border-b lg:border-b-0 lg:border-r border-slate-200" id="drawer_left_pane">
                 {/* THÔNG TIN */}
                 <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
-                  <span className="font-extrabold text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
+                  <span className="font-extrabold text-[11.5px] text-[#0d47c9] flex items-center gap-1.5 border-b border-slate-100 pb-2">
                     <FileText className="w-4 h-4" />
                     Thông tin đề xuất
                   </span>
@@ -2277,14 +2277,14 @@ export default function MaterialCoordination({
                     <div>
                       <span className="text-slate-500 block font-semibold mb-1">{label}</span>
                       <div className="bg-slate-50 border border-slate-200 rounded p-1.5 text-[11px] font-semibold flex items-center gap-1.5">
-                        {icon ? <span className="text-teal-600 shrink-0">{icon}</span> : null}
+                        {icon ? <span className="text-[#0d47c9] shrink-0">{icon}</span> : null}
                         <span className="break-words">{value || '—'}</span>
                       </div>
                     </div>
                   );
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
-                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
+                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-[#0d47c9] flex items-center gap-1.5 border-b border-slate-100 pb-2">
                         <Truck className="w-4 h-4" />
                         Thông tin giao nhận &amp; điều phối
                       </span>
@@ -2302,11 +2302,11 @@ export default function MaterialCoordination({
                 {/* BẢNG VẬT TƯ */}
                 <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
                   <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-1">
-                    <span className="font-extrabold text-[11px] sm:text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide">
+                    <span className="font-extrabold text-[11px] sm:text-[11.5px] text-[#0d47c9] flex items-center gap-1.5">
                       <Boxes className="w-4 h-4" />
                       Danh mục vật tư
                     </span>
-                    <span className="text-[10px] sm:text-[10.5px] font-black text-teal-600">Tổng: {proposalTotal(activeDetail.doc).toLocaleString('vi-VN')} ₫</span>
+                    <span className="text-[10px] sm:text-[10.5px] font-black text-[#0d47c9]">Tổng: {proposalTotal(activeDetail.doc).toLocaleString('vi-VN')} ₫</span>
                   </div>
 
                   {/* Mobile: card layout */}
@@ -2353,11 +2353,11 @@ export default function MaterialCoordination({
                                         onBlur={(e) => {
                                           if (Number(e.target.value) !== m.qty) updateProposalItemField(activeDetail.doc, m.id, 'qty', e.target.value);
                                         }}
-                                        className="w-12 text-center bg-white border border-teal-300 rounded px-1 py-0.5 font-mono font-bold text-teal-700 outline-none focus:border-teal-500"
+                                        className="w-12 text-center bg-white border border-[#bcd0ff] rounded px-1 py-0.5 font-mono font-bold text-[#0d47c9] outline-none focus:border-[#0d47c9]"
                                       />
                                     </span>
                                   ) : (
-                                    <span>SL: <strong className="text-teal-600 font-mono">{m.qty}</strong></span>
+                                    <span>SL: <strong className="text-[#0d47c9] font-mono">{m.qty}</strong></span>
                                   )}
                                   {m.unit}
                                   {m.spec && <span className="italic">· {m.spec}</span>}
@@ -2379,12 +2379,12 @@ export default function MaterialCoordination({
                                     onBlur={(e) => {
                                       if (Number(e.target.value) !== price) updateProposalItemField(activeDetail.doc, m.id, 'price', e.target.value);
                                     }}
-                                    className="w-20 text-right bg-white border border-teal-300 rounded px-1 py-0.5 font-mono text-[10px] text-slate-700 outline-none focus:border-teal-500"
+                                    className="w-20 text-right bg-white border border-[#bcd0ff] rounded px-1 py-0.5 font-mono text-[10px] text-slate-700 outline-none focus:border-[#0d47c9]"
                                   />
                                 ) : (
                                   <div className="text-[10px] font-mono text-slate-500">{price.toLocaleString('vi-VN')} ₫</div>
                                 )}
-                                <div className="text-[11px] font-mono font-black text-teal-600 mt-0.5">{total.toLocaleString('vi-VN')} ₫</div>
+                                <div className="text-[11px] font-mono font-black text-[#0d47c9] mt-0.5">{total.toLocaleString('vi-VN')} ₫</div>
                               </div>
                             </div>
                           </div>
@@ -2431,7 +2431,7 @@ export default function MaterialCoordination({
                                     <span className="ml-1.5 text-[8.5px] text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-0.5 font-bold">Mã: {m.maSanPham}</span>
                                   )}
                                 </td>
-                                <td className="p-2.5 text-center font-bold text-teal-600 font-mono">
+                                <td className="p-2.5 text-center font-bold text-[#0d47c9] font-mono">
                                   {canEditRow ? (
                                     <input
                                       type="number"
@@ -2440,7 +2440,7 @@ export default function MaterialCoordination({
                                       onBlur={(e) => {
                                         if (Number(e.target.value) !== m.qty) updateProposalItemField(activeDetail.doc, m.id, 'qty', e.target.value);
                                       }}
-                                      className="w-14 text-center bg-white border border-teal-300 rounded px-1 py-0.5 font-mono font-bold text-teal-700 outline-none focus:border-teal-500"
+                                      className="w-14 text-center bg-white border border-[#bcd0ff] rounded px-1 py-0.5 font-mono font-bold text-[#0d47c9] outline-none focus:border-[#0d47c9]"
                                     />
                                   ) : m.qty}
                                 </td>
@@ -2456,11 +2456,11 @@ export default function MaterialCoordination({
                                       onBlur={(e) => {
                                         if (Number(e.target.value) !== price) updateProposalItemField(activeDetail.doc, m.id, 'price', e.target.value);
                                       }}
-                                      className="w-20 text-right bg-white border border-teal-300 rounded px-1 py-0.5 font-mono text-slate-700 outline-none focus:border-teal-500"
+                                      className="w-20 text-right bg-white border border-[#bcd0ff] rounded px-1 py-0.5 font-mono text-slate-700 outline-none focus:border-[#0d47c9]"
                                     />
                                   ) : `${price.toLocaleString('vi-VN')} ₫`}
                                 </td>
-                                <td className="p-2.5 text-right font-mono font-black text-teal-600">{total.toLocaleString('vi-VN')} ₫</td>
+                                <td className="p-2.5 text-right font-mono font-black text-[#0d47c9]">{total.toLocaleString('vi-VN')} ₫</td>
                                 <td className="p-2.5 text-center font-mono font-bold text-slate-600">{poQty !== null ? received : '—'}</td>
                                 <td className={`p-2.5 text-center font-mono font-bold ${shortage ? 'text-amber-600' : 'text-slate-400'}`}>{shortage !== null ? shortage : '—'}</td>
                                 <td className="p-2.5 text-center">
@@ -2493,7 +2493,7 @@ export default function MaterialCoordination({
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
                       <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                        <span className="font-extrabold text-[11.5px] text-amber-600 flex items-center gap-1.5 uppercase tracking-wide">
+                        <span className="font-extrabold text-[11.5px] text-amber-600 flex items-center gap-1.5">
                           <Store className="w-4 h-4" /> Báo giá nhà cung cấp ({prop.quotes?.length || 0}/3)
                         </span>
                         {isCoordinator && (
@@ -2520,7 +2520,7 @@ export default function MaterialCoordination({
                                   <span className="ml-2 text-[9px] text-slate-500 font-mono">{formatVietnameseDateTime(q.createdAt)}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[11px] font-black text-teal-600">{quoteTotal(q).toLocaleString('vi-VN')} đ</span>
+                                  <span className="text-[11px] font-black text-[#0d47c9]">{quoteTotal(q).toLocaleString('vi-VN')} đ</span>
                                   <button type="button" onClick={() => setQuoteDetailModal({ open: true, quote: q, proposalCode: prop.code })} className="p-1 text-sky-600 hover:bg-sky-50 rounded cursor-pointer" title="Xem chi tiết báo giá">
                                     <Eye className="w-3.5 h-3.5" />
                                   </button>
@@ -2558,7 +2558,7 @@ export default function MaterialCoordination({
                   if (prop.status !== 'waiting_approval') return null;
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
-                      <span className="font-extrabold text-[11.5px] text-sky-700 uppercase tracking-wide flex items-center gap-1.5 border-b border-slate-100 pb-2">
+                      <span className="font-extrabold text-[11.5px] text-sky-700 flex items-center gap-1.5 border-b border-slate-100 pb-2">
                         <ShieldCheck className="w-4 h-4" /> Xét duyệt — chọn 1 báo giá
                       </span>
                       {(prop.quotes || []).map((q: any) => (
@@ -2578,7 +2578,7 @@ export default function MaterialCoordination({
                             <div className="flex-1">
                               <div className="flex justify-between">
                                 <span className="font-black text-[11px] text-slate-800">🏢 {q.supplierName}</span>
-                                <span className="text-[11px] font-black text-teal-600">{quoteTotal(q).toLocaleString('vi-VN')} đ</span>
+                                <span className="text-[11px] font-black text-[#0d47c9]">{quoteTotal(q).toLocaleString('vi-VN')} đ</span>
                               </div>
                               <div className="mt-1 text-[9.5px] text-slate-600">
                                 {(q.items || []).map((it: any, i: number) => (
@@ -2651,14 +2651,14 @@ export default function MaterialCoordination({
 
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
-                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-violet-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
+                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-violet-600 flex items-center gap-1.5 border-b border-slate-100 pb-2">
                         <Layers className="w-4 h-4" /> Gán nguồn vật tư & Tạo đơn hàng
                       </span>
 
                       {/* Áp dụng nhanh 1 nguồn (NCC hoặc Kho có sẵn) cho toàn bộ danh mục */}
                       <div className="border border-violet-200 bg-violet-50 rounded-xl p-3 space-y-1.5">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[10px] font-black uppercase tracking-wider text-violet-700">Áp dụng 1 nguồn cho toàn bộ danh mục</span>
+                          <span className="text-[10px] font-blackr text-violet-700">Áp dụng 1 nguồn cho toàn bộ danh mục</span>
                           {uniformSid && (
                             <button
                               type="button"
@@ -2748,7 +2748,7 @@ export default function MaterialCoordination({
                   const showRadio = prop.status === 'ordered';
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
-                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-teal-600 flex items-center gap-1.5 uppercase tracking-wide border-b border-slate-100 pb-2">
+                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-[#0d47c9] flex items-center gap-1.5 border-b border-slate-100 pb-2">
                         <FileText className="w-4 h-4" /> Đơn hàng đã tạo ({relatedOrders.length})
                       </span>
                       <div className="space-y-2.5">
@@ -2766,8 +2766,8 @@ export default function MaterialCoordination({
                                   : someReceived
                                   ? 'border-amber-200 bg-amber-50/40'
                                   : showRadio && selectedOrderForReceive === o.id
-                                  ? 'border-teal-300 bg-teal-50/60 ring-1 ring-teal-300/50'
-                                  : 'border-slate-200 bg-teal-50/30'
+                                  ? 'border-[#bcd0ff] bg-[#e8efff]/60 ring-1 ring-[#bcd0ff]'
+                                  : 'border-slate-200 bg-[#e8efff]/30'
                               }`}
                             >
                               {/* Header row */}
@@ -2782,7 +2782,7 @@ export default function MaterialCoordination({
                                       }}
                                     >
                                       <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all ${
-                                        selectedOrderForReceive === o.id ? 'border-teal-600 bg-teal-600' : 'border-slate-300 bg-white'
+                                        selectedOrderForReceive === o.id ? 'border-[#0d47c9] bg-[#0d47c9]' : 'border-slate-300 bg-white'
                                       }`}>
                                         {selectedOrderForReceive === o.id && (
                                           <div className="w-1.5 h-1.5 rounded-full bg-white" />
@@ -2791,7 +2791,7 @@ export default function MaterialCoordination({
                                     </div>
                                   )}
                                   <div className="min-w-0">
-                                    <span className="font-mono font-black text-[11px] text-teal-700">{o.id}</span>
+                                    <span className="font-mono font-black text-[11px] text-[#0d47c9]">{o.id}</span>
                                     <span className="ml-1.5 text-[10px] text-slate-600">· {o.supplierName}</span>
                                   </div>
                                 </div>
@@ -2809,7 +2809,7 @@ export default function MaterialCoordination({
                                   <button
                                     type="button"
                                     onClick={() => setOrderDetailModal({ open: true, order: o, proposal: prop, project: activeDetail.project })}
-                                    className="bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-all"
+                                    className="bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-all"
                                   >
                                     <Eye className="w-3 h-3" /> Xem chi tiết
                                   </button>
@@ -2934,7 +2934,7 @@ export default function MaterialCoordination({
                 onClick={(e) => { if (showRightPane && e.target === e.currentTarget) setShowRightPane(false); }}
               >
                 <div className={`${showRightPane ? 'absolute right-0 top-0 h-full w-[85vw] max-w-[320px] shadow-2xl' : ''} lg:relative lg:w-full lg:max-w-none lg:shadow-none p-4 sm:p-5 bg-white lg:bg-slate-50 border-l border-slate-200 space-y-4 h-full overflow-y-auto`} id="drawer_right_pane">
-                <span className="font-extrabold text-[10px] text-slate-600 block uppercase tracking-wider mb-1">
+                <span className="font-extrabold text-[10px] text-slate-600 blockr mb-1">
                   CÔNG CỤ ĐIỀU PHỐI
                 </span>
 {/* ── Status-specific workflow panels ── */}
@@ -3004,7 +3004,7 @@ export default function MaterialCoordination({
                     if (st === 'waiting_order') {
                       return (
                         <div className="space-y-3 pt-1">
-                          <span className="font-extrabold text-[11px] text-violet-700 uppercase tracking-wide flex items-center gap-1.5">
+                          <span className="font-extrabold text-[11px] text-violet-700 flex items-center gap-1.5">
                             <Layers className="w-4 h-4" /> CHỜ ĐẶT HÀNG — tạo đơn hàng tại chi tiết đề xuất
                           </span>
                           <p className="text-[11px] text-slate-600 bg-violet-50 border border-violet-200 rounded-xl p-3 leading-relaxed">
@@ -3018,7 +3018,7 @@ export default function MaterialCoordination({
                                 onClick={() => markOrdered(prop)}
                                 disabled={(prop.purchaseOrderIds || []).length === 0}
                                 title={(prop.purchaseOrderIds || []).length === 0 ? 'Cần Tạo đơn hàng trước khi Đặt Hàng' : ''}
-                                className={`flex-1 ${(prop.purchaseOrderIds || []).length === 0 ? 'opacity-50 cursor-not-allowed bg-teal-600' : 'bg-teal-600 hover:bg-teal-500 cursor-pointer'} text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all`}
+                                className={`flex-1 ${(prop.purchaseOrderIds || []).length === 0 ? 'opacity-50 cursor-not-allowed bg-[#0d47c9]' : 'bg-[#0d47c9] hover:bg-[#0a3aa8] cursor-pointer'} text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all`}
                               >
                                 <Check className="w-4 h-4" /> Đặt Hàng
                               </button>
@@ -3039,10 +3039,10 @@ export default function MaterialCoordination({
                       const hasSelectedOrder = selectedOrderForReceive && (prop.purchaseOrderIds || []).includes(selectedOrderForReceive);
                       return (
                         <div className="space-y-3 pt-1">
-                          <span className="font-extrabold text-[11px] text-teal-700 uppercase tracking-wide flex items-center gap-1.5">
+                          <span className="font-extrabold text-[11px] text-[#0d47c9] flex items-center gap-1.5">
                             <PackageCheck className="w-4 h-4" /> ĐẶT HÀNG THÀNH CÔNG
                           </span>
-                          <p className="text-[11px] text-slate-600 bg-teal-50 border border-teal-200 rounded-xl p-3">
+                          <p className="text-[11px] text-slate-600 bg-[#e8efff] border border-[#bcd0ff] rounded-xl p-3">
                             Đơn hàng đã được đặt. Chọn một đơn hàng trong mục <strong>Đơn hàng đã tạo</strong> bên trái, nhấn <strong>Nhận hàng</strong> khi hàng về và nhập số lượng thực nhận. Dùng <strong>Đổi NCC</strong> nếu cần quay lại chọn nhà cung cấp.
                           </p>
 
@@ -3083,7 +3083,7 @@ export default function MaterialCoordination({
                       return (
                         <div className="space-y-3 pt-1">
                           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
-                            <span className="text-[11.5px] font-black text-emerald-700 uppercase tracking-wide">🎉 ĐÃ NHẬN HÀNG HOÀN TẤT</span>
+                            <span className="text-[11.5px] font-black text-emerald-700">🎉 ĐÃ NHẬN HÀNG HOÀN TẤT</span>
                             <p className="text-[10px] text-emerald-600 mt-1">Tất cả đơn hàng trong đề xuất đã được nhận đủ.</p>
                           </div>
                           {(isCoordinator || isApprover) && (
@@ -3102,7 +3102,7 @@ export default function MaterialCoordination({
                     return (
                       <div className="space-y-3 pt-1">
                         <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-center">
-                          <span className="text-[11.5px] font-black text-rose-700 uppercase tracking-wide">ĐÃ HỦY</span>
+                          <span className="text-[11.5px] font-black text-rose-700">ĐÃ HỦY</span>
                         </div>
                       </div>
                     );
