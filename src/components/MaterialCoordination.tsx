@@ -206,9 +206,10 @@ export default function MaterialCoordination({
   // ─── Phân trang: số trang + số dòng/trang cho từng cột ──────────────────
   const COL_PAGE_SIZES = [5, 10, 15, 20] as const;
   const [colPage, setColPage] = useState<Record<string, number>>({});
-  const [colPageSize, setColPageSize] = useState<Record<string, number>>({});
+  // Số dòng/trang dùng CHUNG cho mọi cột Kanban (đổi ở cột nào thì cả 5 cột đổi theo)
+  const [sharedColPageSize, setSharedColPageSize] = useState<number>(5);
   const getColPage = (id: string) => colPage[id] || 1;
-  const getColPageSize = (id: string) => colPageSize[id] || 5;
+  const getColPageSize = (_id: string) => sharedColPageSize;
   const colTotalPages = (id: string, count: number) => Math.max(1, Math.ceil(count / getColPageSize(id)));
   const setColPageSafe = (id: string, p: number) => setColPage(prev => ({ ...prev, [id]: Math.max(1, p) }));
   // Thùng rác
@@ -1905,10 +1906,6 @@ export default function MaterialCoordination({
             >
               📦 Đề xuất kho
             </button>
-            <div className="text-[12px] bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-slate-600 flex flex-col items-end">
-              <span>Tổng: <strong className="text-[#0d47c9]">{stats.total}</strong></span>
-              <span className="hidden sm:inline">Tài khoản: <strong className="text-slate-800">{currentUser?.name || 'Hệ thống'}</strong></span>
-            </div>
           </div>
         </div>
 
@@ -1967,7 +1964,7 @@ export default function MaterialCoordination({
               const colPageClamped = Math.min(getColPage(col.id), colTotal);
               const pagedDocs = colDocs.slice((colPageClamped - 1) * colSize, colPageClamped * colSize);
               return (
-                <div key={col.id} className={`flex flex-col h-[400px] sm:h-[540px] lg:h-[680px] rounded-2xl bg-white border ${col.borderColor} overflow-hidden relative`}>
+                <div key={col.id} className={`flex flex-col min-h-[240px] rounded-2xl bg-white border ${col.borderColor} overflow-hidden relative`}>
                   <div className={`px-3.5 py-3 border-b border-slate-200/80 flex items-center justify-between ${col.bgColor}`}>
                     <div className="flex items-center gap-2">
                       <col.icon className={`w-4.5 h-4.5 ${col.textColor}`} />
@@ -1978,7 +1975,7 @@ export default function MaterialCoordination({
                     </span>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 custom-scrollbar">
+                  <div className="flex-1 p-3.5 space-y-3.5">
                     {pagedDocs.length === 0 ? (
                       <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
                         <Boxes className="w-10 h-10 opacity-15 mb-3 text-slate-600" />
@@ -2055,7 +2052,7 @@ export default function MaterialCoordination({
                     pageSize={colSize}
                     total={colDocs.length}
                     onPage={(p) => setColPageSafe(col.id, p)}
-                    onPageSize={(s) => { setColPageSize(prev => ({ ...prev, [col.id]: s })); setColPageSafe(col.id, 1); }}
+                    onPageSize={(s) => { setSharedColPageSize(s); setColPage({}); }}
                   />
                 </div>
               );
@@ -3758,12 +3755,12 @@ export default function MaterialCoordination({
           className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className={`p-4 flex justify-between items-center shrink-0 bg-gradient-to-r ${quickPropIsWarehouse ? 'from-teal-600 to-emerald-600' : 'from-amber-500 to-orange-500'}`}>
+          <div className={`p-4 flex justify-between items-center shrink-0 bg-white border-b border-slate-200`}>
             <div className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-white" />
-              <span className="font-black text-sm text-white uppercase">{quickPropIsWarehouse ? '📦 Tạo Đề Xuất Kho (Nhập hàng)' : 'Tạo Đề Xuất Vật Tư Nhanh'}</span>
+              <span className="p-1.5 rounded-lg bg-[#e8efff] text-[#0d47c9]"><Zap className="w-4 h-4" /></span>
+              <span className="font-extrabold text-base text-slate-900">{quickPropIsWarehouse ? 'Tạo đề xuất kho (nhập hàng)' : 'Tạo đề xuất vật tư nhanh'}</span>
             </div>
-            <button type="button" onClick={() => setQuickPropModal(false)} className="p-1.5 hover:bg-white/20 rounded-full text-white cursor-pointer transition-all">
+            <button type="button" onClick={() => setQuickPropModal(false)} className="p-1.5 hover:bg-slate-100 rounded-full text-slate-500 cursor-pointer transition-all">
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -3771,9 +3768,9 @@ export default function MaterialCoordination({
             {/* Dự án + Công việc */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="block text-slate-500 font-bold text-[10px] uppercase">Dự án *</label>
+                <label className="block text-slate-500 font-bold text-[10px]">Dự án *</label>
                 {quickPropIsWarehouse ? (
-                  <div className="w-full bg-teal-50 border border-teal-200 rounded-lg p-2 text-xs text-teal-700 font-bold">
+                  <div className="w-full bg-[#e8efff] border border-[#bcd0ff] rounded-xl p-2 text-xs text-[#0d47c9] font-bold">
                     📦 Kho Tổng (Nhập hàng) — không thuộc công trình
                   </div>
                 ) : (
@@ -3788,12 +3785,12 @@ export default function MaterialCoordination({
                 )}
               </div>
               <div className="space-y-1">
-                <label className="block text-slate-500 font-bold text-[10px] uppercase">Ghi chú</label>
+                <label className="block text-slate-500 font-bold text-[10px]">Ghi chú</label>
                 <input
                   value={quickPropNotes}
                   onChange={(e) => setQuickPropNotes(e.target.value)}
                   placeholder="Ghi chú cho đề xuất..."
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 outline-none focus:border-amber-500"
+                  className="w-full bg-white border border-slate-300 rounded-xl p-2 text-xs text-slate-800 outline-none focus:border-[#0d47c9]"
                 />
               </div>
             </div>
@@ -3805,7 +3802,7 @@ export default function MaterialCoordination({
                 <button
                   type="button"
                   onClick={addQuickPropItem}
-                  className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:text-amber-700 cursor-pointer"
+                  className="flex items-center gap-1 text-[10px] font-bold text-[#0d47c9] hover:text-[#0d47c9] cursor-pointer"
                 >
                   <Plus className="w-3 h-3" /> Thêm vật tư
                 </button>
@@ -3846,7 +3843,7 @@ export default function MaterialCoordination({
                             : row));
                         }}
                         placeholder="Tên vật tư * (gõ để tìm Danh mục MUA...)"
-                        className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-800 outline-none focus:border-amber-400"
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs text-slate-800 outline-none focus:border-[#0d47c9]"
                       />
                       <button type="button" onClick={() => removeQuickPropItem(idx)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer shrink-0">
                         <Trash2 className="w-3.5 h-3.5" />
@@ -3864,12 +3861,12 @@ export default function MaterialCoordination({
                             const num = parseFloat(raw);
                             updateQuickPropItem(idx, 'qty', isNaN(num) ? 1 : Math.max(0.01, num));
                           }}
-                          className="w-14 bg-white border border-slate-200 rounded p-1 text-[11px] text-center text-slate-800 outline-none focus:border-amber-400"
+                          className="w-14 bg-white border border-slate-200 rounded p-1 text-[11px] text-center text-slate-800 outline-none focus:border-[#0d47c9]"
                         />
                         <input
                           value={it.unit}
                           onChange={(e) => updateQuickPropItem(idx, 'unit', e.target.value)}
-                          className="w-12 bg-white border border-slate-200 rounded p-1 text-[11px] text-center text-slate-800 outline-none focus:border-amber-400"
+                          className="w-12 bg-white border border-slate-200 rounded p-1 text-[11px] text-center text-slate-800 outline-none focus:border-[#0d47c9]"
                           placeholder="ĐVT"
                         />
                       </div>
@@ -3877,13 +3874,13 @@ export default function MaterialCoordination({
                         value={it.spec || ''}
                         onChange={(e) => updateQuickPropItem(idx, 'spec', e.target.value)}
                         placeholder="Quy cách"
-                        className="flex-1 bg-white border border-slate-200 rounded p-1 text-[11px] text-slate-800 outline-none focus:border-amber-400"
+                        className="flex-1 bg-white border border-slate-200 rounded p-1 text-[11px] text-slate-800 outline-none focus:border-[#0d47c9]"
                       />
                       <input
                         value={(it as any).maSanPham || ''}
                         onChange={(e) => updateQuickPropItem(idx, 'maSanPham', e.target.value)}
                         placeholder="Mã MUA"
-                        className="w-20 bg-white border border-slate-200 rounded p-1 text-[11px] text-slate-800 outline-none focus:border-amber-400 font-mono"
+                        className="w-20 bg-white border border-slate-200 rounded p-1 text-[11px] text-slate-800 outline-none focus:border-[#0d47c9] font-mono"
                       />
                       {quickPropIsWarehouse && (
                         <input
@@ -3892,7 +3889,7 @@ export default function MaterialCoordination({
                           onChange={(e) => updateQuickPropItem(idx, 'price', Math.max(0, Number(e.target.value) || 0))}
                           placeholder="Đơn giá"
                           title="Đơn giá nhập kho dự kiến (đ)"
-                          className="w-24 bg-white border border-teal-200 rounded p-1 text-[11px] text-right text-teal-700 font-bold outline-none focus:border-teal-400"
+                          className="w-24 bg-white border border-[#bcd0ff] rounded p-1 text-[11px] text-right text-[#0d47c9] font-bold outline-none focus:border-[#0d47c9]"
                         />
                       )}
                     </div>
@@ -3906,14 +3903,14 @@ export default function MaterialCoordination({
             <button
               type="button"
               onClick={() => setQuickPropModal(false)}
-              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-2.5 rounded-lg cursor-pointer transition-all text-xs"
+              className="flex-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-600 font-bold py-2.5 rounded-xl cursor-pointer transition-all text-xs"
             >
               Hủy
             </button>
             <button
               type="button"
               onClick={submitQuickProposal}
-              className={`flex-1 text-white font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all text-xs shadow-md bg-gradient-to-r ${quickPropIsWarehouse ? 'from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 shadow-teal-500/20' : 'from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 shadow-amber-500/20'}`}
+              className="flex-1 bg-[#0d47c9] hover:bg-[#0a3aa8] font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all text-xs" style={{ color: '#ffffff' }}
             >
               <Zap className="w-4 h-4" /> Tạo đề xuất
             </button>
@@ -3940,9 +3937,9 @@ export default function MaterialCoordination({
                 key={p.ma_san_pham ?? p.id ?? String(p.tenSanPham)}
                 type="button"
                 onClick={() => selectQuickPropCatalogItem(p)}
-                className="w-full text-left p-2 hover:bg-amber-50 text-slate-800 text-[11px] font-medium transition-colors block"
+                className="w-full text-left p-2 hover:bg-[#e8efff] text-slate-800 text-[11px] font-medium transition-colors block"
               >
-                <div className="font-bold text-amber-600">{p.tenSanPham}</div>
+                <div className="font-bold text-[#0d47c9]">{p.tenSanPham}</div>
                 <div className="text-slate-500 text-[9.5px]">
                   {p.ma_san_pham || p.maSanPham ? `Mã: ${p.ma_san_pham || p.maSanPham} · ` : ''}{p.donViTinh || ''} · {p.quyCach || ''}
                 </div>
