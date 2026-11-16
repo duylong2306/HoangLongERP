@@ -5,7 +5,7 @@ import ProjectActivityModal from './ProjectActivityModal';
 import ProjectTodayCard from './ProjectTodayCard';
 import { loadUnreadSummary, markProjectSeen, projectIdOfConversation, type UnreadSummary } from '../lib/projectEventReads';
 import { Star, ChevronsDown, Search, UserPlus, Users, X, Pin, BellOff, Bell, Send, Paperclip, Image as ImageIcon, Smile, ChevronLeft, PanelRight, MoreHorizontal, CornerUpLeft, Forward, ThumbsUp, Check, CheckCheck, Download, Trash2, ClipboardList, ChevronDown, Edit3, Copy, MessageSquare } from 'lucide-react';
-import type { Employee, Task, Conversation, ChatMessage, ChatAttachment } from '../types';
+import type { Employee, Task, Conversation, ChatMessage, ChatAttachment, SubTaskMission } from '../types';
 import { useNotification, isRoleAdmin } from '../context';
 import {
   loadMessagesProgressive,
@@ -27,7 +27,8 @@ import {
 import UserAvatar from './UserAvatar';
 import ConvAvatar, { isAvatarImage } from './ConvAvatar';
 import { WorkList, WorkDetail } from './MessagesWork';
-import { WorkCardView, SendWorkDialog, CreateTaskDialog, cardOfEntry, type NewTaskInput } from './MessagesWorkCards';
+import { WorkCardView, SendWorkDialog, CreateTaskDialog, cardOfEntry, type NewTaskInput, type NewMissionInput } from './MessagesWorkCards';
+import { canDoTaskAction, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
 import type { InboxItem } from './MyWorkOverview';
 import { buildWorkEntries } from '../lib/workEntries';
 import { workThreadId, isWorkThreadId } from '../lib/workThread';
@@ -73,7 +74,7 @@ const PICKER_EMOJIS = ['😊', '😂', '🥰', '😍', '😉', '😎', '🤔', '
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const fmtSize = (n?: number) => (!n ? '' : n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
-export default function MessagesZalo({ currentUser, employees, tasks = [], onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [], canOpenProject, onOpenProject, onExportProjectLog }: Props) {
+export default function MessagesZalo({ currentUser, employees, tasks = [], onUpdateTask, onNavigateTab, initialConversationId, workItems = [], workInbox = [], onReceiveWork, onOpenWorkTask, onCreateTask, projects = [], canOpenProject, onOpenProject, onExportProjectLog }: Props) {
   const { addToast } = useNotification();
   const me = currentUser.id;
   const { isOnline, getLastSeen, formatLastSeen } = usePresence();
@@ -450,7 +451,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
     const task: Task = {
       id: `task_${Date.now()}`, code: `CV-${n < 10 ? `00${n}` : n < 100 ? `0${n}` : n}`, projectId: v.projectId, name: v.name,
       description: createFrom?.content ? `Tạo từ tin nhắn của ${createFrom.senderName}: ${createFrom.content}`.slice(0, 500) : '',
-      assignerId: me, assigneeId: v.assigneeId, department: '', deadline: v.deadline, priority: 'medium', status: 'todo', completionRate: 0,
+      assignerId: me, assigneeId: v.assigneeId, department: '', deadline: v.deadline, priority: v.priority || 'medium', status: 'todo', completionRate: 0,
+      notes: v.note,
       approvals: [],
       workLogs: [{ id: `wl_init_${Date.now()}`, actorId: me, actorName: currentUser.name, action: 'Khởi tạo công việc từ tin nhắn.', timestamp: new Date().toISOString() }],
     };
@@ -465,6 +467,40 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
         content: MT.giaoViec({ task: task.name, deadline: v.deadline, project: proj }), relatedEntity: { type: 'task', id: task.id } });
     }
     addToast({ title: '✅ Đã tạo công việc', message: `"${task.name}" đã được giao${assignee ? ` cho ${assignee.name}` : ''}.`, type: 'success' });
+  };
+
+  /** "Thêm nhiệm vụ" ngay trên thẻ công việc trong chat: tạo nhiệm vụ THẬT (Task.missions) rồi báo vào hội thoại + nhắn riêng người phụ trách nếu họ chưa ở trong hội thoại. */
+  const addMissionFromCard = async (task: Task, v: NewMissionInput): Promise<boolean> => {
+    if (!onUpdateTask) return false;
+    const mission: SubTaskMission = {
+      id: `mission_${Date.now()}`, name: v.name, memberIds: [v.assigneeId], mainAssigneeId: v.assigneeId,
+      status: 'todo', workReports: '', evidence: '', createdAt: new Date().toISOString(),
+      // Hạn rỗng → thừa hưởng hạn công việc (cùng quy tắc form "Tạo nhiệm vụ")
+      deadline: v.deadline ? new Date(v.deadline).toISOString() : (task.deadline || new Date().toISOString()),
+    };
+    // Chỉ GỬI THÊM 1 nhiệm vụ mới (App chỉ upsert phần có mặt) — an toàn dù danh sách cục bộ đang cũ
+    const ok = await onUpdateTask(task.id, { missions: [...(task.missions || []), mission] });
+    if ((ok as any) === false) return false;
+    const conv = selected;
+    const assignee = employees.find(e => e.id === v.assigneeId);
+    if (conv) {
+      await addMessage({
+        conversationId: conv.id, senderId: me, senderName: currentUser.name, senderRole: currentUser.role || 'member',
+        content: MT.nk.taoNhiemVu({ mission: mission.name, task: task.name }), relatedEntity: { type: 'task', id: task.id },
+      });
+      setMessages(applyWindow(getMessages(conv.id))); setConversations(getConversations());
+    }
+    if (assignee && v.assigneeId !== me && !(conv?.participantIds || []).includes(v.assigneeId)) {
+      sendApprovalDirectMessage({ senderId: me, senderName: currentUser.name, senderRole: currentUser.role, recipientId: assignee.id, recipientName: assignee.name,
+        content: MT.nk.taoNhiemVu({ mission: mission.name, task: task.name }), relatedEntity: { type: 'task', id: task.id } });
+    }
+    addToast({ title: '✅ Đã thêm nhiệm vụ', message: `"${mission.name}" đã giao${assignee ? ` cho ${assignee.name}` : ''}.`, type: 'success' });
+    return true;
+  };
+  /** Người dùng có được thêm nhiệm vụ vào công việc này không — dùng đúng quyền "Quản lý nhiệm vụ con" của ma trận quyền công việc. */
+  const canAddMission = (task: Task) => {
+    const pj = projects.find(p => p.id === task.projectId);
+    return canDoTaskAction(currentUser, task, pj as any, 'manageSubTask', loadTaskPermissionMatrix());
   };
 
   const onTextChange = (v: string) => {
@@ -820,7 +856,12 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onNav
                               {(m.attachments || []).filter(a => a.type !== 'file' && (a.mimeType || 'image/').startsWith('image/')).map(a => <button key={a.id} type="button" onClick={() => setExpanded(a.url)} className="block mb-1 cursor-pointer"><img src={a.url} alt={a.name} className="max-w-[240px] max-h-[200px] rounded-lg object-cover" /></button>)}
                               {(m.attachments || []).filter(a => a.type === 'file' || !(a.mimeType || 'image/').startsWith('image/')).map(a => <a key={a.id} href={a.url} download={a.name} className="flex items-center gap-2 bg-slate-100 rounded-lg px-2.5 py-1.5 mb-1 text-[12.5px]"><Paperclip className="w-4 h-4 text-slate-500" /><span className="truncate max-w-[200px]">{a.name}</span><small className="text-slate-500">{fmtSize(a.size)}</small></a>)}
                               {m.content && !(m.attachments?.length && m.content.startsWith('📎')) && <div>{renderContent(m.content)}</div>}
-                              {m.relatedEntity?.card && <WorkCardView card={m.relatedEntity.card} entry={workEntries.find(e => e.key === m.relatedEntity!.card!.key)} onOpen={m.relatedEntity.type === 'task' ? () => onOpenWorkTask?.(m.relatedEntity!.id) : undefined} />}
+                              {m.relatedEntity?.card && (() => {
+                          // Thẻ CÔNG VIỆC lấy công việc thật (tasks) để hiện nhiệm vụ bên trong; nút "Thêm nhiệm vụ" chỉ hiện khi có quyền
+                          const liveTask = m.relatedEntity!.type === 'task' && m.relatedEntity!.card!.kind === 'task' ? tasks.find(t => t.id === m.relatedEntity!.id) : undefined;
+                          return <WorkCardView card={m.relatedEntity!.card!} entry={workEntries.find(e => e.key === m.relatedEntity!.card!.key)} onOpen={m.relatedEntity!.type === 'task' ? () => onOpenWorkTask?.(m.relatedEntity!.id) : undefined}
+                            task={liveTask} employees={employees} onAddMission={liveTask && onUpdateTask && canAddMission(liveTask) ? (v) => addMissionFromCard(liveTask, v) : undefined} />;
+                        })()}
                               {m.relatedEntity && !m.relatedEntity.card && <button type="button" onClick={() => openRelated(m)} className="mt-1.5 text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1 cursor-pointer inline-flex items-center gap-1"><ClipboardList className="w-3.5 h-3.5" />Mở chi tiết</button>}
                             </>)}
                             {(first || m.edited) && !m.deleted && <div className="text-[10.5px] text-slate-500 mt-0.5">{hhmm(m.createdAt)}{m.edited ? ' · đã chỉnh sửa' : ''}{m.pinned ? ' · 📌' : ''}</div>}

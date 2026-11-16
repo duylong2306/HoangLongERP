@@ -22,7 +22,7 @@ vi.mock('../../lib/projectEventReads', () => ({
   projectIdOfConversation: (c: any) => c.taskId ? undefined : (c.projectId || (String(c.id).startsWith('conv_project_') ? String(c.id).slice(13) : undefined)),
 }));
 vi.mock('../ProjectActivityModal', () => ({ default: (p: any) => <div data-testid="activity-stub" data-pid={p.projectId} data-export={p.onExport ? '1' : '0'} onClick={p.onClose} /> }));
-vi.mock('../../context', () => ({ useNotification: () => ({ addToast: vi.fn() }), isRoleAdmin: () => false }));
+vi.mock('../../context', () => ({ useNotification: () => ({ addToast: vi.fn() }), isRoleAdmin: () => false, isUserInRoleGroup: () => false }));
 import MessagesZalo from '../MessagesZalo';
 import { stopPresence } from '../../lib/presence';
 import { todayYmd } from '../../lib/myWork';
@@ -176,6 +176,77 @@ describe('Việc trong khung chat', () => {
     expect(t.name).toContain('kiểm tra lại số tài khoản');
     await waitFor(() => expect(fn.addMessage).toHaveBeenCalled());
     expect(fn.addMessage.mock.calls[0][0].relatedEntity).toMatchObject({ type: 'task', id: t.id, card: { kind: 'task', key: `task:${t.id}` } });
+  });
+});
+
+describe('Nhiệm vụ trong thẻ công việc (khung chat)', () => {
+  const openChat = () => fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+  const taskCardMsg = () => [{ id: 'tc1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: '📌 Giao việc', createdAt: new Date().toISOString(), read: true,
+    relatedEntity: { type: 'task', id: 'a', card: { kind: 'task', key: 'task:a', title: 'Việc a', chip: 'Công việc' } } }];
+  // Tôi là NGƯỜI GIAO của việc a → có quyền quản lý nhiệm vụ con
+  const taskA = () => task('a', { assignerId: 'me', assigneeId: 'ny', deadline: day(5), missions: [
+    { id: 'ms1', name: 'Đo đạc lại', memberIds: ['ny'], mainAssigneeId: 'ny', status: 'completed', deadline: `${day(2)}T00:00:00.000Z`, workReports: '', evidence: '' },
+    { id: 'ms2', name: 'Dựng bản vẽ 3D', memberIds: ['tang'], mainAssigneeId: 'tang', status: 'todo', deadline: `${day(3)}T00:00:00.000Z`, workReports: '', evidence: '' },
+  ] });
+
+  it('thẻ công việc hiện danh sách nhiệm vụ thật, tiến độ x/y và trạng thái từng nhiệm vụ', async () => {
+    store.msgs.p_ny = taskCardMsg();
+    mount({ tasks: [taskA()] }); openChat();
+    const card = await screen.findByTestId('work-card');
+    expect(within(card).getByTestId('mission-count').textContent).toContain('1/2');
+    expect(within(card).getAllByTestId('mission-row')).toHaveLength(2);
+    expect(card.textContent).toContain('Hoàn thành'); expect(card.textContent).toContain('Chưa làm');
+  });
+  it('thêm nhiệm vụ ngay trên thẻ: lưu vào Task.missions (giữ nhiệm vụ cũ) và báo vào hội thoại', async () => {
+    store.msgs.p_ny = taskCardMsg();
+    const onUpdateTask = vi.fn(async () => true);
+    mount({ tasks: [taskA()], onUpdateTask }); openChat();
+    const card = await screen.findByTestId('work-card');
+    fireEvent.click(within(card).getByTestId('mission-add-open'));
+    // Bỏ trống tên → báo lỗi, chưa lưu
+    fireEvent.click(within(card).getByTestId('mission-add-submit'));
+    expect(within(card).getByTestId('mission-add-err').textContent).toContain('tên nhiệm vụ');
+    expect(onUpdateTask).not.toHaveBeenCalled();
+    fireEvent.change(within(card).getByTestId('mission-add-name'), { target: { value: 'Gửi khách duyệt' } });
+    fireEvent.change(within(card).getByTestId('mission-add-who'), { target: { value: 'tang' } });
+    fireEvent.click(within(card).getByTestId('mission-add-submit'));
+    await waitFor(() => expect(onUpdateTask).toHaveBeenCalled());
+    const [id, upd] = onUpdateTask.mock.calls[0] as any[];
+    expect(id).toBe('a');
+    expect(upd.missions).toHaveLength(3);
+    expect(upd.missions[2]).toMatchObject({ name: 'Gửi khách duyệt', mainAssigneeId: 'tang', memberIds: ['tang'], status: 'todo' });
+    await waitFor(() => expect(fn.addMessage).toHaveBeenCalled());
+    expect(fn.addMessage.mock.calls[0][0].content).toContain('Gửi khách duyệt');
+  });
+  it('hạn nhiệm vụ sau hạn công việc cha → báo lỗi, không lưu', async () => {
+    store.msgs.p_ny = taskCardMsg();
+    const onUpdateTask = vi.fn(async () => true);
+    mount({ tasks: [taskA()], onUpdateTask }); openChat();
+    const card = await screen.findByTestId('work-card');
+    fireEvent.click(within(card).getByTestId('mission-add-open'));
+    fireEvent.change(within(card).getByTestId('mission-add-name'), { target: { value: 'Việc trễ' } });
+    fireEvent.change(within(card).getByTestId('mission-add-due'), { target: { value: day(9) } });
+    fireEvent.click(within(card).getByTestId('mission-add-submit'));
+    expect(within(card).getByTestId('mission-add-err').textContent).toContain('Hạn nhiệm vụ');
+    expect(onUpdateTask).not.toHaveBeenCalled();
+  });
+  it('không có hàm cập nhật công việc → thẻ vẫn hiện nhiệm vụ nhưng KHÔNG có nút thêm', async () => {
+    store.msgs.p_ny = taskCardMsg();
+    mount({ tasks: [taskA()] }); openChat();
+    const card = await screen.findByTestId('work-card');
+    expect(within(card).getAllByTestId('mission-row')).toHaveLength(2);
+    expect(within(card).queryByTestId('mission-add-open')).toBeNull();
+  });
+  it('hộp "Tạo công việc từ tin nhắn": chọn mức ưu tiên + ghi chú → ghi vào công việc', async () => {
+    store.msgs.p_ny = [{ id: 'm1', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'Chốt bản vẽ tủ bếp', createdAt: new Date().toISOString(), read: true }];
+    mount(); openChat();
+    fireEvent.click(await screen.findByTitle('Thêm'));
+    fireEvent.click(screen.getByTestId('zalo-menu-createtask'));
+    fireEvent.click(screen.getByTestId('work-create-priority-high'));
+    fireEvent.change(screen.getByTestId('work-create-note'), { target: { value: 'Gửi trước 5 giờ chiều' } });
+    fireEvent.click(screen.getByTestId('work-create-submit'));
+    await waitFor(() => expect(createTask).toHaveBeenCalled());
+    expect((createTask.mock.calls[0] as any[])[0]).toMatchObject({ priority: 'high', notes: 'Gửi trước 5 giờ chiều' });
   });
 });
 
