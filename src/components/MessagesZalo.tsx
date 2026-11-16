@@ -643,7 +643,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
 
   const renderContent = (content: string) => {
     const parts: React.ReactNode[] = []; const re = /@([^\s,.:;!?]+)/g; let last = 0, m;
-    while ((m = re.exec(content)) !== null) { if (m.index > last) parts.push(content.slice(last, m.index)); parts.push(<span key={m.index} className="text-blue-600 font-semibold">@{m[1]}</span>); last = m.index + m[0].length; }
+    while ((m = re.exec(content)) !== null) { if (m.index > last) parts.push(content.slice(last, m.index)); parts.push(<span key={m.index} className="text-[#0d47c9] font-semibold">@{m[1]}</span>); last = m.index + m[0].length; }
     if (last < content.length) parts.push(content.slice(last));
     return parts;
   };
@@ -671,7 +671,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
         {selected.type === 'personal' && otherOf(selected)?.position && <small className="text-slate-500">{otherOf(selected)?.position}</small>}
       </div>
       <div className="grid grid-cols-3 gap-1 px-3 pt-2 pb-4 text-center text-[11.5px] text-slate-600">
-        <button type="button" onClick={() => toggleMute(selected.id)} className="cursor-pointer" data-testid="zalo-mute"><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full ${mutedSel ? 'bg-blue-100 text-blue-600' : 'bg-slate-100'}`}>{mutedSel ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}</span>{mutedSel ? 'Bật thông báo' : 'Tắt thông báo'}</button>
+        <button type="button" onClick={() => toggleMute(selected.id)} className="cursor-pointer" data-testid="zalo-mute"><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full ${mutedSel ? 'bg-[#e8efff] text-[#0d47c9]' : 'bg-slate-100'}`}>{mutedSel ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}</span>{mutedSel ? 'Bật thông báo' : 'Tắt thông báo'}</button>
         <button type="button" onClick={() => toggleStar(selected.id)} className="cursor-pointer" data-testid="zalo-star" aria-pressed={isStarredConv(selected, prefs)}><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full ${isStarredConv(selected, prefs) ? 'bg-amber-100 text-amber-500' : 'bg-slate-100'}`}><Star className="w-4 h-4" fill={isStarredConv(selected, prefs) ? 'currentColor' : 'none'} /></span>{isStarredConv(selected, prefs) ? 'Bỏ quan tâm' : 'Quan tâm'}</button>
         <button type="button" onClick={() => (selected.type === 'personal' ? (setGroupMembers([otherOf(selected)?.id || '']), setGroupOpen(true)) : setAddMemberOpen(true))} className="cursor-pointer"><span className="mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full bg-slate-100"><UserPlus className="w-4 h-4" /></span>{selected.type === 'personal' ? 'Tạo nhóm' : 'Thêm thành viên'}</button>
       </div>
@@ -679,13 +679,13 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
         <div className="border-t-8 border-slate-100 px-4 py-3">
           <div className="font-bold text-[13px] mb-1.5">{selected.taskId ? 'Công việc liên quan' : 'Dự án'}</div>
           {selected.taskId ? (
-            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: selected.taskId } }))} className="text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 cursor-pointer">Mở công việc</button>
+            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: selected.taskId } }))} className="text-[12px] font-bold text-[#0d47c9] bg-[#e8efff] border border-[#bcd0ff] rounded-lg px-3 py-1.5 cursor-pointer">Mở công việc</button>
           ) : (() => {
             // Mở thẳng chi tiết công trình — chỉ khi người dùng được vào phân hệ dự án đó (phân quyền do App kiểm); không thì nút bị khóa kèm lý do
             const pid = selected.projectId || String(selected.id).replace('conv_project_', '');
             const allowed = canOpenProject ? canOpenProject(pid) : true;
             return allowed
-              ? <button type="button" onClick={() => onOpenProject ? onOpenProject(pid) : onNavigateTab?.('projects-construction')} className="text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 cursor-pointer" data-testid="zalo-open-project">Mở dự án</button>
+              ? <button type="button" onClick={() => onOpenProject ? onOpenProject(pid) : onNavigateTab?.('projects-construction')} className="text-[12px] font-bold text-[#0d47c9] bg-[#e8efff] border border-[#bcd0ff] rounded-lg px-3 py-1.5 cursor-pointer" data-testid="zalo-open-project">Mở dự án</button>
               : <span className="inline-block text-[12px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5" data-testid="zalo-open-project-denied" title="Bạn không có quyền xem dự án này hoặc dự án không còn tồn tại">Bạn không có quyền xem dự án này</span>;
           })()}
           {/* Nhật ký dự án — mọi thành viên nhóm chat theo dõi được (kể cả người không có quyền mở dự án) */}
@@ -721,7 +721,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
       </div>
       <div className="border-t-8 border-slate-100 px-4 py-3" data-testid="zalo-links">
         <div className="font-bold text-[13px] mb-2">Link</div>
-        {links.length === 0 ? <small className="text-slate-400">Chưa có link</small> : links.slice(0, 6).map(l => <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="block text-[12.5px] text-blue-600 truncate my-1.5">{l.url}</a>)}
+        {links.length === 0 ? <small className="text-slate-400">Chưa có link</small> : links.slice(0, 6).map(l => <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="block text-[12.5px] text-[#0d47c9] truncate my-1.5">{l.url}</a>)}
       </div>
       <div className="border-t-8 border-slate-100 px-4 py-3">
         <button type="button" onClick={deleteConv} className="flex items-center gap-2 text-[12.5px] font-bold text-rose-600 cursor-pointer"><Trash2 className="w-4 h-4" />Xóa cuộc trò chuyện</button>
@@ -752,21 +752,21 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
           {leftMode === 'chat' && <>
           <div className="relative flex items-center gap-4 px-3.5 border-b border-slate-100">
             {([['all', 'Tất cả'], ['unread', 'Chưa đọc'], ['starred', 'Quan tâm']] as const).map(([k, l]) => (
-              <button key={k} type="button" onClick={() => setTab(k)} aria-pressed={tab === k} className={`py-2 text-[13px] font-bold border-b-2 -mb-px cursor-pointer ${tab === k ? 'text-blue-600 border-blue-600' : 'text-slate-500 border-transparent'}`}>
+              <button key={k} type="button" onClick={() => setTab(k)} aria-pressed={tab === k} className={`py-2 text-[13px] font-bold border-b-2 -mb-px cursor-pointer ${tab === k ? 'text-[#0d47c9] border-[#0d47c9]' : 'text-slate-500 border-transparent'}`}>
                 {l}{k === 'unread' && unreadTotal > 0 && <span className="ml-1.5 inline-grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[11px] font-bold align-middle">{unreadTotal}</span>}
               </button>))}
             <span className="flex-1" />
             <button type="button" onClick={() => setShowCategory(v => !v)} className="text-[13px] font-semibold text-slate-600 flex items-center gap-1 cursor-pointer" data-testid="zalo-category-btn">{category === 'all' ? 'Phân loại' : CATEGORY_LABEL[category]}<ChevronDown className="w-3.5 h-3.5" /></button>
             {showCategory && (
               <div className="absolute right-2 top-full mt-1 z-30 bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-52" role="menu" data-testid="zalo-category-menu">
-                {CATEGORY_MENU.map(k => <button key={k} type="button" role="menuitem" onClick={() => { setCategory(k); setShowCategory(false); }} className={`w-full text-left px-3.5 py-2 text-[13px] hover:bg-slate-50 cursor-pointer ${category === k ? 'font-bold text-blue-600' : ''}`}>{CATEGORY_LABEL[k]}</button>)}
+                {CATEGORY_MENU.map(k => <button key={k} type="button" role="menuitem" onClick={() => { setCategory(k); setShowCategory(false); }} className={`w-full text-left px-3.5 py-2 text-[13px] hover:bg-slate-50 cursor-pointer ${category === k ? 'font-bold text-[#0d47c9]' : ''}`}>{CATEGORY_LABEL[k]}</button>)}
                 <div className="border-t border-slate-100 my-1" />
                 <button type="button" role="menuitem" onClick={markAllRead} className="w-full text-left px-3.5 py-2 text-[13px] hover:bg-slate-50 cursor-pointer flex items-center gap-2"><CheckCheck className="w-4 h-4" />Đánh dấu tất cả đã đọc</button>
               </div>)}
           </div>
           <div className="flex-1 overflow-y-auto min-h-0" data-testid="zalo-list">
             {workEntries.length > 0 && !query.trim() && (
-              <button type="button" onClick={() => setLeftMode('work')} data-testid="zalo-today" style={{ color: '#ffffff' }} className="w-[calc(100%-1.5rem)] mx-3 mt-2 mb-1 flex items-center justify-between gap-3 rounded-2xl bg-gradient-to-r from-[#1f6bff] to-[#0a4fd8] px-3.5 py-2.5 text-left cursor-pointer">
+              <button type="button" onClick={() => setLeftMode('work')} data-testid="zalo-today" style={{ color: '#ffffff' }} className="w-[calc(100%-1.5rem)] mx-3 mt-2 mb-1 flex items-center justify-between gap-3 rounded-2xl bg-[#0d47c9] hover:bg-[#0a3aa8] px-3.5 py-2.5 text-left cursor-pointer">
                 <span><b className="block text-[14px]">Hôm nay</b><span className="block text-[12px] opacity-95">{workEntries.filter(e => e.section === 'today').length} việc đến hạn · {workEntries.filter(e => e.section === 'late').length} quá hạn · {workEntries.filter(e => e.section === 'inbox').length} mục chờ bạn xử lý</span></span>
                 <span className="text-[12px] font-bold bg-white/20 rounded-full px-3 py-1 whitespace-nowrap">Xem →</span>
               </button>)}
@@ -775,11 +775,11 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
               const unread = c.unreadCount || 0; const muted = prefs.muted.includes(c.id); const starred = isStarredConv(c, prefs); const o = otherOf(c);
               return (
                 <button key={c.id} type="button" data-testid="zalo-conv" data-conv={c.id} onClick={() => { if (selectedId === c.id) setReloadTick(t => t + 1); setSelectedId(c.id); setPendingEmpId(null); setMobileView('chat'); }}
-                  className={`group w-full grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 text-left items-center cursor-pointer ${selectedId === c.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+                  className={`group w-full grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 text-left items-center cursor-pointer ${selectedId === c.id ? 'bg-[#e8efff]' : 'hover:bg-slate-50'}`}>
                   <span className="relative"><ConvAvatar conv={c} employees={employees} me={me} size={48} />{c.type === 'personal' && isOnline(o?.id) && <i className="absolute right-0 bottom-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />}</span>
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5"><b className={`truncate text-[14.5px] ${unread > 0 && !muted ? 'font-extrabold' : 'font-medium'}`}>{convName(c)}</b>
-                      {categoryOf(c) === 'project' && <span className="text-[9.5px] font-extrabold text-blue-600 bg-blue-50 rounded px-1.5 py-px shrink-0">Dự án</span>}
+                      {categoryOf(c) === 'project' && <span className="text-[9.5px] font-extrabold text-[#0d47c9] bg-[#e8efff] rounded px-1.5 py-px shrink-0">Dự án</span>}
                       <span className="ml-auto text-[11.5px] text-slate-500 shrink-0 flex items-center gap-1">{muted && <BellOff className="w-3 h-3" aria-label="Đã tắt thông báo" />}{listTime(c.lastMessageAt)}</span></span>
                     <span className="flex items-center gap-2"><span className={`truncate text-[13px] ${unread > 0 && !muted ? 'text-slate-900 font-semibold' : 'text-slate-500'}`}>{previewOf(c)}</span>
                       {/* Bên phải: số chưa đọc + ⭐ Quan tâm (thay cho biểu tượng ghim). Sao tô vàng = đã quan tâm; chưa quan tâm chỉ hiện mờ khi rê chuột (điện thoại luôn hiện mờ). Bấm sao KHÔNG mở hội thoại. */}
@@ -803,7 +803,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
         </section>
 
         {/* ── KHUNG CHAT ── */}
-        <section className={`${showChat ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-gradient-to-br from-[#dbe3d3] via-[#c9d6df] to-[#d5d9ea]`} data-testid="zalo-chat">
+        <section className={`${showChat ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 bg-[#f3f6fc]`} data-testid="zalo-chat">
           {leftMode === 'work' ? (
             workSel
               ? <WorkDetail key={workSel.key} entry={workSel} me={me} meName={currentUser.name} employees={employees} today={today} onBack={() => setMobileView('list')} />
@@ -816,8 +816,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
               {selected ? <ConvAvatar conv={selected} employees={employees} me={me} size={44} /> : <UserAvatar employee={pendingEmp || null} size="lg" noRing />}
               <div className="min-w-0"><b className="block text-[16px] truncate">{selected ? convName(selected) : pendingEmp?.name}</b><small className="block text-[12px] text-slate-500 truncate">{selected ? statusLine(selected) : 'Nhắn tin mới'}</small></div>
               <div className="ml-auto flex items-center gap-1">
-                {selected && <button type="button" onClick={() => { setSearchOpen(v => !v); setSearchQ(''); }} title="Tìm trong hội thoại" aria-label="Tìm trong hội thoại" className={`p-2 rounded-lg cursor-pointer ${searchOpen ? 'bg-slate-100 text-blue-600' : 'text-slate-600 hover:bg-slate-100'}`}><Search className="w-[18px] h-[18px]" /></button>}
-                {selected && <button type="button" onClick={() => setInfoOpen(v => !v)} title="Thông tin hội thoại" aria-label="Thông tin hội thoại" aria-pressed={infoOpen} className={`p-2 rounded-lg cursor-pointer ${infoOpen ? 'bg-blue-100 text-blue-600' : 'text-slate-600 hover:bg-slate-100'}`}><PanelRight className="w-[18px] h-[18px]" /></button>}
+                {selected && <button type="button" onClick={() => { setSearchOpen(v => !v); setSearchQ(''); }} title="Tìm trong hội thoại" aria-label="Tìm trong hội thoại" className={`p-2 rounded-lg cursor-pointer ${searchOpen ? 'bg-slate-100 text-[#0d47c9]' : 'text-slate-600 hover:bg-slate-100'}`}><Search className="w-[18px] h-[18px]" /></button>}
+                {selected && <button type="button" onClick={() => setInfoOpen(v => !v)} title="Thông tin hội thoại" aria-label="Thông tin hội thoại" aria-pressed={infoOpen} className={`p-2 rounded-lg cursor-pointer ${infoOpen ? 'bg-[#e8efff] text-[#0d47c9]' : 'text-slate-600 hover:bg-slate-100'}`}><PanelRight className="w-[18px] h-[18px]" /></button>}
               </div>
             </header>
             {/* Dải "Cập nhật mới": tóm tắt hoạt động dự án chưa xem, bấm mở nhật ký; đã xem thì tự ẩn */}
@@ -826,7 +826,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
               const u = pid ? unreadAct[pid] : undefined;
               if (!pid || !u || u.count === 0 || activityPid === pid) return null;
               return (
-                <div className="mx-3 mt-2 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 flex items-center gap-2.5 text-[12.5px]" style={{ color: '#0b3aa8' }} data-testid="zalo-activity-bar">
+                <div className="mx-3 mt-2 bg-[#e8efff] border border-[#bcd0ff] rounded-xl px-3 py-2 flex items-center gap-2.5 text-[12.5px]" style={{ color: '#0b3aa8' }} data-testid="zalo-activity-bar">
                   <span aria-hidden>🕘</span>
                   <button type="button" onClick={() => setActivityPid(pid)} className="flex-1 min-w-0 text-left cursor-pointer">
                     <b>{u.count} hoạt động mới</b>
@@ -837,10 +837,10 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
                 </div>);
             })()}
             {mutedSel && (
-              <div className="mx-3 mt-2 bg-white rounded-xl px-3 py-2 flex items-center gap-2.5 text-[12.5px] text-slate-600 shadow-sm" data-testid="zalo-mutebar"><BellOff className="w-4 h-4 text-slate-500 shrink-0" /><span className="flex-1 truncate">Tin nhắn trong hội thoại sẽ KHÔNG được thông báo cho bạn</span><button type="button" onClick={() => toggleMute(selected!.id)} className="bg-blue-50 text-blue-600 font-bold rounded-lg px-3 py-1 cursor-pointer">Mở lại</button></div>)}
+              <div className="mx-3 mt-2 bg-white rounded-xl px-3 py-2 flex items-center gap-2.5 text-[12.5px] text-slate-600 shadow-sm" data-testid="zalo-mutebar"><BellOff className="w-4 h-4 text-slate-500 shrink-0" /><span className="flex-1 truncate">Tin nhắn trong hội thoại sẽ KHÔNG được thông báo cho bạn</span><button type="button" onClick={() => toggleMute(selected!.id)} className="bg-[#e8efff] text-[#0d47c9] font-bold rounded-lg px-3 py-1 cursor-pointer">Mở lại</button></div>)}
             {pins.length > 0 && (
               <div className="mx-3 mt-2 bg-white rounded-xl shadow-sm" data-testid="zalo-pinbar">
-                <div className="px-3 py-2 flex items-center gap-2.5"><Pin className="w-4 h-4 text-blue-600 shrink-0" />
+                <div className="px-3 py-2 flex items-center gap-2.5"><Pin className="w-4 h-4 text-[#0d47c9] shrink-0" />
                   <button type="button" onClick={() => jumpTo(pins[0].id)} className="flex-1 min-w-0 text-left cursor-pointer"><b className="block text-[12.5px]">Tin nhắn đã ghim</b><span className="block text-[12.5px] text-slate-600 truncate">{pins[0].senderName}: {pins[0].content}</span></button>
                   {pins.length > 1 && <button type="button" onClick={() => setPinsOpen(v => !v)} className="border border-slate-300 rounded-lg px-2.5 py-1 text-[12px] font-semibold cursor-pointer">+{pins.length - 1} ghim ⌄</button>}</div>
                 {pinsOpen && <div className="border-t border-slate-100 max-h-40 overflow-y-auto">{pins.slice(1).map(p => <button key={p.id} type="button" onClick={() => { jumpTo(p.id); setPinsOpen(false); }} className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-slate-50 truncate cursor-pointer"><b>{p.senderName}:</b> {p.content}</button>)}</div>}
@@ -869,10 +869,10 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
                       <div id={`zmsg-${m.id}`} data-testid="zalo-msg" onTouchStart={onMsgTouchStart} onTouchEnd={e => onMsgTouchEnd(e, m)} className={`group flex gap-2 items-end ${mineMsg ? 'justify-end' : ''} ${first ? 'mt-3' : 'mt-0.5'} ${reacts.length ? 'mb-3' : ''}`}>
                         {!mineMsg && (first ? <UserAvatar employee={employees.find(e => e.id === m.senderId) || null} name={m.senderName} size="sm" noRing className="shrink-0" /> : <span className="w-7 shrink-0" />)}
                         <div className={`relative max-w-[78%] sm:max-w-[70%] ${mineMsg ? 'order-2' : ''}`}>
-                          <div className={`rounded-xl px-3 py-2 shadow-sm text-[14px] leading-snug break-words [overflow-wrap:anywhere] min-w-0 ${m.deleted ? 'bg-white/55 text-slate-500 italic shadow-none' : mineMsg ? 'bg-[#d6e6ff]' : 'bg-white'}`}>
+                          <div className={`rounded-xl px-3 py-2 shadow-sm text-[14px] leading-snug break-words [overflow-wrap:anywhere] min-w-0 ${m.deleted ? 'bg-white/55 text-slate-500 italic shadow-none' : mineMsg ? 'bg-[#e8efff] border border-[#bcd0ff]' : 'bg-white'}`}>
                             {group && !mineMsg && first && !m.deleted && <div className="text-[12px] text-slate-500 mb-0.5">{m.senderName}</div>}
                             {m.deleted ? 'Tin nhắn đã được thu hồi' : (<>
-                              {m.replyTo && <div className="border-l-[3px] border-blue-500 bg-slate-500/10 rounded-md px-2.5 py-1.5 mb-1.5 text-[12.5px]"><b className="block font-semibold">{m.replyTo.senderName}</b><span className="text-slate-600 line-clamp-2">{m.replyTo.content}</span></div>}
+                              {m.replyTo && <div className="border-l-[3px] border-[#0d47c9] bg-slate-500/10 rounded-md px-2.5 py-1.5 mb-1.5 text-[12.5px]"><b className="block font-semibold">{m.replyTo.senderName}</b><span className="text-slate-600 line-clamp-2">{m.replyTo.content}</span></div>}
                               {(m.attachments || []).filter(a => a.type !== 'file' && (a.mimeType || 'image/').startsWith('image/')).map(a => <button key={a.id} type="button" onClick={() => setExpanded(a.url)} className="block mb-1 cursor-pointer"><img src={a.url} alt={a.name} className="max-w-[240px] max-h-[200px] rounded-lg object-cover" /></button>)}
                               {(m.attachments || []).filter(a => a.type === 'file' || !(a.mimeType || 'image/').startsWith('image/')).map(a => <a key={a.id} href={a.url} download={a.name} className="flex items-center gap-2 bg-slate-100 rounded-lg px-2.5 py-1.5 mb-1 text-[12.5px]"><Paperclip className="w-4 h-4 text-slate-500" /><span className="truncate max-w-[200px]">{a.name}</span><small className="text-slate-500">{fmtSize(a.size)}</small></a>)}
                               {m.content && !(m.attachments?.length && m.content.startsWith('📎')) && <div>{renderContent(m.content)}</div>}
@@ -882,7 +882,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
                           return <WorkCardView card={m.relatedEntity!.card!} entry={workEntries.find(e => e.key === m.relatedEntity!.card!.key)} onOpen={m.relatedEntity!.type === 'task' ? () => onOpenWorkTask?.(m.relatedEntity!.id) : undefined}
                             task={liveTask} employees={employees} onAddMission={liveTask && onUpdateTask && canAddMission(liveTask) ? (v) => addMissionFromCard(liveTask, v) : undefined} />;
                         })()}
-                              {m.relatedEntity && !m.relatedEntity.card && <button type="button" onClick={() => openRelated(m)} className="mt-1.5 text-[12px] font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1 cursor-pointer inline-flex items-center gap-1"><ClipboardList className="w-3.5 h-3.5" />Mở chi tiết</button>}
+                              {m.relatedEntity && !m.relatedEntity.card && <button type="button" onClick={() => openRelated(m)} className="mt-1.5 text-[12px] font-bold text-[#0d47c9] bg-[#e8efff] border border-[#bcd0ff] rounded-lg px-2.5 py-1 cursor-pointer inline-flex items-center gap-1"><ClipboardList className="w-3.5 h-3.5" />Mở chi tiết</button>}
                             </>)}
                             {(first || m.edited) && !m.deleted && <div className="text-[10.5px] text-slate-500 mt-0.5">{hhmm(m.createdAt)}{m.edited ? ' · đã chỉnh sửa' : ''}{m.pinned ? ' · 📌' : ''}</div>}
                           </div>
@@ -899,8 +899,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
                                 <div className={`absolute z-30 ${menuDown ? 'top-full mt-1' : 'bottom-full mb-1'} ${mineMsg ? 'right-0' : 'left-0'} bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-56`} role="menu" data-testid="zalo-msgmenu">
                                   <div className="flex justify-around px-2 py-1.5 border-b border-slate-100">{QUICK_EMOJIS.map(e => <button key={e} type="button" onClick={() => react(m, e)} className="text-lg hover:scale-125 transition cursor-pointer" aria-label={`Thả ${e}`}>{e}</button>)}</div>
                                   <button type="button" role="menuitem" onClick={() => pinMsg(m)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Pin className="w-4 h-4" />{m.pinned ? 'Bỏ ghim tin nhắn' : 'Ghim tin nhắn'}</button>
-                                  {onCreateTask && canCreateTaskHere && m.content && !m.relatedEntity?.card && <button type="button" role="menuitem" onClick={() => { setCreateFrom(m); setMenuFor(null); }} data-testid="zalo-menu-createtask" className="w-full text-left px-3 py-1.5 text-[13px] bg-blue-50 text-blue-800 font-bold hover:bg-blue-100 flex items-center gap-2 cursor-pointer"><ClipboardList className="w-4 h-4" />Tạo công việc từ tin nhắn</button>}
-                                  {workEntries.length > 0 && <button type="button" role="menuitem" onClick={() => { setSendWorkOpen(true); setMenuFor(null); }} data-testid="zalo-menu-sendwork" className="w-full text-left px-3 py-1.5 text-[13px] bg-blue-50 text-blue-800 font-bold hover:bg-blue-100 flex items-center gap-2 cursor-pointer"><Paperclip className="w-4 h-4" />Gửi việc vào hội thoại</button>}
+                                  {onCreateTask && canCreateTaskHere && m.content && !m.relatedEntity?.card && <button type="button" role="menuitem" onClick={() => { setCreateFrom(m); setMenuFor(null); }} data-testid="zalo-menu-createtask" className="w-full text-left px-3 py-1.5 text-[13px] bg-[#e8efff] text-[#0d47c9] font-bold hover:bg-[#d6e2ff] flex items-center gap-2 cursor-pointer"><ClipboardList className="w-4 h-4" />Tạo công việc từ tin nhắn</button>}
+                                  {workEntries.length > 0 && <button type="button" role="menuitem" onClick={() => { setSendWorkOpen(true); setMenuFor(null); }} data-testid="zalo-menu-sendwork" className="w-full text-left px-3 py-1.5 text-[13px] bg-[#e8efff] text-[#0d47c9] font-bold hover:bg-[#d6e2ff] flex items-center gap-2 cursor-pointer"><Paperclip className="w-4 h-4" />Gửi việc vào hội thoại</button>}
                                   <button type="button" role="menuitem" onClick={() => copyMsg(m)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Copy className="w-4 h-4" />Sao chép</button>
                                   {mineMsg && !m.attachments?.length && <button type="button" role="menuitem" onClick={() => { setEditing({ id: m.id, text: m.content }); setText(m.content); setMenuFor(null); }} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Edit3 className="w-4 h-4" />Chỉnh sửa</button>}
                                   {mineMsg && <button type="button" role="menuitem" onClick={() => recall(m)} className="w-full text-left px-3 py-1.5 text-[13px] text-rose-600 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"><Trash2 className="w-4 h-4" />Thu hồi</button>}
@@ -915,7 +915,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
             </div>
             {showJump && (
               <button type="button" onClick={jumpToBottom} aria-label="Xuống tin mới nhất" title="Xuống tin mới nhất" data-testid="zalo-jump-bottom"
-                className="absolute right-3 bottom-3 w-11 h-11 rounded-full bg-white shadow-lg border border-slate-200 grid place-items-center text-slate-600 hover:text-blue-600 cursor-pointer z-10">
+                className="absolute right-3 bottom-3 w-11 h-11 rounded-full bg-white shadow-lg border border-slate-200 grid place-items-center text-slate-600 hover:text-[#0d47c9] cursor-pointer z-10">
                 <ChevronsDown className="w-6 h-6" />
                 {newWhileUp > 0 && <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-[11px] font-bold grid place-items-center" style={{ color: '#ffffff' }} data-testid="zalo-jump-count">{newWhileUp > 99 ? '99+' : newWhileUp}</span>}
               </button>)}
@@ -923,12 +923,12 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
 
             <footer className="bg-white border-t border-slate-200 relative" data-testid="zalo-composer" onDragOver={e => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }} onDrop={onDropComposer}>
               {(replyTo || editing) && (
-                <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 border-b border-slate-100 text-[12.5px]"><span className="border-l-[3px] border-blue-500 pl-2 min-w-0 flex-1">{editing ? <b>Đang chỉnh sửa tin nhắn</b> : <><b>Trả lời {replyTo!.senderName}</b><span className="block truncate text-slate-500">{replyTo!.content}</span></>}</span><button type="button" onClick={() => { setReplyTo(null); setEditing(null); setText(''); }} aria-label="Hủy" className="cursor-pointer"><X className="w-4 h-4" /></button></div>)}
+                <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-50 border-b border-slate-100 text-[12.5px]"><span className="border-l-[3px] border-[#0d47c9] pl-2 min-w-0 flex-1">{editing ? <b>Đang chỉnh sửa tin nhắn</b> : <><b>Trả lời {replyTo!.senderName}</b><span className="block truncate text-slate-500">{replyTo!.content}</span></>}</span><button type="button" onClick={() => { setReplyTo(null); setEditing(null); setText(''); }} aria-label="Hủy" className="cursor-pointer"><X className="w-4 h-4" /></button></div>)}
               {(attachments.length > 0 || uploading > 0) && (
                 <div className="px-4 py-2" data-testid="zalo-pending">
                   {attachments.some(a => a.type === 'image') && <div className="text-[11.5px] font-semibold text-slate-600 mb-1">{attachments.filter(a => a.type === 'image').length} ảnh</div>}
                   <div className="flex gap-2 overflow-x-auto items-center">
-                    {uploading > 0 && <span className="shrink-0 bg-blue-50 text-blue-700 rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5" data-testid="zalo-uploading"><MiniLoader size={14} />Đang tải lên…</span>}
+                    {uploading > 0 && <span className="shrink-0 bg-[#e8efff] text-[#0d47c9] rounded-lg px-2.5 py-1.5 text-[12px] flex items-center gap-1.5" data-testid="zalo-uploading"><MiniLoader size={14} />Đang tải lên…</span>}
                     {attachments.map(a => a.type === 'image'
                       // Ảnh: hiện ảnh nhỏ; bấm vào để sửa (cắt/vẽ/làm mờ) nếu còn bản gốc cục bộ
                       ? <span key={a.id} className="relative shrink-0" data-testid="zalo-thumb">
@@ -969,7 +969,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
                 <input value={text} onChange={e => onTextChange(e.target.value)} onPaste={onPasteComposer} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) { e.preventDefault(); send(); } }}   /* đang ghép chữ tiếng Việt thì Enter chỉ chốt chữ, chưa gửi */
                   placeholder={`Nhập @, tin nhắn tới ${selected ? convName(selected) : pendingEmp?.name || ''}`} aria-label="Nhập tin nhắn" className="chat-plain-input flex-1 outline-none text-[14px] py-1.5" />
                 {text.trim() || attachments.length || uploading > 0 || editing
-                  ? <button type="button" onClick={() => send()} disabled={sending || uploading > 0} aria-label="Gửi" className="p-2 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer disabled:opacity-50"><Send className="w-5 h-5" /></button>
+                  ? <button type="button" onClick={() => send()} disabled={sending || uploading > 0} aria-label="Gửi" className="p-2 rounded-lg text-[#0d47c9] hover:bg-[#e8efff] cursor-pointer disabled:opacity-50"><Send className="w-5 h-5" /></button>
                   : <button type="button" onClick={() => send('👍')} aria-label="Gửi 👍" className="p-2 rounded-lg text-amber-500 hover:bg-amber-50 cursor-pointer"><ThumbsUp className="w-5 h-5" /></button>}
               </div>
             </footer>
@@ -997,7 +997,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
           <div className="bg-white rounded-2xl w-full max-w-sm max-h-[85%] flex flex-col"><div className="flex items-center justify-between px-4 py-3 border-b"><b>Tạo nhóm trò chuyện</b><button type="button" onClick={() => setGroupOpen(false)} aria-label="Đóng"><X className="w-5 h-5" /></button></div>
             <div className="p-3"><input value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="Tên nhóm" aria-label="Tên nhóm" className="w-full bg-slate-100 rounded-lg px-3 py-2 text-[13px] outline-none" /></div>
             <div className="overflow-y-auto flex-1">{employees.filter(e => e.id !== me && e.hasSystemAccount).map(e => <label key={e.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 cursor-pointer"><input type="checkbox" checked={groupMembers.includes(e.id)} onChange={() => setGroupMembers(toggleIn(groupMembers, e.id))} /><UserAvatar employee={e} size="sm" noRing /><span className="text-[13.5px]">{e.name}</span></label>)}</div>
-            <div className="p-3 border-t flex justify-end gap-2"><button type="button" onClick={() => setGroupOpen(false)} className="px-4 py-2 rounded-lg bg-slate-100 text-[13px] font-semibold cursor-pointer">Hủy</button><button type="button" onClick={createGroup} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-[13px] font-bold cursor-pointer">Tạo nhóm ({groupMembers.length})</button></div></div></div>)}
+            <div className="p-3 border-t flex justify-end gap-2"><button type="button" onClick={() => setGroupOpen(false)} className="px-4 py-2 rounded-lg bg-slate-100 text-[13px] font-semibold cursor-pointer">Hủy</button><button type="button" onClick={createGroup} className="px-4 py-2 rounded-lg bg-[#0d47c9] text-white text-[13px] font-bold cursor-pointer">Tạo nhóm ({groupMembers.length})</button></div></div></div>)}
       {addMemberOpen && selected && (
         <div className="absolute inset-0 z-50 bg-black/40 grid place-items-center p-4" role="dialog" aria-label="Thêm thành viên">
           <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80%] flex flex-col"><div className="flex items-center justify-between px-4 py-3 border-b"><b>Thêm thành viên</b><button type="button" onClick={() => setAddMemberOpen(false)} aria-label="Đóng"><X className="w-5 h-5" /></button></div>
@@ -1005,9 +1005,9 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
       {forwardMsg && (
         <div className="absolute inset-0 z-50 bg-black/40 grid place-items-center p-4" role="dialog" aria-label="Chuyển tiếp tin nhắn" data-testid="zalo-forward">
           <div className="bg-white rounded-2xl w-full max-w-sm max-h-[85%] flex flex-col"><div className="flex items-center justify-between px-4 py-3 border-b"><b>Chuyển tiếp tin nhắn</b><button type="button" onClick={() => setForwardMsg(null)} aria-label="Đóng"><X className="w-5 h-5" /></button></div>
-            <div className="mx-3 mt-3 border-l-[3px] border-blue-500 bg-slate-50 rounded-md px-3 py-1.5 text-[12.5px] text-slate-600 line-clamp-2">{forwardMsg.content}</div>
+            <div className="mx-3 mt-3 border-l-[3px] border-[#0d47c9] bg-slate-50 rounded-md px-3 py-1.5 text-[12.5px] text-slate-600 line-clamp-2">{forwardMsg.content}</div>
             <div className="overflow-y-auto flex-1 py-1">{sortConversations(mine, prefs).map(c => <label key={c.id} className="flex items-center gap-3 px-4 py-2 hover:bg-slate-50 cursor-pointer"><input type="checkbox" checked={fwdTargets.includes(c.id)} onChange={() => setFwdTargets(toggleIn(fwdTargets, c.id))} data-testid="zalo-fwd-target" /><ConvAvatar conv={c} employees={employees} me={me} size={32} /><span className="text-[13.5px] truncate">{convName(c)}</span></label>)}</div>
-            <div className="p-3 border-t flex justify-end gap-2"><button type="button" onClick={() => setForwardMsg(null)} className="px-4 py-2 rounded-lg bg-slate-100 text-[13px] font-semibold cursor-pointer">Hủy</button><button type="button" onClick={doForward} disabled={fwdTargets.length === 0} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-[13px] font-bold disabled:opacity-40 cursor-pointer">Gửi ({fwdTargets.length})</button></div></div></div>)}
+            <div className="p-3 border-t flex justify-end gap-2"><button type="button" onClick={() => setForwardMsg(null)} className="px-4 py-2 rounded-lg bg-slate-100 text-[13px] font-semibold cursor-pointer">Hủy</button><button type="button" onClick={doForward} disabled={fwdTargets.length === 0} className="px-4 py-2 rounded-lg bg-[#0d47c9] text-white text-[13px] font-bold disabled:opacity-40 cursor-pointer">Gửi ({fwdTargets.length})</button></div></div></div>)}
       {shot && <ChatImageEditor file={shot} variant="snip" initialTool="crop" onCancel={() => setShot(null)} onDone={f => { setShot(null); addFiles([f], 'image', true); }} />}
       {imgEdit && <ChatImageEditor file={imgEdit.file} onCancel={() => setImgEdit(null)} onDone={f => applyEditedImage(imgEdit.id, f)} />}
       {expanded && <div className="absolute inset-0 z-[60] bg-black/80 grid place-items-center p-4" onClick={() => setExpanded(null)} role="dialog" aria-label="Xem ảnh"><img src={expanded} alt="" className="max-w-full max-h-full rounded-lg" /></div>}

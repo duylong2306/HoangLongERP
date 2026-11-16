@@ -33,7 +33,7 @@ function Ring({ pct }: { pct: number }) {
 }
 
 const btnCls = (tone: string) => tone === 'ok' ? 'bg-emerald-600 text-white hover:bg-emerald-500' : tone === 'no' ? 'bg-white text-rose-600 border border-rose-200 hover:bg-rose-50'
-  : tone === 'plain' ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-blue-600 text-white hover:bg-blue-500';
+  : tone === 'plain' ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-[#0d47c9] text-white hover:bg-[#0a3aa8]';
 
 // ─── Danh sách (cột trái) ───
 export function WorkList({ entries, selectedKey, onSelect, unreadKeys, today, query }: {
@@ -49,10 +49,10 @@ export function WorkList({ entries, selectedKey, onSelect, unreadKeys, today, qu
         const rows = bySection(s); if (rows.length === 0) return null;
         return (
           <div key={s} data-testid={`work-section-${s}`}>
-            <div className="px-3.5 pt-2.5 pb-1 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5">{SECTION_LABEL[s]}<span className="bg-slate-200/70 rounded-full px-1.5 text-[10.5px]">{rows.length}</span></div>
+            <div className="px-3.5 pt-2.5 pb-1 text-[11px] font-extrabold text-slate-500 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5">{SECTION_LABEL[s]}<span className="bg-slate-200/70 rounded-full px-1.5 text-[10.5px]">{rows.length}</span></div>
             {rows.map(e => (
               <button key={e.key} type="button" data-testid="work-row" data-work={e.key} onClick={() => onSelect(e.key)}
-                className={`w-full text-left grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 items-center cursor-pointer ${selectedKey === e.key ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+                className={`w-full text-left grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 items-center cursor-pointer ${selectedKey === e.key ? 'bg-[#e8efff]' : 'hover:bg-slate-50'}`}>
                 <span className={`w-12 h-12 rounded-2xl grid place-items-center px-0.5 text-[9.5px] font-black text-center leading-[1.1] break-words ${TONE[e.chipTone] || TONE.slate}`}>{e.chip}</span>
                 <span className="min-w-0">
                   <span className="flex items-center gap-2"><b className="text-[14px] font-semibold truncate" title={e.title}>{e.title}</b>{unreadKeys.has(e.key) && <i className="ml-auto w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" data-testid="work-unread" aria-label="Có thảo luận mới" />}</span>
@@ -114,7 +114,7 @@ export function WorkDetail({ entry, me, meName, employees, today, onBack }: {
         <div className="flex items-start gap-3">
           <button type="button" onClick={onBack} className="lg:hidden p-1 -ml-1 mt-0.5 text-slate-700 cursor-pointer" aria-label="Quay lại danh sách"><ChevronLeft className="w-6 h-6" /></button>
           <div className="min-w-0 flex-1">
-            <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded tracking-wide ${TONE[entry.chipTone] || TONE.slate}`}>{entry.chip}</span>
+            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${TONE[entry.chipTone] || TONE.slate}`}>{entry.chip}</span>
             <h2 className="text-[17px] font-extrabold tracking-tight mt-1 leading-snug" data-testid="work-title">{entry.title}</h2>
             <div className="text-[12.5px] text-slate-500 flex items-center gap-2 flex-wrap mt-0.5">{entry.meta}<DueChip due={entry.due} today={today} /></div>
           </div>
@@ -124,7 +124,7 @@ export function WorkDetail({ entry, me, meName, employees, today, onBack }: {
           {entry.actions.map(a => <button key={a.label} type="button" onClick={a.onClick} className={`px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold cursor-pointer ${btnCls(a.tone)}`}>{a.label}</button>)}
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto min-h-0 px-3 sm:px-5 py-3 bg-gradient-to-br from-[#dbe3d3] via-[#c9d6df] to-[#d5d9ea]" data-testid="work-thread">
+      <div className="flex-1 overflow-y-auto min-h-0 px-3 sm:px-5 py-3 bg-[#f3f6fc]" data-testid="work-thread">
         <p className="text-center text-[11.5px] text-slate-600 mb-2 inline-flex w-full justify-center items-center gap-1"><MessageSquare className="w-3.5 h-3.5" />Thảo luận về mục này{names.length > 0 ? ` · ${names.join(', ')}` : ''}</p>
         {msgs.length === 0 && <p className="text-center text-[12.5px] text-slate-600 bg-white/60 rounded-xl py-3 px-4 mx-auto max-w-sm" data-testid="work-thread-empty">Chưa có trao đổi nào. Nhắn để hỏi nhanh hoặc báo tiến độ — chỉ những người liên quan đến mục này thấy.</p>}
         {msgs.filter(m => !m.deleted).map(m => {
@@ -134,7 +134,7 @@ export function WorkDetail({ entry, me, meName, employees, today, onBack }: {
               {!mine && <UserAvatar employee={emp(m.senderId)} name={m.senderName} size="sm" noRing />}
               <div className="max-w-[78%]">
                 {!mine && <div className="text-[11.5px] text-slate-600 ml-1 mb-0.5">{m.senderName}</div>}
-                <div className={`rounded-xl px-3 py-2 text-[13.5px] shadow-sm whitespace-pre-wrap break-words ${mine ? 'bg-[#d6e6ff]' : 'bg-white'}`}>{m.content}<div className="text-[10.5px] text-slate-500 mt-0.5">{hhmm(m.createdAt)}</div></div>
+                <div className={`rounded-xl px-3 py-2 text-[13.5px] shadow-sm whitespace-pre-wrap break-words ${mine ? 'bg-[#e8efff]' : 'bg-white'}`}>{m.content}<div className="text-[10.5px] text-slate-500 mt-0.5">{hhmm(m.createdAt)}</div></div>
               </div>
             </div>
           );
@@ -144,7 +144,7 @@ export function WorkDetail({ entry, me, meName, employees, today, onBack }: {
       <footer className="bg-white border-t border-slate-200 flex items-center gap-2 px-3 py-2.5" data-testid="work-composer">
         <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) { e.preventDefault(); send(); } }}
           placeholder="Trao đổi về mục này…" aria-label="Nhập tin nhắn thảo luận" className="chat-plain-input flex-1 outline-none text-[14px] px-2 py-2" data-testid="work-input" />
-        <button type="button" onClick={send} disabled={!text.trim() || sending} aria-label="Gửi" className="p-2 rounded-lg text-blue-600 disabled:text-slate-300 cursor-pointer" data-testid="work-send"><Send className="w-5 h-5" /></button>
+        <button type="button" onClick={send} disabled={!text.trim() || sending} aria-label="Gửi" className="p-2 rounded-lg text-[#0d47c9] disabled:text-slate-300 cursor-pointer" data-testid="work-send"><Send className="w-5 h-5" /></button>
       </footer>
     </div>
   );
