@@ -20,7 +20,7 @@ vi.mock('../../lib/chatStore', () => ({
 // Thẻ "Hôm nay" trong khung thông tin: không gọi máy chủ thật trong test
 vi.mock('../../lib/projectEvents', async (orig) => ({ ...(await orig<typeof import('../../lib/projectEvents')>()), loadTodayProjectEvents: vi.fn(async () => []) }));
 const addToast = vi.fn();
-vi.mock('../../context', () => ({ useNotification: () => ({ addToast }), isRoleAdmin: () => false }));
+vi.mock('../../context', async (orig) => ({ ...(await orig<typeof import('../../context')>()), useNotification: () => ({ addToast }), isRoleAdmin: () => false, isUserInRoleGroup: () => false }));
 const cap = vi.hoisted(() => ({ page: vi.fn(), display: vi.fn(), can: { v: true } }));
 vi.mock('../../lib/screenCapture', () => ({ capturePage: cap.page, captureDisplay: cap.display, canCaptureDisplay: () => cap.can.v }));
 import MessagesZalo from '../MessagesZalo';

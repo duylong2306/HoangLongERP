@@ -22,7 +22,10 @@ vi.mock('../../lib/projectEventReads', () => ({
   projectIdOfConversation: (c: any) => c.taskId ? undefined : (c.projectId || (String(c.id).startsWith('conv_project_') ? String(c.id).slice(13) : undefined)),
 }));
 vi.mock('../ProjectActivityModal', () => ({ default: (p: any) => <div data-testid="activity-stub" data-pid={p.projectId} data-export={p.onExport ? '1' : '0'} onClick={p.onClose} /> }));
-vi.mock('../../context', () => ({ useNotification: () => ({ addToast: vi.fn() }), isRoleAdmin: () => false, isUserInRoleGroup: () => false }));
+vi.mock('../../context', async (orig) => ({ ...(await orig<typeof import('../../context')>()), useNotification: () => ({ addToast: vi.fn() }), isRoleAdmin: () => false, isUserInRoleGroup: () => false }));
+// Quyền "Tạo công việc" (Quyền Dự Án) — điều khiển được để thử cả hai trường hợp
+const perm = vi.hoisted(() => ({ allow: true }));
+vi.mock('../hr/hrProjectPermissions', async (orig) => ({ ...(await orig<typeof import('../hr/hrProjectPermissions')>()), can: () => perm.allow }));
 import MessagesZalo from '../MessagesZalo';
 import { stopPresence } from '../../lib/presence';
 import { todayYmd } from '../../lib/myWork';
@@ -247,6 +250,44 @@ describe('Nhiệm vụ trong thẻ công việc (khung chat)', () => {
     fireEvent.click(screen.getByTestId('work-create-submit'));
     await waitFor(() => expect(createTask).toHaveBeenCalled());
     expect((createTask.mock.calls[0] as any[])[0]).toMatchObject({ priority: 'high', notes: 'Gửi trước 5 giờ chiều' });
+  });
+});
+
+describe('Tạo công việc từ tin nhắn — theo dự án & Quyền Dự Án', () => {
+  const PROJ = [{ id: 'P1', name: 'CĂN TIN', kanbanColumnId: 'col_thicong' }];
+  const setupGroup = () => {
+    // Nhóm chat công trình CŨ: chỉ có mã dạng conv_project_<mã>, KHÔNG có trường projectId
+    store.convs.push({ id: 'conv_project_P1', type: 'group', name: '📁 CĂN TIN', participantIds: ['me', 'ny'], createdAt: '2026-10-01T00:00:00Z', unreadCount: 0 });
+    store.msgs.conv_project_P1 = [{ id: 'g1', conversationId: 'conv_project_P1', senderId: 'ny', senderName: 'Gia Ny', content: 'Cần lắp thêm ổ điện', createdAt: new Date().toISOString(), read: true }];
+  };
+  beforeEach(() => { perm.allow = true; });
+
+  it('nhóm chat dự án: dự án mặc định = dự án của nhóm (kể cả nhóm cũ không có trường projectId); việc tạo ra thuộc đúng dự án + giai đoạn hiện tại', async () => {
+    setupGroup(); mount({ projects: PROJ });
+    fireEvent.click(document.querySelector('[data-conv="conv_project_P1"]') as HTMLElement);
+    fireEvent.click(await screen.findByTitle('Thêm'));
+    fireEvent.click(screen.getByTestId('zalo-menu-createtask'));
+    const sel = within(screen.getByTestId('work-create-dialog')).getAllByRole('combobox')[1] as HTMLSelectElement;   // ô "Dự án" (sau ô Giao cho)
+    expect(sel.value).toBe('P1');
+    fireEvent.click(screen.getByTestId('work-create-submit'));
+    await waitFor(() => expect(createTask).toHaveBeenCalled());
+    expect((createTask.mock.calls[0] as any[])[0]).toMatchObject({ projectId: 'P1', columnId: 'col_thicong' });
+  });
+  it('không có quyền "Tạo công việc" ở dự án của nhóm → mục "Tạo công việc" bị ẩn khỏi menu tin nhắn', async () => {
+    perm.allow = false; setupGroup(); mount({ projects: PROJ });
+    fireEvent.click(document.querySelector('[data-conv="conv_project_P1"]') as HTMLElement);
+    fireEvent.click(await screen.findByTitle('Thêm'));
+    expect(screen.queryByTestId('zalo-menu-createtask')).toBeNull();
+  });
+  it('hội thoại thường: hộp chỉ liệt kê dự án mình CÓ quyền tạo việc (không quyền → chỉ còn "Nhiệm vụ nội bộ")', async () => {
+    perm.allow = false;
+    store.msgs.p_ny = [{ id: 'm9', conversationId: 'p_ny', senderId: 'ny', senderName: 'Gia Ny', content: 'Nhờ anh kiểm tra', createdAt: new Date().toISOString(), read: true }];
+    mount({ projects: PROJ });
+    fireEvent.click(document.querySelector('[data-conv="p_ny"]') as HTMLElement);
+    fireEvent.click(await screen.findByTitle('Thêm'));
+    fireEvent.click(screen.getByTestId('zalo-menu-createtask'));
+    const sel = within(screen.getByTestId('work-create-dialog')).getAllByRole('combobox')[1] as HTMLSelectElement;
+    expect(Array.from(sel.options).map(o => o.value)).toEqual(['']);
   });
 });
 

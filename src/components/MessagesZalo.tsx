@@ -29,6 +29,7 @@ import ConvAvatar, { isAvatarImage } from './ConvAvatar';
 import { WorkList, WorkDetail } from './MessagesWork';
 import { WorkCardView, SendWorkDialog, CreateTaskDialog, cardOfEntry, type NewTaskInput, type NewMissionInput } from './MessagesWorkCards';
 import { canDoTaskAction, loadTaskPermissionMatrix } from './hr/hrTaskPermissions';
+import { can as canProjectAction, loadProjectPermissions } from './hr/hrProjectPermissions';
 import type { InboxItem } from './MyWorkOverview';
 import { buildWorkEntries } from '../lib/workEntries';
 import { workThreadId, isWorkThreadId } from '../lib/workThread';
@@ -65,7 +66,7 @@ interface Props {
   onOpenProject?: (projectId: string) => void;
   /** "Xuất Excel" trong Nhật ký dự án — App dựng file đầy đủ thông tin dự án; chỉ hiện cho người được xem dự án (canOpenProject) vì file có giá trị hợp đồng, khách hàng */
   onExportProjectLog?: (projectId: string) => void | Promise<void>;
-  projects?: { id: string; name: string; pmId?: string }[];
+  projects?: { id: string; name: string; pmId?: string; kanbanColumnId?: string }[];
 }
 
 const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
@@ -445,11 +446,18 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
   /** "Tạo công việc từ tin nhắn": tạo công việc thật, rồi gửi thẻ việc vào hội thoại (và nhắn riêng người nhận nếu họ không ở trong hội thoại này). */
   const createTaskFromMessage = async (v: NewTaskInput) => {
     if (!onCreateTask) return;
+    // Chốt quyền lần nữa lúc tạo (hộp thoại đã lọc dự án, đây là lớp bảo vệ cuối)
+    if (v.projectId && !canCreateTaskIn(v.projectId)) {
+      addToast({ title: '⛔ Không có quyền', message: 'Tài khoản của bạn không có quyền TẠO công việc trong dự án này.', type: 'error' });
+      return;
+    }
     setCreateFrom(null);
     const conv = await ensureConv(); if (!conv) return;
     const n = tasks.length + 1;
     const task: Task = {
-      id: `task_${Date.now()}`, code: `CV-${n < 10 ? `00${n}` : n < 100 ? `0${n}` : n}`, projectId: v.projectId, name: v.name,
+      id: `task_${Date.now()}`, code: `CV-${n < 10 ? `00${n}` : n < 100 ? `0${n}` : n}`, projectId: v.projectId,
+      // Công việc thuộc dự án → xếp vào đúng giai đoạn (cột Kanban) hiện tại của dự án, như khi tạo công việc ở màn hình dự án
+      columnId: v.projectId ? projects.find(p => p.id === v.projectId)?.kanbanColumnId : undefined, name: v.name,
       description: createFrom?.content ? `Tạo từ tin nhắn của ${createFrom.senderName}: ${createFrom.content}`.slice(0, 500) : '',
       assignerId: me, assigneeId: v.assigneeId, department: '', deadline: v.deadline, priority: v.priority || 'medium', status: 'todo', completionRate: 0,
       notes: v.note,
@@ -468,6 +476,18 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
     }
     addToast({ title: '✅ Đã tạo công việc', message: `"${task.name}" đã được giao${assignee ? ` cho ${assignee.name}` : ''}.`, type: 'success' });
   };
+
+  /** Quyền TẠO công việc trong 1 dự án — đúng quyền "Tạo công việc" (createTask) của Quyền Dự Án, như màn hình dự án. */
+  const canCreateTaskIn = (projectId: string) => {
+    const pj = projects.find(p => p.id === projectId);
+    return !!pj && canProjectAction('createTask', currentUser, pj as any, undefined, loadProjectPermissions());
+  };
+  /** Dự án của hội thoại đang mở (nhóm chat công trình có thể chỉ có mã dạng conv_project_<mã> mà không có trường projectId). */
+  const convProjectId = selected ? projectIdOfConversation(selected as any) : undefined;
+  /** Dự án được chọn trong hộp "Tạo công việc": chỉ những dự án người dùng có quyền tạo việc (còn lại không cho chọn). */
+  const creatableProjects = useMemo(() => projects.filter(p => canCreateTaskIn(p.id)), [projects, currentUser]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** Hiện mục "Tạo công việc" trong menu tin nhắn: nhóm chat dự án → phải có quyền tạo việc ở CHÍNH dự án đó; hội thoại khác → như trước (việc nội bộ). */
+  const canCreateTaskHere = !convProjectId || canCreateTaskIn(convProjectId);
 
   /** "Thêm nhiệm vụ" ngay trên thẻ công việc trong chat: tạo nhiệm vụ THẬT (Task.missions) rồi báo vào hội thoại + nhắn riêng người phụ trách nếu họ chưa ở trong hội thoại. */
   const addMissionFromCard = async (task: Task, v: NewMissionInput): Promise<boolean> => {
@@ -879,7 +899,7 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
                                 <div className={`absolute z-30 ${menuDown ? 'top-full mt-1' : 'bottom-full mb-1'} ${mineMsg ? 'right-0' : 'left-0'} bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-56`} role="menu" data-testid="zalo-msgmenu">
                                   <div className="flex justify-around px-2 py-1.5 border-b border-slate-100">{QUICK_EMOJIS.map(e => <button key={e} type="button" onClick={() => react(m, e)} className="text-lg hover:scale-125 transition cursor-pointer" aria-label={`Thả ${e}`}>{e}</button>)}</div>
                                   <button type="button" role="menuitem" onClick={() => pinMsg(m)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Pin className="w-4 h-4" />{m.pinned ? 'Bỏ ghim tin nhắn' : 'Ghim tin nhắn'}</button>
-                                  {onCreateTask && m.content && !m.relatedEntity?.card && <button type="button" role="menuitem" onClick={() => { setCreateFrom(m); setMenuFor(null); }} data-testid="zalo-menu-createtask" className="w-full text-left px-3 py-1.5 text-[13px] bg-blue-50 text-blue-800 font-bold hover:bg-blue-100 flex items-center gap-2 cursor-pointer"><ClipboardList className="w-4 h-4" />Tạo công việc từ tin nhắn</button>}
+                                  {onCreateTask && canCreateTaskHere && m.content && !m.relatedEntity?.card && <button type="button" role="menuitem" onClick={() => { setCreateFrom(m); setMenuFor(null); }} data-testid="zalo-menu-createtask" className="w-full text-left px-3 py-1.5 text-[13px] bg-blue-50 text-blue-800 font-bold hover:bg-blue-100 flex items-center gap-2 cursor-pointer"><ClipboardList className="w-4 h-4" />Tạo công việc từ tin nhắn</button>}
                                   {workEntries.length > 0 && <button type="button" role="menuitem" onClick={() => { setSendWorkOpen(true); setMenuFor(null); }} data-testid="zalo-menu-sendwork" className="w-full text-left px-3 py-1.5 text-[13px] bg-blue-50 text-blue-800 font-bold hover:bg-blue-100 flex items-center gap-2 cursor-pointer"><Paperclip className="w-4 h-4" />Gửi việc vào hội thoại</button>}
                                   <button type="button" role="menuitem" onClick={() => copyMsg(m)} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Copy className="w-4 h-4" />Sao chép</button>
                                   {mineMsg && !m.attachments?.length && <button type="button" role="menuitem" onClick={() => { setEditing({ id: m.id, text: m.content }); setText(m.content); setMenuFor(null); }} className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-slate-50 flex items-center gap-2 cursor-pointer"><Edit3 className="w-4 h-4" />Chỉnh sửa</button>}
@@ -962,8 +982,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
       {leftMode === 'chat' && !isDesktop && infoOpen && selected && showChat && <div className="absolute inset-0 z-40 bg-white overflow-y-auto" data-testid="zalo-info-mobile">{infoPanel}</div>}
 
       {sendWorkOpen && <SendWorkDialog entries={workEntries} onPick={sendWorkCard} onClose={() => setSendWorkOpen(false)} />}
-      {createFrom && <CreateTaskDialog initialName={createFrom.content} employees={employees} me={me} projects={projects}
-        defaultAssigneeId={selected?.type === 'personal' ? selected.participantIds.find(i => i !== me) : undefined} defaultProjectId={selected?.projectId}
+      {createFrom && <CreateTaskDialog initialName={createFrom.content} employees={employees} me={me} projects={creatableProjects}
+        defaultAssigneeId={selected?.type === 'personal' ? selected.participantIds.find(i => i !== me) : undefined} defaultProjectId={convProjectId && creatableProjects.some(p => p.id === convProjectId) ? convProjectId : undefined}
         onCreate={createTaskFromMessage} onClose={() => setCreateFrom(null)} />}
 
       {/* ── Hộp thoại ── */}
