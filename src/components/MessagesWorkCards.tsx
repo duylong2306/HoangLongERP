@@ -140,14 +140,14 @@ export function SendWorkDialog({ entries, onPick, onClose }: { entries: WorkEntr
   const [q, setQ] = useState('');
   const shown = useMemo(() => entries.filter(e => !q.trim() || `${e.title} ${e.meta}`.toLowerCase().includes(q.trim().toLowerCase())), [entries, q]);
   return (
-    <div className="absolute inset-0 z-50 bg-black/40 grid place-items-center p-4" role="dialog" aria-label="Gửi việc vào hội thoại" data-testid="work-send-dialog">
-      <div className="bg-white rounded-2xl w-full max-w-md max-h-[80%] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200"><b className="text-[15px]">Gửi việc vào hội thoại</b><button type="button" onClick={onClose} aria-label="Đóng" className="cursor-pointer"><X className="w-5 h-5" /></button></div>
-        <label className="flex items-center gap-2 bg-slate-100 rounded-lg mx-3 mt-3 px-2.5 py-2 text-[13px] text-slate-500"><Search className="w-4 h-4" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm việc, đề xuất…" className="bg-transparent outline-none w-full text-slate-900" /></label>
+    <div className="absolute inset-0 z-50 bg-black/50 grid place-items-center p-4" role="dialog" aria-label="Gửi việc vào hội thoại" data-testid="work-send-dialog">
+      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md max-h-[80%] flex flex-col shadow-xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200"><b className="font-extrabold text-[14px] text-slate-800">Gửi việc vào hội thoại</b><button type="button" onClick={onClose} aria-label="Đóng" className="w-8 h-8 grid place-items-center rounded-xl text-slate-500 hover:bg-slate-100 cursor-pointer"><X className="w-5 h-5" /></button></div>
+        <label className="flex items-center gap-2 bg-white border border-slate-300 focus-within:border-[#0d47c9] rounded-xl mx-3 mt-3 px-2.5 h-9 text-[13px] text-slate-500"><Search className="w-4 h-4" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm việc, đề xuất…" className="bg-transparent outline-none w-full text-slate-900" /></label>
         <div className="overflow-y-auto flex-1 py-1 mt-1">
           {shown.length === 0 && <p className="text-center text-[13px] text-slate-500 py-8">Không có việc nào để gửi.</p>}
           {shown.map(e => (
-            <button key={e.key} type="button" data-testid="work-send-item" onClick={() => onPick(e)} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-3 cursor-pointer">
+            <button key={e.key} type="button" data-testid="work-send-item" onClick={() => onPick(e)} className="w-[calc(100%-1rem)] mx-2 text-left px-3 py-2 rounded-xl hover:bg-[#e8efff] flex items-center gap-3 cursor-pointer">
               <ClipboardList className="w-5 h-5 text-[#0d47c9] shrink-0" />
               <span className="min-w-0"><b className="block text-[13.5px] truncate">{e.title}</b><span className="block text-[12px] text-slate-500 truncate">{e.chip} · {e.meta}</span></span>
             </button>))}
@@ -174,15 +174,15 @@ export function CreateTaskDialog({ initialName, employees, me, projects, default
   const people = employees.filter(e => (e as any).hasSystemAccount !== false);
   const ok = name.trim() && assignee && deadline;
   return (
-    <div className="absolute inset-0 z-50 bg-black/40 grid place-items-center p-4" role="dialog" aria-label="Tạo công việc từ tin nhắn" data-testid="work-create-dialog">
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200"><b className="text-[15px]">Tạo công việc từ tin nhắn</b><button type="button" onClick={onClose} aria-label="Đóng" className="cursor-pointer"><X className="w-5 h-5" /></button></div>
+    <div className="absolute inset-0 z-50 bg-black/50 grid place-items-center p-4" role="dialog" aria-label="Tạo công việc từ tin nhắn" data-testid="work-create-dialog">
+      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md shadow-xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200"><b className="font-extrabold text-[14px] text-slate-800">Tạo công việc từ tin nhắn</b><button type="button" onClick={onClose} aria-label="Đóng" className="w-8 h-8 grid place-items-center rounded-xl text-slate-500 hover:bg-slate-100 cursor-pointer"><X className="w-5 h-5" /></button></div>
         <div className="p-4 space-y-3 text-[13px]">
-          <label className="block"><span className="font-bold text-slate-600">Tên công việc</span><textarea value={name} onChange={e => setName(e.target.value)} rows={2} data-testid="work-create-name" className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2 outline-none focus:border-[#0d47c9]" /></label>
-          <label className="block"><span className="font-bold text-slate-600">Giao cho</span><select value={assignee} onChange={e => setAssignee(e.target.value)} data-testid="work-create-assignee" className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white">{people.map(e => <option key={e.id} value={e.id}>{e.name}{e.id === me ? ' (tôi)' : ''}</option>)}</select></label>
+          <label className="block"><span className="font-bold text-slate-600">Tên công việc</span><textarea value={name} onChange={e => setName(e.target.value)} rows={2} data-testid="work-create-name" className="mt-1 w-full border border-slate-300 rounded-xl px-2.5 py-2 outline-none focus:border-[#0d47c9]" /></label>
+          <label className="block"><span className="font-bold text-slate-600">Giao cho</span><select value={assignee} onChange={e => setAssignee(e.target.value)} data-testid="work-create-assignee" className="mt-1 w-full border border-slate-300 rounded-xl px-2.5 h-9 bg-white">{people.map(e => <option key={e.id} value={e.id}>{e.name}{e.id === me ? ' (tôi)' : ''}</option>)}</select></label>
           <div className="grid grid-cols-2 gap-3">
-            <label className="block"><span className="font-bold text-slate-600">Hạn hoàn thành</span><input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} data-testid="work-create-deadline" className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2" /></label>
-            <label className="block"><span className="font-bold text-slate-600">Dự án</span><select value={project} onChange={e => setProject(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white"><option value="">Nhiệm vụ nội bộ</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+            <label className="block"><span className="font-bold text-slate-600">Hạn hoàn thành</span><input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} data-testid="work-create-deadline" className="mt-1 w-full border border-slate-300 rounded-xl px-2.5 h-9" /></label>
+            <label className="block"><span className="font-bold text-slate-600">Dự án</span><select value={project} onChange={e => setProject(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-xl px-2.5 h-9 bg-white"><option value="">Nhiệm vụ nội bộ</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
           </div>
           <div>
             <span className="font-bold text-slate-600">Mức ưu tiên</span>
@@ -193,11 +193,11 @@ export function CreateTaskDialog({ initialName, employees, me, projects, default
               ))}
             </div>
           </div>
-          <label className="block"><span className="font-bold text-slate-600">Ghi chú</span><input value={note} onChange={e => setNote(e.target.value)} placeholder="Yêu cầu thêm nếu có" data-testid="work-create-note" className="mt-1 w-full border border-slate-300 rounded-lg px-2.5 py-2 outline-none focus:border-[#0d47c9]" /></label>
+          <label className="block"><span className="font-bold text-slate-600">Ghi chú</span><input value={note} onChange={e => setNote(e.target.value)} placeholder="Yêu cầu thêm nếu có" data-testid="work-create-note" className="mt-1 w-full border border-slate-300 rounded-xl px-2.5 h-9 outline-none focus:border-[#0d47c9]" /></label>
         </div>
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-slate-200">
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-100 font-bold text-[13px] cursor-pointer">Hủy</button>
-          <button type="button" disabled={!ok} onClick={() => onCreate({ name: name.trim(), assigneeId: assignee, deadline, projectId: project || undefined, priority, note: note.trim() || undefined })} data-testid="work-create-submit" className="px-4 py-2 rounded-lg bg-[#0d47c9] text-white font-bold text-[13px] cursor-pointer disabled:opacity-40">Tạo & gửi vào hội thoại</button>
+          <button type="button" onClick={onClose} className="h-9 px-4 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-[13px] cursor-pointer">Hủy</button>
+          <button type="button" disabled={!ok} onClick={() => onCreate({ name: name.trim(), assigneeId: assignee, deadline, projectId: project || undefined, priority, note: note.trim() || undefined })} data-testid="work-create-submit" style={{ color: '#ffffff' }} className="h-9 px-4 rounded-xl bg-[#0d47c9] hover:bg-[#0a3aa8] font-bold text-[13px] cursor-pointer disabled:opacity-40">Tạo & gửi vào hội thoại</button>
         </div>
       </div>
     </div>
