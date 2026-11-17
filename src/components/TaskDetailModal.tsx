@@ -1585,7 +1585,7 @@ export default function TaskDetailModal({
              : 10;
   
   const progressColor = rate === 100 ? 'bg-emerald-500' 
-                      : rate >= 70 ? 'bg-sky-500' 
+                      : rate >= 70 ? 'bg-[#0d47c9]' 
                       : rate >= 30 ? 'bg-amber-500' 
                       : 'bg-rose-500';
 
@@ -1607,7 +1607,7 @@ export default function TaskDetailModal({
       {options?.onDelete && (
         <div
           onClick={(e) => { e.stopPropagation(); options.onDelete?.(); }}
-          className="absolute inset-0 bg-red-600/90 rounded-full flex items-center justify-center text-white font-extrabold text-[10px] opacity-0 group-hover/avatar:opacity-100 transition-opacity"
+          style={{ color: '#ffffff' }} className="absolute inset-0 bg-red-600/90 rounded-full flex items-center justify-center text-white font-extrabold text-[10px] opacity-0 group-hover/avatar:opacity-100 transition-opacity"
         >
           ✕
         </div>
@@ -1743,11 +1743,11 @@ export default function TaskDetailModal({
                     </div>
                   )}
                   {selectedTask.status === 'reviewing' && (
-                    <div className="bg-sky-50 border border-sky-200 text-sky-700 p-4 rounded-xl flex items-start gap-3">
-                      <MiniLoader size={20} className="text-sky-500 shrink-0 mt-0.5" />
+                    <div className="bg-[#e8efff] border border-[#bcd0ff] text-[#0d47c9] p-4 rounded-xl flex items-start gap-3">
+                      <MiniLoader size={20} className="text-[#0d47c9] shrink-0 mt-0.5" />
                       <div>
                         <span className="font-extrabold text-[12px] block text-slate-900 uppercase tracking-wider">⏳ Trạng thái chờ xét duyệt</span>
-                        <span className="text-[11.5px] text-sky-700 leading-relaxed block mt-1">
+                        <span className="text-[11.5px] text-[#0d47c9] leading-relaxed block mt-1">
                           Công việc đang được chờ phê duyệt của <strong className="text-slate-900 font-extrabold underline">{assigner?.name || 'người giao việc'}</strong>.
                         </span>
                       </div>
@@ -1773,8 +1773,8 @@ export default function TaskDetailModal({
                     <strong className="text-white font-extrabold text-[12.5px]">{selectedTask.name}</strong>
                     <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border ${
                       selectedTask.status === 'completed' ? 'bg-white text-emerald-600 border-emerald-300 shadow-sm' :
-                      selectedTask.status === 'doing' ? 'bg-white text-sky-600 border-sky-300 shadow-sm' :
-                      selectedTask.status === 'reviewing' ? 'bg-white text-indigo-600 border-indigo-300 shadow-sm' :
+                      selectedTask.status === 'doing' ? 'bg-white text-[#0d47c9] border-[#bcd0ff] shadow-sm' :
+                      selectedTask.status === 'reviewing' ? 'bg-white text-[#0d47c9] border-[#bcd0ff] shadow-sm' :
                       selectedTask.status === 'overdue' ? 'bg-white text-rose-600 border-rose-300 shadow-sm' :
                       'bg-white text-slate-500 border-slate-300 shadow-sm'
                     }`}>
@@ -1810,7 +1810,7 @@ export default function TaskDetailModal({
                             const convId = `conv_project_${project.id}`;
                             window.dispatchEvent(new CustomEvent('hl-open-conversation', { detail: { conversationId: convId } }));
                           }}
-                          className="w-full bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-bold text-[11px] py-2 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                          className="w-full bg-[#e8efff] hover:bg-[#d6e2ff] border border-[#bcd0ff] text-[#0d47c9] font-bold text-[11px] py-2 px-3 rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
                           title="Mở nhóm chat dự án"
                         >
                           <MessageSquare className="w-4 h-4" />
@@ -1951,7 +1951,7 @@ export default function TaskDetailModal({
                         // 📒 Nhật ký: đổi thầu phụ của công việc
                         notifyProjectChat(MT.nk.doiThauPhu(selectedTask.name), { type: 'task', id: selectedTask.id }, undefined, undefined, { from: selectedTask.subcontractorName || '(chưa chọn)', to: matchedName || '(bỏ chọn)' });
                       }}
-                      className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg p-2.5 w-full focus:outline-none focus:border-orange-500 cursor-pointer disabled:cursor-not-allowed"
+                      className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 w-full focus:outline-none focus:border-orange-500 cursor-pointer disabled:cursor-not-allowed"
                     >
                       <option value="">-- Click để chọn Thầu Phụ --</option>
                       {subcontractors.map((s: any) => (
@@ -1989,7 +1989,7 @@ export default function TaskDetailModal({
                           </div>
                           <div>
                             <span className="text-slate-500 block text-[9px] uppercase tracking-wider">Số điện thoại liên hệ</span>
-                            <a href={`tel:${activeSup.phone}`} className="text-teal-400 hover:underline text-[11px] font-bold">{activeSup.phone}</a>
+                            <a href={`tel:${activeSup.phone}`} className="text-[#0d47c9] hover:underline text-[11px] font-bold">{activeSup.phone}</a>
                           </div>
                           <div>
                             <span className="text-slate-500 block text-[9px] uppercase tracking-wider">Lĩnh vực hoạt động </span>
@@ -2005,7 +2005,7 @@ export default function TaskDetailModal({
                           </div>
                           <div className="sm:col-span-2">
                             <span className="text-slate-500 block text-[9px] uppercase tracking-wider">Tài khoản ngân hàng giải ngân</span>
-                            <span className="bg-teal-50 text-teal-700 px-2.5 py-1 rounded border border-teal-200 font-bold text-[12px] inline-block">{activeSup.bankAccount || 'Chưa cập nhật'}</span>
+                            <span className="bg-[#e8efff] text-[#0d47c9] px-2.5 py-1 rounded border border-[#bcd0ff] font-bold text-[12px] inline-block">{activeSup.bankAccount || 'Chưa cập nhật'}</span>
                           </div>
                           {activeSup.note && (
                             <div className="sm:col-span-2">
@@ -2033,7 +2033,7 @@ export default function TaskDetailModal({
                     type="button"
                     onClick={handleExportMissionsExcel}
                     title="Xuất Excel danh sách nhiệm vụ chi tiết"
-                    className="flex items-center gap-1 bg-emerald-600/90 hover:bg-emerald-500 text-white text-[9.5px] font-bold px-2 py-1 rounded-lg cursor-pointer transition-colors"
+                    style={{ color: '#ffffff' }} className="flex items-center gap-1 bg-emerald-600/90 hover:bg-emerald-500 text-white text-[9.5px] font-bold px-2 py-1 rounded-xl cursor-pointer transition-colors"
                   >
                     <Download className="w-3 h-3" /> Export
                   </button>
@@ -2042,7 +2042,7 @@ export default function TaskDetailModal({
                     type="button"
                     onClick={() => missionExcelInputRef.current?.click()}
                     title="Nhập Excel danh sách nhiệm vụ chi tiết"
-                    className="flex items-center gap-1 bg-indigo-600/90 hover:bg-indigo-500 text-white text-[9.5px] font-bold px-2 py-1 rounded-lg cursor-pointer transition-colors"
+                    style={{ color: '#ffffff' }} className="flex items-center gap-1 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[9.5px] font-bold px-2 py-1 rounded-xl cursor-pointer transition-colors"
                   >
                     <Upload className="w-3 h-3" /> Import
                   </button>
@@ -2223,7 +2223,7 @@ export default function TaskDetailModal({
                       {newMissionChecklist.length > 0 && (
                         <div className="space-y-1 pt-1">
                           {newMissionChecklist.map((chk, idx) => (
-                            <div key={idx} className="flex items-center justify-between gap-2 bg-slate-950/60 border border-slate-850/50 rounded-lg px-2.5 py-1.5">
+                            <div key={idx} className="flex items-center justify-between gap-2 bg-slate-950/60 border border-slate-850/50 rounded-xl px-2.5 py-1.5">
                               <span className="text-[10.5px] text-slate-300 font-mono">{idx + 1}. {chk}</span>
                               <button
                                 type="button"
@@ -2385,7 +2385,7 @@ export default function TaskDetailModal({
                           setMissionPageSize(v === 'all' ? 'all' : parseInt(v));
                           setMissionPage(1);
                         }}
-                        className="bg-slate-950 text-slate-200 border border-slate-850 focus:border-emerald-500/40 rounded-lg px-2 py-1 text-[10.5px] font-bold outline-none cursor-pointer"
+                        className="bg-slate-950 text-slate-200 border border-slate-850 focus:border-emerald-500/40 rounded-xl px-2 py-1 text-[10.5px] font-bold outline-none cursor-pointer"
                       >
                         <option value="5">5 dòng</option>
                         <option value="10">10 dòng</option>
@@ -2402,7 +2402,7 @@ export default function TaskDetailModal({
                           type="button"
                           disabled={safePage <= 1}
                           onClick={() => setMissionPage(p => Math.max(1, p - 1))}
-                          className={`px-2 py-1 rounded-lg border text-[10.5px] font-bold transition ${
+                          className={`px-2 py-1 rounded-xl border text-[10.5px] font-bold transition ${
                             safePage <= 1
                               ? 'bg-slate-900 text-slate-600 border-slate-850 cursor-not-allowed'
                               : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 cursor-pointer'
@@ -2417,7 +2417,7 @@ export default function TaskDetailModal({
                           type="button"
                           disabled={safePage >= totalPages}
                           onClick={() => setMissionPage(p => Math.min(totalPages, p + 1))}
-                          className={`px-2 py-1 rounded-lg border text-[10.5px] font-bold transition ${
+                          className={`px-2 py-1 rounded-xl border text-[10.5px] font-bold transition ${
                             safePage >= totalPages
                               ? 'bg-slate-900 text-slate-600 border-slate-850 cursor-not-allowed'
                               : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-500/40 hover:text-emerald-400 cursor-pointer'
@@ -2478,16 +2478,16 @@ export default function TaskDetailModal({
                                 ? mission.evidence
                                 : '';
                             return (
-                              <div className="relative shrink-0 w-11 h-11 rounded-lg overflow-hidden group/thumb">
+                              <div className="relative shrink-0 w-11 h-11 rounded-xl overflow-hidden group/thumb">
                                 {thumbSrc ? (
                                   <img
                                     src={thumbSrc}
                                     alt="Ảnh báo cáo đầu tiên"
                                     referrerPolicy="no-referrer"
-                                    className="w-full h-full object-cover rounded-lg border border-slate-800 group-hover/thumb:border-emerald-500/50 transition"
+                                    className="w-full h-full object-cover rounded-xl border border-slate-800 group-hover/thumb:border-emerald-500/50 transition"
                                   />
                                 ) : (
-                                  <div className="w-full h-full rounded-lg border-2 border-dashed border-slate-700 flex items-center justify-center text-slate-600">
+                                  <div className="w-full h-full rounded-xl border-2 border-dashed border-slate-700 flex items-center justify-center text-slate-600">
                                     <ImageIcon className="w-4 h-4" />
                                   </div>
                                 )}
@@ -2507,7 +2507,7 @@ export default function TaskDetailModal({
                                     value={editMissionName}
                                     onChange={(e) => setEditMissionName(e.target.value)}
                                     placeholder="Tên nhiệm vụ"
-                                    className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none placeholder:text-slate-650"
+                                    className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-xl px-2.5 py-1.5 text-[11px] font-mono outline-none placeholder:text-slate-650"
                                   />
                                 </div>
                                 <div className="space-y-1">
@@ -2521,11 +2521,11 @@ export default function TaskDetailModal({
                                     type="datetime-local"
                                     value={editMissionDeadline}
                                     onChange={(e) => setEditMissionDeadline(e.target.value)}
-                                    className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none cursor-pointer"
+                                    className="w-full bg-slate-950 text-slate-205 border border-slate-850 focus:border-amber-400/40 rounded-xl px-2.5 py-1.5 text-[11px] font-mono outline-none cursor-pointer"
                                   />
                                 </div>
                                 {editingMissionError && (
-                                  <div className="text-[9.5px] text-rose-700 font-bold bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 leading-relaxed animate-fade-in">
+                                  <div className="text-[9.5px] text-rose-700 font-bold bg-rose-50 border border-rose-200 rounded-xl px-2.5 py-1.5 leading-relaxed animate-fade-in">
                                     {editingMissionError}
                                   </div>
                                 )}
@@ -2533,14 +2533,14 @@ export default function TaskDetailModal({
                                   <button
                                     type="button"
                                     onClick={() => saveEditMission(mission)}
-                                    className="flex-1 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 text-[9.5px] font-extrabold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1"
+                                    className="flex-1 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-[9.5px] font-extrabold uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1"
                                   >
                                     <Check className="w-3 h-3 stroke-[3]" /> Lưu
                                   </button>
                                   <button
                                     type="button"
                                     onClick={cancelEditMission}
-                                    className="px-3 py-1.5 rounded-lg border border-slate-800 hover:bg-slate-900 text-slate-300 text-[9.5px] font-bold transition cursor-pointer"
+                                    className="px-3 py-1.5 rounded-xl border border-slate-800 hover:bg-slate-900 text-slate-300 text-[9.5px] font-bold transition cursor-pointer"
                                   >
                                     Hủy
                                   </button>
@@ -2550,7 +2550,7 @@ export default function TaskDetailModal({
                               <>
                                 <div className="flex items-center gap-2">
                                   <span className={`w-2 h-2 rounded-full shrink-0 ${
-                                    isCompleted ? 'bg-emerald-500 animate-pulse' : mission.status === 'doing' ? 'bg-sky-500' : 'bg-amber-500'
+                                    isCompleted ? 'bg-emerald-500 animate-pulse' : mission.status === 'doing' ? 'bg-[#0d47c9]' : 'bg-amber-500'
                                   }`} />
                                   <h5 className={`text-[11.5px] font-bold truncate text-left flex-1 ${isCompleted ? 'line-through text-slate-500' : 'text-slate-100'}`}>
                                     {mission.name}
@@ -2642,7 +2642,7 @@ export default function TaskDetailModal({
                                       >
                                         {initials}
                                         {(canAssignMission && selectedTask.status !== 'completed' && !isCompleted) && (
-                                          <div className="absolute inset-0 bg-red-650/90 rounded-full flex items-center justify-center text-white font-extrabold text-[8px] opacity-0 hover:opacity-100 transition-opacity">
+                                          <div style={{ color: '#ffffff' }} className="absolute inset-0 bg-rose-600/90 rounded-full flex items-center justify-center text-white font-extrabold text-[8px] opacity-0 hover:opacity-100 transition-opacity">
                                             ✕
                                           </div>
                                         )}
@@ -2765,7 +2765,7 @@ export default function TaskDetailModal({
                                       >
                                         {initials}
                                         {(canAssignMission && selectedTask.status !== 'completed' && !isCompleted) && (
-                                          <div className="absolute inset-0 bg-red-650/95 rounded-full flex items-center justify-center text-white font-extrabold text-[8px] opacity-0 hover:opacity-100 transition-opacity">
+                                          <div style={{ color: '#ffffff' }} className="absolute inset-0 bg-rose-600/95 rounded-full flex items-center justify-center text-white font-extrabold text-[8px] opacity-0 hover:opacity-100 transition-opacity">
                                             ✕
                                           </div>
                                         )}
@@ -2830,7 +2830,7 @@ export default function TaskDetailModal({
                                   <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); startEditMission(mission); }}
-                                    className="p-1 px-1.5 bg-slate-950 hover:bg-amber-950/40 border border-slate-850 hover:border-amber-900 text-slate-500 hover:text-amber-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
+                                    className="p-1 px-1.5 bg-slate-950 hover:bg-amber-950/40 border border-slate-850 hover:border-amber-900 text-slate-500 hover:text-amber-400 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0"
                                     title="Sửa tên / hạn hoàn thành"
                                   >
                                     <Edit2 className="w-3 h-3 text-amber-400" />
@@ -2860,7 +2860,7 @@ export default function TaskDetailModal({
                                         }
                                       }
                                     }}
-                                    className="p-1 px-1.5 bg-slate-950 hover:bg-rose-950/40 border border-slate-850 hover:border-rose-900 text-slate-500 hover:text-rose-400 rounded-lg transition cursor-pointer flex items-center justify-center shrink-0"
+                                    className="p-1 px-1.5 bg-slate-950 hover:bg-rose-950/40 border border-slate-850 hover:border-rose-900 text-slate-500 hover:text-rose-400 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0"
                                     title="Xóa nhiệm vụ này"
                                   >
                                     <Trash2 className="w-3 h-3 text-rose-400" />
@@ -2871,7 +2871,7 @@ export default function TaskDetailModal({
                                 isCompleted
                                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                   : mission.status === 'doing'
-                                    ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                    ? 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]'
                                     : 'bg-slate-50 text-slate-600 border-slate-200'
                               }`}>
                                 {isCompleted ? 'Hoàn thành' : mission.status === 'doing' ? 'Đang làm' : 'Chưa làm'}
@@ -2920,7 +2920,7 @@ export default function TaskDetailModal({
                               onClick={() => {
                                 setViolationRows(prev => prev.filter(r => r.id !== row.id));
                               }}
-                              className="p-1 px-2 border border-slate-850 hover:border-rose-900 bg-slate-950 hover:bg-rose-955/30 text-slate-400 hover:text-rose-400 rounded-lg transition cursor-pointer text-[10px]"
+                              className="p-1 px-2 border border-slate-850 hover:border-rose-900 bg-slate-950 hover:bg-rose-955/30 text-slate-400 hover:text-rose-400 rounded-xl transition cursor-pointer text-[10px]"
                             >
                               ✕ Xóa dòng
                             </button>
@@ -2975,7 +2975,7 @@ export default function TaskDetailModal({
                             <div className="absolute z-55 left-0 right-0 mt-1 max-h-60 overflow-y-auto overscroll-contain bg-slate-950 border border-slate-850 rounded-xl shadow-2xl p-1">
                               {filteredCriteria.map(crit => {
                                 let catText = 'Tác phong';
-                                let catColor = 'text-purple-700 bg-purple-50 border-purple-200';
+                                let catColor = 'text-[#0d47c9] bg-[#e8efff] border-[#bcd0ff]';
                                 if (crit.category === 'progress') {
                                   catText = 'Hiệu suất';
                                   catColor = 'text-amber-700 bg-amber-50 border-amber-200';
@@ -3022,7 +3022,7 @@ export default function TaskDetailModal({
                               <span className={`px-2 py-0.5 rounded text-[9.5px] font-bold border ${
                                 criterion.category === 'progress' ? 'text-amber-700 bg-amber-50 border-amber-200' :
                                 criterion.category === 'reporting' ? 'text-pink-700 bg-pink-50 border-pink-200' :
-                                'text-purple-700 bg-purple-50 border-purple-200'
+                                'text-[#0d47c9] bg-[#e8efff] border-[#bcd0ff]'
                               }`}>
                                 {criterion.category === 'progress' ? 'Hiệu suất / Tiến độ' : criterion.category === 'reporting' ? 'Báo cáo / Thái độ' : 'Tác phong 5S'}
                               </span>
@@ -3072,7 +3072,7 @@ export default function TaskDetailModal({
                               onClick={() => {
                                 setViolationRows(prev => prev.map(r => r.id === row.id ? { ...r, isTagOpen: !r.isTagOpen } : r));
                               }}
-                              className="w-5.5 h-5.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center border border-indigo-200 text-[11px] font-black transition-all shrink-0 cursor-pointer active:scale-90 align-middle"
+                              className="w-5.5 h-5.5 bg-[#e8efff] hover:bg-[#d6e2ff] text-[#0d47c9] rounded-full flex items-center justify-center border border-[#bcd0ff] text-[11px] font-black transition-all shrink-0 cursor-pointer active:scale-90 align-middle"
                               title="Thêm người vi phạm"
                             >
                               +
@@ -3083,7 +3083,7 @@ export default function TaskDetailModal({
                           {row.isTagOpen && (
                             <div className="absolute z-55 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-slate-950 border border-slate-805 rounded-xl shadow-2xl p-2.5 space-y-3">
                               {relatedEmployees.length > 0 && (
-                                <div className="space-y-1 bg-slate-900/20 p-1.5 rounded-lg border border-slate-900">
+                                <div className="space-y-1 bg-slate-900/20 p-1.5 rounded-xl border border-slate-900">
                                   <span className="block text-[8.5px] text-zinc-400 font-extrabold uppercase tracking-widest mb-1.5">👥 NHÂN SỰ LIÊN QUAN TRONG CÔNG VIỆC:</span>
                                   <div className="grid grid-cols-2 gap-1.5">
                                     {relatedEmployees.map(emp => {
@@ -3098,9 +3098,9 @@ export default function TaskDetailModal({
                                               : [...row.taggedEmployeeIds, emp.id];
                                             setViolationRows(prev => prev.map(r => r.id === row.id ? { ...r, taggedEmployeeIds: updated } : r));
                                           }}
-                                          className={`flex items-center gap-1.5 p-1 px-2 rounded-lg border text-left text-[10.5px] font-bold transition-all truncate cursor-pointer ${
+                                          className={`flex items-center gap-1.5 p-1 px-2 rounded-xl border text-left text-[10.5px] font-bold transition-all truncate cursor-pointer ${
                                             isSelected 
-                                              ? 'bg-indigo-955 border-indigo-600 text-indigo-350 shadow-sm' 
+                                              ? 'bg-[#e8efff] border-[#0d47c9] text-[#0d47c9] shadow-sm' 
                                               : 'bg-slate-950 border-slate-850 text-slate-400 hover:bg-slate-900 hover:text-white'
                                           }`}
                                         >
@@ -3130,9 +3130,9 @@ export default function TaskDetailModal({
                                             : [...row.taggedEmployeeIds, emp.id];
                                           setViolationRows(prev => prev.map(r => r.id === row.id ? { ...r, taggedEmployeeIds: updated } : r));
                                         }}
-                                        className={`flex items-center gap-1.5 p-1 px-2 rounded-lg border text-left text-[10.5px] font-bold transition-all truncate cursor-pointer ${
+                                        className={`flex items-center gap-1.5 p-1 px-2 rounded-xl border text-left text-[10.5px] font-bold transition-all truncate cursor-pointer ${
                                           isSelected 
-                                            ? 'bg-indigo-955 border-indigo-600 text-indigo-350 shadow-sm' 
+                                            ? 'bg-[#e8efff] border-[#0d47c9] text-[#0d47c9] shadow-sm' 
                                             : 'bg-slate-950 border-slate-850 text-slate-400 hover:bg-slate-900 hover:text-white'
                                         }`}
                                       >
@@ -3183,7 +3183,7 @@ export default function TaskDetailModal({
                           {row.images && row.images.length > 0 && (
                             <div className="grid grid-cols-5 gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-900">
                               {row.images.map((img, idx) => (
-                                <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-slate-800">
+                                <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-800">
                                   <img src={img} alt="Evidence" className="w-full h-full object-cover" />
                                   <button
                                     type="button"
@@ -3193,7 +3193,7 @@ export default function TaskDetailModal({
                                         images: (r.images || []).filter((_, i) => i !== idx)
                                       } : r));
                                     }}
-                                    className="absolute -top-1 -right-1 bg-red-650 hover:bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px] cursor-pointer font-bold shadow"
+                                    style={{ color: '#ffffff' }} className="absolute -top-1 -right-1 bg-red-650 hover:bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px] cursor-pointer font-bold shadow"
                                   >
                                     ✕
                                   </button>
@@ -3227,7 +3227,7 @@ export default function TaskDetailModal({
                                 };
                                 input.click();
                               }}
-                              className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-400 font-bold p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                              className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-400 font-bold p-1.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
                             >
                               <FileUp className="w-3.5 h-3.5 text-slate-500" />
                               Tải ảnh lên
@@ -3277,9 +3277,9 @@ export default function TaskDetailModal({
                                   }
                                 }
                               }}
-                              className={`flex-1 text-[10.5px] font-bold p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                              style={cameraRowId === row.id ? { color: '#ffffff' } : undefined} className={`flex-1 text-[10.5px] font-bold p-1.5 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                                 cameraRowId === row.id
-                                  ? 'bg-rose-650 hover:bg-rose-550 border-none text-white animate-pulse'
+                                  ? 'bg-rose-600 hover:bg-rose-500 border-none text-white animate-pulse'
                                   : 'bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-slate-400'
                               }`}
                             >
@@ -3289,7 +3289,7 @@ export default function TaskDetailModal({
                           </div>
 
                           {cameraRowId === row.id && (
-                            <div className="relative rounded-lg overflow-hidden border border-rose-900/40 bg-black mt-2 aspect-video flex flex-col items-center justify-center">
+                            <div className="relative rounded-xl overflow-hidden border border-rose-900/40 bg-black mt-2 aspect-video flex flex-col items-center justify-center">
                               <video id={`detailVideo_${row.id}`} className="w-full h-full object-cover" playsInline muted />
                               <button
                                 type="button"
@@ -3311,7 +3311,7 @@ export default function TaskDetailModal({
                     <button
                       type="button"
                       onClick={handleSendViolations}
-                      className="w-full bg-rose-650 hover:bg-rose-550 border-none text-white font-black p-2.5 rounded-xl text-[11px] transition duration-150 flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-rose-950/20 active:scale-95"
+                      style={{ color: '#ffffff' }} className="w-full bg-rose-600 hover:bg-rose-500 border-none text-white font-black p-2.5 rounded-xl text-[11px] transition duration-150 flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-rose-950/20 active:scale-95"
                     >
                       <Send className="w-3.5 h-3.5" />
                       Gửi vi phạm
@@ -3331,7 +3331,7 @@ export default function TaskDetailModal({
                       <div className="max-h-60 overflow-y-auto space-y-2 pr-1" id="submitted_violations_list">
                         {submittedViolations.map((item: any, idx: number) => {
                           let catText = 'Tác phong 5S';
-                          let catColor = 'text-purple-700 bg-purple-50 border-purple-200';
+                          let catColor = 'text-[#0d47c9] bg-[#e8efff] border-[#bcd0ff]';
                           if (item.category === 'progress') {
                             catText = 'Hiệu suất / Tiến độ';
                             catColor = 'text-amber-700 bg-amber-50 border-amber-200';
@@ -3362,7 +3362,7 @@ export default function TaskDetailModal({
                               {item.images && item.images.length > 0 && (
                                 <div className="grid grid-cols-5 gap-1.5 pt-1">
                                   {item.images.map((img: string, imgIdx: number) => (
-                                    <div key={imgIdx} className="aspect-square rounded-lg overflow-hidden border border-slate-900 bg-black">
+                                    <div key={imgIdx} className="aspect-square rounded-xl overflow-hidden border border-slate-900 bg-black">
                                       <img src={img} alt="Evidence" className="w-full h-full object-cover cursor-pointer hover:scale-105 transition" referrerPolicy="no-referrer" onClick={() => window.open(img, '_blank')} />
                                     </div>
                                   ))}
@@ -3401,7 +3401,7 @@ export default function TaskDetailModal({
                     <div className="space-y-2" id="connected_tools_menu">
                       <span className="font-black text-[10px] text-slate-450 flex items-center justify-between uppercase tracking-wider border-b border-white/5 pb-1 select-none">
                         <span>Công cụ liên thông</span>
-                        <span className="bg-sky-50 text-sky-700 text-[8.5px] px-1.5 py-0.5 rounded-md border border-sky-200 font-mono tracking-normal normal-case shrink-0">LIÊN THÔNG</span>
+                        <span className="bg-[#e8efff] text-[#0d47c9] text-[8.5px] px-1.5 py-0.5 rounded-md border border-[#bcd0ff] font-mono tracking-normal normal-case shrink-0">LIÊN THÔNG</span>
                       </span>
 
                       {selectedTask.status === 'todo' ? (
@@ -3423,7 +3423,7 @@ export default function TaskDetailModal({
                                 isCompleted
                                   ? 'bg-emerald-50 border-emerald-200 text-emerald-700 cursor-pointer'
                                   : isApprovalLocked
-                                    ? 'bg-slate-900 border-slate-800 text-indigo-400 hover:bg-slate-850 cursor-pointer'
+                                    ? 'bg-slate-900 border-slate-800 text-[#0d47c9] hover:bg-slate-850 cursor-pointer'
                                     : 'bg-slate-900 border-slate-800 hover:bg-slate-850 text-slate-300 hover:text-white cursor-pointer'
                               }`}
                               title="Gửi yêu cầu phê duyệt chuẩn hóa"
@@ -3431,7 +3431,7 @@ export default function TaskDetailModal({
                               {isCompleted ? (
                                 <CheckCircle2 className="w-4 h-4 text-emerald-400 font-bold" />
                               ) : (
-                                <Shield className={`w-4 h-4 ${isApprovalLocked ? 'text-indigo-455 animate-pulse text-indigo-400' : 'text-sky-400'}`} />
+                                <Shield className={`w-4 h-4 ${isApprovalLocked ? 'text-[#0d47c9] animate-pulse text-[#0d47c9]' : 'text-[#0d47c9]'}`} />
                               )}
                               {isCompleted ? 'Phê duyệt hoàn tất' : (isApprovalLocked ? 'Quản lý phê duyệt' : 'Yêu cầu phê duyệt')}
                             </button>
@@ -3617,16 +3617,16 @@ export default function TaskDetailModal({
                         <div className="space-y-2 pt-4 border-t border-slate-900/60" id="project_docs_menu">
                           <span className="font-black text-[10px] text-slate-450 flex items-center justify-between uppercase tracking-wider border-b border-white/5 pb-1 select-none">
                             <span>Menu Hồ Sơ Dự Án</span>
-                            <span className="bg-indigo-50 text-indigo-700 text-[8.5px] px-1.5 py-0.5 rounded-md border border-indigo-200 font-mono tracking-normal normal-case shrink-0">HỒ SƠ</span>
+                            <span className="bg-[#e8efff] text-[#0d47c9] text-[8.5px] px-1.5 py-0.5 rounded-md border border-[#bcd0ff] font-mono tracking-normal normal-case shrink-0">HỒ SƠ</span>
                           </span>
 
                           <button
                             type="button"
                             onClick={() => goArchive('quote')}
-                            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-indigo-400 hover:text-indigo-300 p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
+                            className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-[#0d47c9] hover:text-[#0d47c9] p-2.5 rounded-xl flex items-center justify-between font-bold cursor-pointer transition-colors text-left font-sans"
                           >
                             <div className="flex items-center gap-2">
-                              <FileText className="w-4 h-4 text-indigo-400" />
+                              <FileText className="w-4 h-4 text-[#0d47c9]" />
                               Báo Giá
                             </div>
                             <span className={`text-[9.5px] font-extrabold px-2 py-0.5 rounded border uppercase tracking-wider ${quoteStatusColor}`}>
@@ -3683,10 +3683,10 @@ export default function TaskDetailModal({
                             type="button"
                             onClick={() => goArchive('legal')}
                             disabled={quoteLocked}
-                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-sky-400 hover:text-sky-300 p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
+                            className={`w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-[#0d47c9] hover:text-[#0d47c9] p-2.5 rounded-xl flex items-center justify-between font-bold transition-colors text-left font-sans ${quoteLocked ? 'opacity-40 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}`}
                           >
                             <div className="flex items-center gap-2">
-                              <Scale className="w-4 h-4 text-sky-400" />
+                              <Scale className="w-4 h-4 text-[#0d47c9]" />
                               Hồ Sơ Pháp Lý
                             </div>
                             <span className={`text-[9.5px] font-extrabold px-2 py-0.5 rounded border uppercase tracking-wider ${legalStatusColor}`}>
@@ -3759,7 +3759,7 @@ export default function TaskDetailModal({
                               <Briefcase className="w-4 h-4 text-orange-400" />
                               <span>Hợp Đồng Giao Khoán</span>
                             </div>
-                            <span className={`px-2 py-0.5 rounded-lg text-[9px] font-extrabold ${contractStateColor}`}>
+                            <span className={`px-2 py-0.5 rounded-xl text-[9px] font-extrabold ${contractStateColor}`}>
                               {contractStateText}
                             </span>
                           </button>
@@ -3816,7 +3816,7 @@ export default function TaskDetailModal({
                         addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái Nhận Việc. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
                       }
                     }}
-                    className="bg-sky-600 hover:bg-sky-500 text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
+                    className="bg-[#0d47c9] hover:bg-[#0a3aa8] text-slate-950 font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md"
                   >
                     <Check className="w-4 h-4" />
                     Nhận Việc
@@ -3824,7 +3824,7 @@ export default function TaskDetailModal({
                 );
               } else {
                 return (
-                  <span className="text-[10px] text-slate-500 italic bg-slate-900 border border-slate-850 px-3 py-1.5 rounded-lg select-none">
+                  <span className="text-[10px] text-slate-500 italic bg-slate-900 border border-slate-850 px-3 py-1.5 rounded-xl select-none">
                     🔒 Khóa: Chờ [{assignee?.name || 'Người phụ trách'}] Nhận Việc
                   </span>
                 );
@@ -3877,7 +3877,7 @@ export default function TaskDetailModal({
                         }
                         setShowApprovalWarning(true);
                       }}
-                      className={`bg-rose-600 hover:bg-rose-500 text-white font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md animate-pulse ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-rose-600' : ''}`}
+                      style={{ color: '#ffffff' }} className={`bg-rose-600 hover:bg-rose-500 text-white font-black px-5 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-md animate-pulse ${!allMissionsCompleted ? 'opacity-50 cursor-not-allowed hover:bg-rose-600' : ''}`}
                     >
                       <Shield className="w-4 h-4" />
                       Yêu cầu phê duyệt
@@ -3886,7 +3886,7 @@ export default function TaskDetailModal({
                 }
               } else {
                 return (
-                  <span className="text-[10px] text-slate-500 italic bg-slate-900 border border-slate-850 px-3 py-1.5 rounded-lg select-none">
+                  <span className="text-[10px] text-slate-500 italic bg-slate-900 border border-slate-850 px-3 py-1.5 rounded-xl select-none">
                     ⚙️ Công việc đang giao cho [{assignee?.name || 'Người phụ trách'}] thực hiện
                   </span>
                 );
@@ -3920,7 +3920,7 @@ export default function TaskDetailModal({
                           addToast({ title: '❌ Lưu thất bại', message: 'Không thể lưu trạng thái Từ Chối duyệt. Vui lòng kiểm tra kết nối và thử lại.', type: 'error' });
                         }
                       }}
-                      className="bg-rose-600 hover:bg-rose-500 text-white font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-sm"
+                      style={{ color: '#ffffff' }} className="bg-rose-600 hover:bg-rose-500 text-white font-black px-4 py-2.2 rounded-xl cursor-pointer text-[11px] transition duration-150 flex items-center gap-1 border-none shadow-sm"
                     >
                       <X className="w-4 h-4" />
                       Từ Chối
@@ -3960,7 +3960,7 @@ export default function TaskDetailModal({
                 );
               } else {
                 return (
-                  <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg select-none">
+                  <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl select-none">
                     ⏳ Đang chờ người giao việc [{assigner?.name || 'Quản lý'}] phê duyệt nghiệm thu
                   </span>
                 );
@@ -4000,7 +4000,7 @@ export default function TaskDetailModal({
             
             <div className="space-y-3 text-sm text-slate-300">
               <p className="font-medium text-slate-200">Bạn đang thực hiện gửi yêu cầu phê duyệt cho hạng mục thi công:</p>
-              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-xs text-amber-400">
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-xs text-amber-400">
                 #{selectedTask.code} - {selectedTask.name}
               </div>
 
@@ -4010,7 +4010,7 @@ export default function TaskDetailModal({
                 <select
                   value={customApproverId || ''}
                   onChange={(e) => setCustomApproverId(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 w-full text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-sans cursor-pointer"
+                  className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 w-full text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-sans cursor-pointer"
                 >
                   <option value="">Chọn người phê duyệt...</option>
                   {employees.map((emp) => (
@@ -4023,7 +4023,7 @@ export default function TaskDetailModal({
 
               <ul className="space-y-2 list-disc pl-4 text-xs text-slate-400">
                 <li>Trạng thái công việc sẽ tự động chuyển sang <strong className="text-amber-400">Chờ duyệt</strong>.</li>
-                <li>Tiến độ hoàn thành dự kiến tự động đặt là <strong className="text-indigo-400">90%</strong>.</li>
+                <li>Tiến độ hoàn thành dự kiến tự động đặt là <strong className="text-[#0d47c9]">90%</strong>.</li>
                 <li>Người chịu trách nhiệm phê duyệt chính: <strong className="text-white">{employees.find(e => e.id === customApproverId)?.name || assigner?.name || 'Người giao việc'}</strong>.</li>
                 <li>Nhật ký thi công và Bình luận dự án sẽ tự động thông báo khẩn đến các cấp chỉ huy.</li>
               </ul>
@@ -4044,7 +4044,7 @@ export default function TaskDetailModal({
               <button
                 type="button"
                 onClick={handleConfirmApprovalRequest}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl cursor-pointer shadow-sm transition hover:scale-103 active:scale-97 text-xs border-none"
+                style={{ color: '#ffffff' }} className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl cursor-pointer shadow-sm transition hover:scale-103 active:scale-97 text-xs border-none"
               >
                 Xác nhận & Gửi yêu cầu
               </button>
@@ -4167,7 +4167,7 @@ export default function TaskDetailModal({
                         ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
                         : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                       return (
-                        <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg w-fit">
+                        <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-xl w-fit">
                           <div className="w-5.5 h-5.5 rounded-full bg-gradient-to-br from-amber-500 to-yellow-500 flex items-center justify-center text-[8px] font-black text-slate-950 shrink-0">
                             {initials}
                           </div>
@@ -4236,7 +4236,7 @@ export default function TaskDetailModal({
                         ? `${parts[parts.length - 2][0]}${parts[parts.length - 1][0]}`.toUpperCase()
                         : (parts[0] ? parts[0].substring(0, 2).toUpperCase() : '??');
                       return (
-                        <div key={memId} className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
+                        <div key={memId} className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-800">
                           <div className="w-5 h-5 rounded-full bg-slate-800 border border-slate-705 flex items-center justify-center text-[8px] font-black text-white shrink-0">
                             {initials}
                           </div>
@@ -4307,7 +4307,7 @@ export default function TaskDetailModal({
                             }}
                             className={`flex items-center gap-2 text-[10.5px] select-none ${canToggle ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
                           >
-                            <div className={`w-4.5 h-4.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                            <div style={isChecked ? { color: '#ffffff' } : undefined} className={`w-4.5 h-4.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
                               isChecked ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-500'
                             }`}>
                               {isChecked ? <Check className="w-3 h-3 stroke-[3]" /> : <span className="text-[8.5px] font-mono font-bold">{idx + 1}</span>}
@@ -4339,7 +4339,7 @@ export default function TaskDetailModal({
                         {mission.travelAllowances.map((item) => {
                           const emp = employees.find(e => e.id === item.memberId);
                           return (
-                            <div key={item.id} className="p-2 bg-slate-50 hover:bg-slate-100/70 border border-slate-150 rounded-lg flex items-center justify-between gap-2 group transition">
+                            <div key={item.id} className="p-2 bg-slate-50 hover:bg-slate-100/70 border border-slate-150 rounded-xl flex items-center justify-between gap-2 group transition">
                               <div className="flex items-center gap-2 min-w-0">
                                 <span className="text-[10px] text-amber-800 font-extrabold bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 shrink-0">
                                   {emp?.name || 'Thợ / Nhân viên'}
@@ -4415,7 +4415,7 @@ export default function TaskDetailModal({
                               <select
                                 value={allowanceMemberId || mission.memberIds[0] || ''}
                                 onChange={(e) => setAllowanceMemberId(e.target.value)}
-                                className="w-full bg-white border border-slate-200 hover:border-slate-350 text-slate-800 rounded-lg px-2 py-1.5 outline-none focus:border-emerald-500/30 text-[11px]"
+                                className="w-full bg-white border border-slate-200 hover:border-slate-350 text-slate-800 rounded-xl px-2 py-1.5 outline-none focus:border-emerald-500/30 text-[11px]"
                               >
                                 {mission.memberIds.map(memId => {
                                   const emp = employees.find(e => e.id === memId);
@@ -4447,7 +4447,7 @@ export default function TaskDetailModal({
                                     setAllowanceCustomUnitPrice(0);
                                   }
                                 }}
-                                className="w-full bg-white border border-slate-200 hover:border-slate-350 text-slate-800 rounded-lg px-2 py-1.5 outline-none focus:border-emerald-500/30 text-[11px]"
+                                className="w-full bg-white border border-slate-200 hover:border-slate-350 text-slate-800 rounded-xl px-2 py-1.5 outline-none focus:border-emerald-500/30 text-[11px]"
                               >
                                 <option value="">-- Chọn chuyến đi trong định mức --</option>
                                 {travelNorms.map(norm => (
@@ -4535,7 +4535,7 @@ export default function TaskDetailModal({
                                 setAllowanceCustomUnitPrice(0);
                                 setAllowanceNotes('');
                               }}
-                              className="px-3 w-10 sm:w-10 font-bold uppercase rounded-lg text-white bg-emerald-500 hover:bg-emerald-600 active:scale-98 cursor-pointer shadow-sm inline-flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 text-[16px] h-[32px] shrink-0"
+                              style={{ color: '#ffffff' }} className="px-3 w-10 sm:w-10 font-bold uppercase rounded-xl text-white bg-emerald-500 hover:bg-emerald-600 active:scale-98 cursor-pointer shadow-sm inline-flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 text-[16px] h-[32px] shrink-0"
                               title="Thêm công tác phí"
                             >
                               <Plus className="w-4 h-4" />
@@ -4608,15 +4608,15 @@ export default function TaskDetailModal({
                         {mission.reportImages.map((src, i) => (
                           isImageAttachment(src) ? (
                             <a key={i} href={src} download={getAttachedFileName(src)} target="_blank" rel="noreferrer" className="block relative group" title="Tải về">
-                              <img src={src} alt={`Đính kèm báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800 hover:border-emerald-500/40 transition cursor-pointer" />
-                              <span className="absolute bottom-1 right-1 bg-black/60 group-hover:bg-emerald-600 text-white p-1 rounded transition-colors">
+                              <img src={src} alt={`Đính kèm báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-xl border border-slate-800 hover:border-emerald-500/40 transition cursor-pointer" />
+                              <span style={{ color: '#ffffff' }} className="absolute bottom-1 right-1 bg-black/60 group-hover:bg-emerald-600 text-white p-1 rounded transition-colors">
                                 <Download className="w-3 h-3" />
                               </span>
                             </a>
                           ) : (
                             <a key={i} href={src} download={getAttachedFileName(src)} target="_blank" rel="noreferrer"
-                              className="flex flex-col items-center justify-center gap-1 h-24 rounded-lg border border-slate-800 hover:border-emerald-500/40 bg-slate-950 transition text-center p-1.5">
-                              <FileText className="w-6 h-6 text-indigo-400" />
+                              className="flex flex-col items-center justify-center gap-1 h-24 rounded-xl border border-slate-800 hover:border-emerald-500/40 bg-slate-950 transition text-center p-1.5">
+                              <FileText className="w-6 h-6 text-[#0d47c9]" />
                               <span className="text-[9px] text-slate-400 truncate max-w-full">{getAttachedFileName(src)}</span>
                               <span className="text-[8.5px] text-emerald-500 flex items-center gap-0.5"><Download className="w-2.5 h-2.5" /> Tải về</span>
                             </a>
@@ -4634,10 +4634,10 @@ export default function TaskDetailModal({
                           {missionReportImages.map((src, i) => (
                             <div key={i} className="relative group">
                               {isImageAttachment(src) ? (
-                                <img src={src} alt={`Đính kèm báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-lg border border-slate-800" />
+                                <img src={src} alt={`Đính kèm báo cáo ${i + 1}`} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded-xl border border-slate-800" />
                               ) : (
-                                <div className="flex flex-col items-center justify-center gap-1 h-24 rounded-lg border border-slate-800 bg-slate-950 text-center p-1.5">
-                                  <FileText className="w-6 h-6 text-indigo-400" />
+                                <div className="flex flex-col items-center justify-center gap-1 h-24 rounded-xl border border-slate-800 bg-slate-950 text-center p-1.5">
+                                  <FileText className="w-6 h-6 text-[#0d47c9]" />
                                   <span className="text-[9px] text-slate-400 truncate max-w-full">{getAttachedFileName(src)}</span>
                                 </div>
                               )}
@@ -4647,7 +4647,7 @@ export default function TaskDetailModal({
                                 target="_blank"
                                 rel="noreferrer"
                                 title="Tải về"
-                                className="absolute bottom-1 left-1 bg-black/60 hover:bg-emerald-600 text-white p-1 rounded border border-slate-850 cursor-pointer"
+                                style={{ color: '#ffffff' }} className="absolute bottom-1 left-1 bg-black/60 hover:bg-emerald-600 text-white p-1 rounded border border-slate-850 cursor-pointer"
                               >
                                 <Download className="w-3 h-3" />
                               </a>
@@ -4655,7 +4655,7 @@ export default function TaskDetailModal({
                                 <button
                                   type="button"
                                   onClick={() => removeMissionReportImage(i)}
-                                  className="absolute top-1 right-1 bg-black/60 hover:bg-rose-600 text-white text-[9px] p-1 px-1.5 rounded border border-slate-850 cursor-pointer font-bold"
+                                  style={{ color: '#ffffff' }} className="absolute top-1 right-1 bg-black/60 hover:bg-rose-600 text-white text-[9px] p-1 px-1.5 rounded border border-slate-850 cursor-pointer font-bold"
                                   title="Xóa tệp này"
                                 >
                                   <X className="w-3 h-3" />
@@ -4673,7 +4673,7 @@ export default function TaskDetailModal({
                             type="button"
                             onClick={openMissionReportCamera}
                             disabled={missionReportCameraOpen}
-                            className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                            className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
                           >
                             <Camera className="w-3.5 h-3.5 text-emerald-400" />
                             {missionReportCameraOpen ? 'Đang mở camera...' : 'Chụp từ Camera'}
@@ -4681,9 +4681,9 @@ export default function TaskDetailModal({
                           <button
                             type="button"
                             onClick={() => missionReportImageInputRef.current?.click()}
-                            className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                            className="flex-1 bg-slate-950 hover:bg-slate-900 border border-slate-850 hover:border-slate-800 text-[10.5px] text-slate-300 font-bold p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
                           >
-                            <FileUp className="w-3.5 h-3.5 text-indigo-400" />
+                            <FileUp className="w-3.5 h-3.5 text-[#0d47c9]" />
                             File báo cáo
                           </button>
                           {/* Không giới hạn `accept` — cho phép đính kèm mọi định dạng file
@@ -4700,13 +4700,13 @@ export default function TaskDetailModal({
 
                       {/* Khung camera live */}
                       {missionReportCameraOpen && (
-                        <div className="relative rounded-lg overflow-hidden border border-emerald-900/40 bg-black mt-2 aspect-video flex flex-col items-center justify-center">
+                        <div className="relative rounded-xl overflow-hidden border border-emerald-900/40 bg-black mt-2 aspect-video flex flex-col items-center justify-center">
                           <video ref={missionReportVideoRef} className="w-full h-full object-cover" playsInline muted />
                           <div className="absolute bottom-1.5 left-0 right-0 flex justify-center gap-2">
                             <button
                               type="button"
                               onClick={captureMissionReportImage}
-                              className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg shadow cursor-pointer flex items-center gap-1"
+                              style={{ color: '#ffffff' }} className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-3 py-1.5 rounded-xl shadow cursor-pointer flex items-center gap-1"
                             >
                               <Camera className="w-3.5 h-3.5" /> Chụp hình
                             </button>
@@ -5053,7 +5053,7 @@ export default function TaskDetailModal({
                   element.click();
                   document.body.removeChild(element);
                 }}
-                className="px-5 py-2.5 bg-[#00a651] hover:bg-[#008f45] text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all hover:scale-[1.01]"
+                style={{ color: '#ffffff' }} className="px-5 py-2.5 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all hover:scale-[1.01]"
               >
                 Tải xuống file TXT bản thô
               </button>
@@ -5083,7 +5083,7 @@ export default function TaskDetailModal({
               </span>
               <button 
                 onClick={() => setIsAdvancingSubcontractor(false)} 
-                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 p-1.5 rounded-lg transition-colors cursor-pointer"
+                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 p-1.5 rounded-xl transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -5097,7 +5097,7 @@ export default function TaskDetailModal({
                   type="text" 
                   disabled 
                   value={proposalId}
-                  className="bg-slate-950 border border-slate-850 rounded-lg p-2.5 w-full text-xs font-bold text-emerald-450 cursor-not-allowed font-mono"
+                  className="bg-slate-950 border border-slate-850 rounded-xl p-2.5 w-full text-xs font-bold text-emerald-450 cursor-not-allowed font-mono"
                 />
               </div>
 
@@ -5108,7 +5108,7 @@ export default function TaskDetailModal({
                   type="date" 
                   value={advProposalDate}
                   onChange={(e) => setAdvProposalDate(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 w-full text-xs text-slate-100 focus:outline-none focus:border-emerald-500 font-sans font-medium"
+                  className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 w-full text-xs text-slate-100 focus:outline-none focus:border-emerald-500 font-sans font-medium"
                 />
               </div>
 
@@ -5118,7 +5118,7 @@ export default function TaskDetailModal({
                 <select 
                   disabled
                   value={selectedTask.subcontractorId || ''}
-                  className="bg-slate-950 border border-slate-850 rounded-lg p-2.5 w-full text-xs font-bold text-orange-400 cursor-not-allowed font-sans"
+                  className="bg-slate-950 border border-slate-850 rounded-xl p-2.5 w-full text-xs font-bold text-orange-400 cursor-not-allowed font-sans"
                 >
                   <option value={selectedTask.subcontractorId || ''}>
                     {selectedTask.subcontractorName || 'N/A'} {selectedTask.subcontractorId ? `(${selectedTask.subcontractorId})` : ''}
@@ -5129,12 +5129,12 @@ export default function TaskDetailModal({
               {/* Thông tin Hợp đồng & Công nợ thầu phụ */}
               <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
                 <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 flex items-center gap-1">
-                  <FileText className="w-3.5 h-3.5 text-blue-400" />
+                  <FileText className="w-3.5 h-3.5 text-[#0d47c9]" />
                   THÔNG TIN HỢP ĐỒNG & CÔNG NỢ
                 </span>
                 
                 <div className="grid grid-cols-2 gap-2.5">
-                  <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-850">
+                  <div className="bg-slate-900/40 p-2 rounded-xl border border-slate-850">
                     <span className="text-[9px] text-slate-400 block uppercase font-medium">Giá Trị Hợp Đồng</span>
                     {isSubContractApproved ? (
                       <span className="text-xs font-bold text-emerald-400 font-mono">
@@ -5147,15 +5147,15 @@ export default function TaskDetailModal({
                     )}
                   </div>
 
-                  <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-850">
+                  <div className="bg-slate-900/40 p-2 rounded-xl border border-slate-850">
                     <span className="text-[9px] text-slate-400 block uppercase font-medium">Đã Thanh Toán</span>
-                    <span className="text-xs font-bold text-sky-400 font-mono">
+                    <span className="text-xs font-bold text-[#0d47c9] font-mono">
                       {subTotalPaidAmount.toLocaleString('vi-VN')} đ
                     </span>
                   </div>
                 </div>
 
-                <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-850 flex items-center justify-between">
+                <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-850 flex items-center justify-between">
                   <div>
                     <span className="text-[10px] text-slate-300 block uppercase font-bold">CÔNG NỢ CÒN LẠI</span>
                     <span className="text-[9px] text-slate-500 font-mono font-medium">Hợp đồng - Thanh toán thực tế</span>
@@ -5166,7 +5166,7 @@ export default function TaskDetailModal({
                 </div>
 
                 {subTotalPendingAdvAmount > 0 && (
-                  <div className="bg-slate-900/40 p-2.5 rounded-lg border border-slate-850 flex items-center justify-between text-xs">
+                  <div className="bg-slate-900/40 p-2.5 rounded-xl border border-slate-850 flex items-center justify-between text-xs">
                     <span className="text-slate-400 text-[10px] font-medium uppercase">Đề xuất khác đang chờ duyệt:</span>
                     <span className="font-bold text-slate-300 font-mono">
                       -{subTotalPendingAdvAmount.toLocaleString('vi-VN')} đ
@@ -5191,7 +5191,7 @@ export default function TaskDetailModal({
                   type="text" 
                   disabled 
                   value={project?.name || 'Không xác định'}
-                  className="bg-slate-950 border border-slate-850 rounded-lg p-2.5 w-full text-xs text-slate-400 cursor-not-allowed font-sans font-medium"
+                  className="bg-slate-950 border border-slate-850 rounded-xl p-2.5 w-full text-xs text-slate-400 cursor-not-allowed font-sans font-medium"
                 />
               </div>
 
@@ -5202,7 +5202,7 @@ export default function TaskDetailModal({
                   type="text" 
                   disabled 
                   value={selectedTask.name}
-                  className="bg-slate-950 border border-slate-850 rounded-lg p-2.5 w-full text-xs text-slate-400 cursor-not-allowed font-sans font-medium"
+                  className="bg-slate-950 border border-slate-850 rounded-xl p-2.5 w-full text-xs text-slate-400 cursor-not-allowed font-sans font-medium"
                 />
               </div>
 
@@ -5214,7 +5214,7 @@ export default function TaskDetailModal({
                   value={subcontractorAdvAmount || ''}
                   onChange={(e) => setSubcontractorAdvAmount(Number(e.target.value))}
                   placeholder="Nhập số tiền VNĐ..."
-                  className={`bg-slate-950 border rounded-lg p-2.5 w-full text-xs font-mono font-bold focus:outline-none ${
+                  className={`bg-slate-950 border rounded-xl p-2.5 w-full text-xs font-mono font-bold focus:outline-none ${
                     subcontractorAdvAmount > subRemainingLiability 
                       ? 'border-rose-500 text-rose-200 focus:border-rose-500' 
                       : 'border-slate-800 text-slate-100 focus:border-emerald-500'
@@ -5240,7 +5240,7 @@ export default function TaskDetailModal({
                   onChange={(e) => setSubcontractorAdvReason(e.target.value)}
                   placeholder="Nhập diễn giải chi tiết cho khoản đề xuất tạm ứng..."
                   rows={2}
-                  className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 w-full text-xs text-slate-100 focus:outline-none focus:border-emerald-500 font-sans"
+                  className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 w-full text-xs text-slate-100 focus:outline-none focus:border-emerald-500 font-sans"
                 />
               </div>
 
@@ -5251,7 +5251,7 @@ export default function TaskDetailModal({
                   <select
                     value={advProposalApprover}
                     onChange={(e) => setAdvProposalApprover(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 w-full text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-sans cursor-pointer"
+                    className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 w-full text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-sans cursor-pointer"
                   >
                     {finalManagementGroup.map((emp) => {
                       let roleLabel = '';
@@ -5273,7 +5273,7 @@ export default function TaskDetailModal({
                   <select
                     value={advProposalCreator}
                     onChange={(e) => setAdvProposalCreator(e.target.value)}
-                    className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 w-full text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-sans cursor-pointer"
+                    className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 w-full text-xs text-slate-200 focus:outline-none focus:border-emerald-500 font-sans cursor-pointer"
                   >
                     {finalManagementGroup.map((emp) => {
                       let roleLabel = '';
@@ -5296,7 +5296,7 @@ export default function TaskDetailModal({
               <button
                 type="button"
                 onClick={() => setIsAdvancingSubcontractor(false)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-lg cursor-pointer transition-colors font-sans"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-xl cursor-pointer transition-colors font-sans"
               >
                 Hủy bỏ
               </button>
@@ -5329,7 +5329,7 @@ export default function TaskDetailModal({
                     }
                   });
                 }}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs rounded-lg cursor-pointer transition-all hover:scale-[1.01] font-sans"
+                style={{ color: '#ffffff' }} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs rounded-xl cursor-pointer transition-all hover:scale-[1.01] font-sans"
               >
                 Gửi Đề Xuất
               </button>
@@ -5369,7 +5369,7 @@ export default function TaskDetailModal({
                   }
                   setCustomDialog(null);
                 }} 
-                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 p-1.5 rounded-lg transition-colors cursor-pointer"
+                className="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 p-1.5 rounded-xl transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -5390,7 +5390,7 @@ export default function TaskDetailModal({
                       if (customDialog.onCancel) customDialog.onCancel();
                       setCustomDialog(null);
                     }}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-lg cursor-pointer transition-colors font-sans"
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-xl cursor-pointer transition-colors font-sans"
                   >
                     Hủy bỏ
                   </button>
@@ -5400,7 +5400,7 @@ export default function TaskDetailModal({
                       if (customDialog.onConfirm) customDialog.onConfirm();
                       setCustomDialog(null);
                     }}
-                    className="px-4 py-2 bg-[#00a651] hover:bg-[#008f45] text-white font-bold text-xs rounded-lg cursor-pointer transition-all hover:scale-[1.01] font-sans"
+                    style={{ color: '#ffffff' }} className="px-4 py-2 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-bold text-xs rounded-xl cursor-pointer transition-all hover:scale-[1.01] font-sans"
                   >
                     Xác nhận
                   </button>
@@ -5412,7 +5412,7 @@ export default function TaskDetailModal({
                     if (customDialog.onConfirm) customDialog.onConfirm();
                     setCustomDialog(null);
                   }}
-                  className="px-5 py-2.5 bg-[#00a651] hover:bg-[#008f45] text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all hover:scale-[1.01] font-sans"
+                  style={{ color: '#ffffff' }} className="px-5 py-2.5 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-extrabold text-xs rounded-xl cursor-pointer transition-all hover:scale-[1.01] font-sans"
                 >
                   Xác nhận
                 </button>
