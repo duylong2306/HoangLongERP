@@ -2519,7 +2519,7 @@ export default function MaterialCoordination({
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <span className="text-[11px] font-black text-[#0d47c9]">{quoteTotal(q).toLocaleString('vi-VN')} đ</span>
-                                  <button type="button" onClick={() => setQuoteDetailModal({ open: true, quote: q, proposalCode: prop.code })} className="p-1 text-sky-600 hover:bg-sky-50 rounded cursor-pointer" title="Xem chi tiết báo giá">
+                                  <button type="button" onClick={() => setQuoteDetailModal({ open: true, quote: q, proposalCode: prop.code })} className="p-1 text-[#0d47c9] hover:bg-[#e8efff] rounded cursor-pointer" title="Xem chi tiết báo giá">
                                     <Eye className="w-3.5 h-3.5" />
                                   </button>
                                   {isCoordinator && (
@@ -2556,14 +2556,14 @@ export default function MaterialCoordination({
                   if (prop.status !== 'waiting_approval') return null;
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 shadow-xs">
-                      <span className="font-extrabold text-[11.5px] text-sky-700 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+                      <span className="font-extrabold text-[11.5px] text-[#0d47c9] flex items-center gap-1.5 border-b border-slate-100 pb-2">
                         <ShieldCheck className="w-4 h-4" /> Xét duyệt — chọn 1 báo giá
                       </span>
                       {(prop.quotes || []).map((q: any) => (
                         <div key={q.id} className="relative">
                           <label
                             className={`flex items-start gap-3 border rounded-xl p-3 cursor-pointer transition-all ${
-                              chosenQuoteId === q.id ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-500/30' : 'border-slate-200 bg-white hover:border-slate-300'
+                              chosenQuoteId === q.id ? 'border-[#0d47c9] bg-[#e8efff] ring-1 ring-[#bcd0ff]' : 'border-slate-200 bg-white hover:border-slate-300'
                             }`}
                           >
                             <input
@@ -2571,7 +2571,7 @@ export default function MaterialCoordination({
                               name={`quote-${prop.id}`}
                               checked={chosenQuoteId === q.id}
                               onChange={() => setChosenQuoteId(q.id)}
-                              className="mt-0.5 accent-sky-600"
+                              className="mt-0.5 accent-[#0d47c9]"
                             />
                             <div className="flex-1">
                               <div className="flex justify-between">
@@ -2591,7 +2591,7 @@ export default function MaterialCoordination({
                           <button
                             type="button"
                             onClick={() => setQuoteDetailModal({ open: true, quote: q, proposalCode: prop.code })}
-                            className="absolute top-2 right-2 p-1 text-sky-600 hover:bg-sky-50 rounded cursor-pointer"
+                            className="absolute top-2 right-2 p-1 text-[#0d47c9] hover:bg-[#e8efff] rounded cursor-pointer"
                             title="Xem chi tiết báo giá"
                           >
                             <Eye className="w-3.5 h-3.5" />
@@ -2649,14 +2649,14 @@ export default function MaterialCoordination({
 
                   return (
                     <div className="bg-white border border-slate-200 p-3 sm:p-5 rounded-2xl space-y-3 sm:space-y-4 shadow-xs">
-                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-violet-600 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+                      <span className="font-extrabold text-[11px] sm:text-[11.5px] text-[#0d47c9] flex items-center gap-1.5 border-b border-slate-100 pb-2">
                         <Layers className="w-4 h-4" /> Gán nguồn vật tư & Tạo đơn hàng
                       </span>
 
                       {/* Áp dụng nhanh 1 nguồn (NCC hoặc Kho có sẵn) cho toàn bộ danh mục */}
-                      <div className="border border-violet-200 bg-violet-50 rounded-xl p-3 space-y-1.5">
+                      <div className="border border-[#bcd0ff] bg-[#e8efff] rounded-xl p-3 space-y-1.5">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[10px] font-blackr text-violet-700">Áp dụng 1 nguồn cho toàn bộ danh mục</span>
+                          <span className="text-[10px] font-black text-[#0d47c9]">Áp dụng 1 nguồn cho toàn bộ danh mục</span>
                           {uniformSid && (
                             <button
                               type="button"
@@ -2683,7 +2683,7 @@ export default function MaterialCoordination({
                           const invMatch = isFromKho ? findInvMatch(it.name) : null;
                           const overStock = isFromKho && (!invMatch || (it.qty || 0) > (invMatch.qty || 0));
                           return (
-                            <div key={it.id || idx} className={`border rounded-xl p-2.5 ${overStock ? 'border-rose-300 bg-rose-50/60' : 'border-slate-200 bg-violet-50/30'}`}>
+                            <div key={it.id || idx} className={`border rounded-xl p-2.5 ${overStock ? 'border-rose-300 bg-rose-50/60' : 'border-slate-200 bg-[#e8efff]/30'}`}>
                               <div className="flex items-center justify-between gap-2 flex-wrap">
                                 <div className="flex-1 min-w-[150px]">
                                   <span className="text-[11px] font-bold text-slate-800">{it.name}</span>
@@ -2700,10 +2700,10 @@ export default function MaterialCoordination({
                                 />
                               </div>
                               {currentSid && !isFromKho && (
-                                <p className="text-[9px] text-violet-600 font-bold mt-1">✔ Đã chọn: {suppliers.find(s => s.id === currentSid)?.name || ''}</p>
+                                <p className="text-[9px] text-[#0d47c9] font-bold mt-1">✔ Đã chọn: {suppliers.find(s => s.id === currentSid)?.name || ''}</p>
                               )}
                               {isFromKho && invMatch && (
-                                <p className={`text-[9px] font-bold mt-1 ${overStock ? 'text-rose-600' : 'text-violet-600'}`}>
+                                <p className={`text-[9px] font-bold mt-1 ${overStock ? 'text-rose-600' : 'text-[#0d47c9]'}`}>
                                   ✔ Kho có sẵn — đơn giá nhập: {(invMatch.unitPrice || 0).toLocaleString('vi-VN')}đ · tồn: {invMatch.qty} {invMatch.unit}
                                   {overStock && ` — VƯỢT TỒN KHO (đề xuất ${it.qty}, còn ${invMatch.qty})`}
                                 </p>
@@ -2726,7 +2726,7 @@ export default function MaterialCoordination({
                             type="button"
                             onClick={() => createOrders(prop)}
                             disabled={hasStockViolation || isCreatingOrder}
-                            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[12px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                            className="w-full h-10 bg-[#0d47c9] hover:bg-[#0a3aa8] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                           >
                             <FileText className="w-4 h-4" /> {isCreatingOrder ? 'Đang xử lý...' : 'Tạo đơn hàng / Xuất kho'}
                           </button>
@@ -2931,8 +2931,8 @@ export default function MaterialCoordination({
                 className={`${showRightPane ? 'fixed inset-0 z-[56] bg-black/40 lg:bg-transparent lg:relative lg:inset-auto lg:z-auto' : 'hidden'} lg:block lg:w-[280px] shrink-0`}
                 onClick={(e) => { if (showRightPane && e.target === e.currentTarget) setShowRightPane(false); }}
               >
-                <div className={`${showRightPane ? 'absolute right-0 top-0 h-full w-[85vw] max-w-[320px] shadow-2xl' : ''} lg:relative lg:w-full lg:max-w-none lg:shadow-none p-4 sm:p-5 bg-white lg:bg-slate-50 border-l border-slate-200 space-y-4 h-full overflow-y-auto`} id="drawer_right_pane">
-                <span className="font-extrabold text-[10px] text-slate-600 blockr mb-1">
+                <div className={`${showRightPane ? 'absolute right-0 top-0 h-full w-[85vw] max-w-[320px] shadow-2xl' : ''} lg:relative lg:w-full lg:max-w-none lg:shadow-none p-4 sm:p-5 bg-white lg:bg-white border-l border-slate-200 space-y-4 h-full overflow-y-auto`} id="drawer_right_pane">
+                <span className="font-extrabold text-[11px] text-slate-500 block mb-1">
                   CÔNG CỤ ĐIỀU PHỐI
                 </span>
 {/* ── Status-specific workflow panels ── */}
@@ -2949,14 +2949,14 @@ export default function MaterialCoordination({
                               <button
                                 type="button"
                                 onClick={() => submitForApproval(prop)}
-                                className="w-full bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                                className="w-full h-10 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                               >
                                 <Send className="w-4 h-4" /> Gửi xét duyệt
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleCancel(prop)}
-                                className="w-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-lg cursor-pointer transition-all"
+                                className="w-full h-10 bg-white hover:bg-rose-50 text-rose-600 border border-rose-300 text-[12px] font-bold rounded-xl cursor-pointer transition-all"
                               >
                                 Hủy bỏ
                               </button>
@@ -2975,21 +2975,21 @@ export default function MaterialCoordination({
                               <button
                                 type="button"
                                 onClick={() => handleApprove(prop)}
-                                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                                className="w-full h-10 bg-emerald-600 hover:bg-emerald-500 text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                               >
                                 <Check className="w-4 h-4" /> Duyệt
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleReject(prop)}
-                                className="w-full bg-orange-500 hover:bg-orange-400 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                                className="w-full h-10 bg-white hover:bg-amber-50 text-amber-700 border border-amber-300 text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                               >
                                 <RefreshCcw className="w-4 h-4" /> Từ chối
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleCancel(prop)}
-                                className="w-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-lg cursor-pointer transition-all"
+                                className="w-full h-10 bg-white hover:bg-rose-50 text-rose-600 border border-rose-300 text-[12px] font-bold rounded-xl cursor-pointer transition-all"
                               >
                                 Hủy bỏ
                               </button>
@@ -3002,10 +3002,10 @@ export default function MaterialCoordination({
                     if (st === 'waiting_order') {
                       return (
                         <div className="space-y-3 pt-1">
-                          <span className="font-extrabold text-[11px] text-violet-700 flex items-center gap-1.5">
+                          <span className="font-extrabold text-[11px] text-[#0d47c9] flex items-center gap-1.5">
                             <Layers className="w-4 h-4" /> CHỜ ĐẶT HÀNG — tạo đơn hàng tại chi tiết đề xuất
                           </span>
-                          <p className="text-[11px] text-slate-600 bg-violet-50 border border-violet-200 rounded-xl p-3 leading-relaxed">
+                          <p className="text-[11px] text-slate-600 bg-[#e8efff] border border-[#bcd0ff] rounded-xl p-3 leading-relaxed">
                             Gán nhà cung cấp &amp; <strong>Tạo đơn hàng</strong> nằm ở phần chi tiết đề xuất (bên trái). Sau khi có đơn hàng, nhấn <strong>Đặt Hàng</strong> bên dưới để chuyển cột.
                           </p>
                           
@@ -3016,14 +3016,14 @@ export default function MaterialCoordination({
                                 onClick={() => markOrdered(prop)}
                                 disabled={(prop.purchaseOrderIds || []).length === 0}
                                 title={(prop.purchaseOrderIds || []).length === 0 ? 'Cần Tạo đơn hàng trước khi Đặt Hàng' : ''}
-                                className={`flex-1 ${(prop.purchaseOrderIds || []).length === 0 ? 'opacity-50 cursor-not-allowed bg-[#0d47c9]' : 'bg-[#0d47c9] hover:bg-[#0a3aa8] cursor-pointer'} text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all`}
+                                className={`w-full h-10 ${(prop.purchaseOrderIds || []).length === 0 ? 'opacity-50 cursor-not-allowed bg-[#0d47c9]' : 'bg-[#0d47c9] hover:bg-[#0a3aa8] cursor-pointer'} text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all`}
                               >
                                 <Check className="w-4 h-4" /> Đặt Hàng
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleCancel(prop)}
-                                className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black px-4 py-2.5 rounded-lg cursor-pointer transition-all"
+                                className="w-full h-10 bg-white hover:bg-rose-50 text-rose-600 border border-rose-300 text-[12px] font-bold rounded-xl cursor-pointer transition-all"
                               >
                                 Hủy bỏ
                               </button>
@@ -3053,21 +3053,21 @@ export default function MaterialCoordination({
                                 }}
                                 disabled={!hasSelectedOrder}
                                 title={!hasSelectedOrder ? 'Chọn một đơn hàng trong mục Đơn hàng đã tạo bên trái' : ''}
-                                className={`flex-1 ${!hasSelectedOrder ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all`}
+                                className={`w-full h-10 ${!hasSelectedOrder ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all`}
                               >
                                 <PackageCheck className="w-4 h-4" /> Nhận hàng
                               </button>
                               <button
                                 type="button"
                                 onClick={() => changeSupplier(prop)}
-                                className="flex-1 bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                                className="w-full h-10 bg-white hover:bg-[#e8efff] text-[#0d47c9] border border-[#bcd0ff] text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                               >
                                 <RefreshCcw className="w-4 h-4" /> Đổi NCC
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleCancel(prop)}
-                                className="bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black px-4 py-2.5 rounded-lg cursor-pointer transition-all"
+                                className="w-full h-10 bg-white hover:bg-rose-50 text-rose-600 border border-rose-300 text-[12px] font-bold rounded-xl cursor-pointer transition-all"
                               >
                                 Hủy bỏ
                               </button>
@@ -3088,7 +3088,7 @@ export default function MaterialCoordination({
                             <button
                               type="button"
                               onClick={() => handleCancel(prop)}
-                              className="w-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-lg cursor-pointer transition-all"
+                              className="w-full h-10 bg-white hover:bg-rose-50 text-rose-600 border border-rose-300 text-[12px] font-bold rounded-xl cursor-pointer transition-all"
                             >
                               Hủy bỏ
                             </button>
@@ -3106,8 +3106,8 @@ export default function MaterialCoordination({
                     );
                   })()}
 
-                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl">
-                  <p className="text-[10px] text-indigo-700 leading-relaxed font-medium">
+                <div className="p-3 bg-[#e8efff] border border-[#bcd0ff] rounded-xl">
+                  <p className="text-[10px] text-slate-600 leading-relaxed font-medium">
                     💡 <strong>Quy trình:</strong> Sản phẩm có mã Danh mục MUA đi thẳng vào <strong>CHỜ ĐẶT HÀNG</strong>; sản phẩm chưa có mã vào <strong>TÌM NHÀ CUNG CẤP</strong>.
                   </p>
                 </div>
@@ -3249,7 +3249,7 @@ export default function MaterialCoordination({
             <div className="flex flex-col items-center text-center space-y-4">
               <div className={`p-3 rounded-full shrink-0 ${
                 customAlert.type === 'warning' ? 'bg-amber-100 text-amber-500'
-                : customAlert.type === 'info' ? 'bg-sky-100 text-sky-500'
+                : customAlert.type === 'info' ? 'bg-[#e8efff] text-[#0d47c9]'
                 : 'bg-emerald-100 text-emerald-500'
               }`}>
                 {customAlert.type === 'warning' ? (
@@ -3401,9 +3401,9 @@ export default function MaterialCoordination({
               ) : (
                 <button type="button" disabled className="flex-1 bg-slate-100 text-slate-400 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-not-allowed"><Trash2 className="w-3.5 h-4" /> <span className="hidden xs:inline">Xóa</span></button>
               )}
-              <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-sky-50 hover:bg-sky-100 text-sky-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Printer className="w-3.5 h-4" /> In</button>
+              <button type="button" onClick={() => printOrder(od)} className="flex-1 bg-[#e8efff] hover:bg-[#d6e2ff] text-[#0d47c9] text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"><Printer className="w-3.5 h-4" /> In</button>
               <button type="button" onClick={() => downloadOrderPdf(od)} className="flex-1 bg-[#e8efff] hover:bg-[#d6e2ff] text-[#0d47c9] text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all" title="Tải PDF về máy rồi kéo thả vào Zalo để gửi"><Download className="w-3.5 h-4" /> <span className="hidden xs:inline">Tải PDF</span></button>
-              <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all"><Share2 className="w-3.5 h-4" /> Chia sẻ</button>
+              <button type="button" onClick={() => { setOrderDetailModal({ open: false, order: null }); shareOrder(od); }} className="flex-1 bg-[#e8efff] hover:bg-[#d6e2ff] text-[#0d47c9] text-[10px] sm:text-xs font-bold py-2 sm:py-2.5 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-all"><Share2 className="w-3.5 h-4" /> Chia sẻ</button>
             </div>
           </div>
         </div>
@@ -3993,7 +3993,7 @@ export default function MaterialCoordination({
                   <button
                     type="button"
                     onClick={() => setShowQuickSupplier((v) => !v)}
-                    className="text-[10px] text-sky-600 hover:text-sky-800 hover:underline font-semibold cursor-pointer"
+                    className="text-[10px] text-[#0d47c9] hover:text-[#0a3aa8] hover:underline font-semibold cursor-pointer"
                   >
                     + Thêm NCC nhanh
                   </button>
@@ -4010,7 +4010,7 @@ export default function MaterialCoordination({
                     <button
                       type="button"
                       onClick={addQuickSupplier}
-                      className="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-[11px] font-black cursor-pointer transition-all"
+                      className="px-2.5 py-1.5 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white rounded-xl text-[11px] font-bold cursor-pointer transition-all"
                     >
                       Lưu
                     </button>
