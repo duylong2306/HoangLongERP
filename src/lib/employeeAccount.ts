@@ -37,3 +37,16 @@ export const SESSION_REVOKE_MESSAGES: Record<SessionRevokeReason, string> = {
   revoked: 'Tài khoản của bạn đã bị thu hồi. Bạn sẽ được đăng xuất.',
   retired: 'Hồ sơ của bạn đã chuyển sang nghỉ việc. Bạn sẽ được đăng xuất.',
 };
+
+/**
+ * Phiên lưu trong trình duyệt mà KHÔNG tìm thấy trong danh sách nhân viên đã nạp (VD: máy chủ không trả được danh sách).
+ * Dữ liệu phiên nằm trong localStorage — ai cũng sửa tay được — nên KHÔNG tin các trường quyền (vai trò, nhóm quyền) của nó:
+ * chỉ giữ thông tin nhận diện để hiển thị; quyền thật nạp lại từ máy chủ ở lần tải sau. (Dữ liệu công ty vẫn do RLS + JWT chặn ở máy chủ.)
+ */
+export function untrustedSessionUser<T extends { id?: string; name?: string; username?: string; avatar?: string; email?: string; phone?: string; department?: string }>(session: T): T {
+  return {
+    id: session.id, name: session.name, username: session.username, avatar: session.avatar,
+    email: session.email || '', phone: session.phone || '', department: session.department || '',
+    roleGroupIds: [], hasSystemAccount: true,
+  } as unknown as T;
+}

@@ -77,13 +77,22 @@ export function AuthProvider({
   children,
   employees,
   addToast,
+  currentUser: controlledUser,
+  onCurrentUserChange,
 }: {
   children: ReactNode;
   employees: Employee[];
+  /**
+   * NGƯỜI ĐANG ĐĂNG NHẬP do App quản lý. Truyền vào (kèm onCurrentUserChange) thì context CHỈ phản chiếu đúng bản của App —
+   * trước đây context giữ một bản riêng đọc từ storage một lần lúc mở trang nên bị lệch (quyền/tên/ảnh đổi mà các màn hình
+   * dùng useAuth() vẫn thấy dữ liệu cũ). Không truyền thì context tự quản lý như trước (dùng trong test độc lập).
+   */
+  currentUser?: Employee | null;
+  onCurrentUserChange?: (user: Employee | null) => void;
   addToast: (toast: { title: string; message: string; type?: 'success' | 'info' | 'warning' | 'error'; duration?: number }) => void;
 }) {
   // Initialize currentUser from session/localStorage
-  const [currentUser, setCurrentUser] = useState<Employee | null>(() => {
+  const [localUser, setLocalUser] = useState<Employee | null>(() => {
     const sessionActive = sessionStorage.getItem('hl_erp_active_session');
     if (sessionActive) {
       try { return JSON.parse(sessionActive); } catch {} /* eslint-disable-line no-empty */
@@ -98,6 +107,14 @@ export function AuthProvider({
     }
     return null;
   });
+
+  // Chế độ "điều khiển": có currentUser từ App thì dùng đúng bản đó; setCurrentUser chuyển ngược lên App
+  const controlled = controlledUser !== undefined;
+  const currentUser = controlled ? controlledUser : localUser;
+  const setCurrentUser = useCallback((u: Employee | null) => {
+    onCurrentUserChange?.(u);
+    if (!controlled) setLocalUser(u);
+  }, [controlled, onCurrentUserChange]);
 
   const isLoggedIn = currentUser !== null;
 
@@ -171,9 +188,9 @@ export function AuthProvider({
         try {
           const parsed = JSON.parse(remembered);
           if (parsed.username === updatedUser.username) {
+            // Chỉ nhớ TÊN ĐĂNG NHẬP — tuyệt đối không ghi mật khẩu (kể cả bản băm) vào localStorage
             localStorage.setItem('hl_erp_remembered_credentials', JSON.stringify({
-              username: updatedUser.username,
-              password: updatedUser.password
+              username: updatedUser.username
             }));
           }
         } catch {} /* eslint-disable-line no-empty */
@@ -202,7 +219,7 @@ export function AuthProvider({
     handleLoginSuccess,
     handleLogout,
     handleUpdateProfile,
-  }), [currentUser, isLoggedIn, handleLoginSuccess, handleLogout, handleUpdateProfile]);
+  }), [currentUser, setCurrentUser, isLoggedIn, handleLoginSuccess, handleLogout, handleUpdateProfile]);
 
   return (
     <AuthContext.Provider value={value}>

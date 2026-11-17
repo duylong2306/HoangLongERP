@@ -6,7 +6,7 @@ import { postProjectNotice, type ProjectNoticeParams } from './lib/projectNotice
 import { recordProjectEvent } from './lib/projectEvents';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { dbService, invalidateCache, normalizeOrderItems, currentMonthRange, rowToCamel, populateCache, stableStr } from './lib/dbService';
-import { hasLoginAccount, sessionRevokeReason, SESSION_REVOKE_MESSAGES } from './lib/employeeAccount';
+import { hasLoginAccount, sessionRevokeReason, SESSION_REVOKE_MESSAGES, untrustedSessionUser } from './lib/employeeAccount';
 import { filterLegacyFallbackTabs } from './lib/legacyRoleTabs';
 import { syncAttendanceOutbox, pendingCount as outboxPendingCount } from './lib/attendanceOutbox';
 import { useWebPush } from './hooks/useWebPush';
@@ -716,7 +716,8 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
               setCurrentUser(foundUser);
               sessionStorage.setItem('hl_erp_active_session', JSON.stringify(stripPassword(foundUser)));
             } else {
-              setCurrentUser(parsedSession);
+              // Không tìm thấy trong danh sách → không tin vai trò/nhóm quyền ghi trong phiên (localStorage sửa tay được), chỉ giữ thông tin nhận diện
+              setCurrentUser(untrustedSessionUser(parsedSession));
             }
             }
           } catch { setCurrentUser(null); }
@@ -3726,7 +3727,7 @@ function AppContent({ toasts, setToasts, addToast, removeToast, employees, setEm
   const currentFont = displaySettings.fontFamily || 'Inter';
 
   return (
-    <AuthProvider employees={employees} addToast={addToast}>
+    <AuthProvider employees={employees} addToast={addToast} currentUser={currentUser} onCurrentUserChange={setCurrentUser}>
       <NotificationProvider toasts={toasts} addToast={addToast} removeToast={removeToast}>
         {/* Thanh báo "Có bản mới" — máy mở lâu không tự lấy bản mới nên phải nhắc người dùng tải lại */}
         <UpdateBanner />
