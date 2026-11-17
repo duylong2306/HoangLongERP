@@ -52,7 +52,7 @@ export function WorkList({ entries, selectedKey, onSelect, unreadKeys, today, qu
             <div className="px-3.5 pt-2.5 pb-1 text-[11px] font-extrabold text-slate-500 bg-slate-50 border-t border-slate-100 flex items-center gap-1.5">{SECTION_LABEL[s]}<span className="bg-slate-200/70 rounded-full px-1.5 text-[10.5px]">{rows.length}</span></div>
             {rows.map(e => (
               <button key={e.key} type="button" data-testid="work-row" data-work={e.key} onClick={() => onSelect(e.key)}
-                className={`w-full text-left grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 items-center cursor-pointer ${selectedKey === e.key ? 'bg-[#e8efff]' : 'hover:bg-slate-50'}`}>
+                className={`w-[calc(100%-1rem)] mx-2 my-0.5 rounded-xl text-left grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3 py-2.5 items-center cursor-pointer border ${selectedKey === e.key ? 'bg-[#e8efff] border-[#bcd0ff]' : 'border-transparent hover:bg-slate-50'}`}>
                 <span className={`w-12 h-12 rounded-2xl grid place-items-center px-0.5 text-[9.5px] font-black text-center leading-[1.1] break-words ${TONE[e.chipTone] || TONE.slate}`}>{e.chip}</span>
                 <span className="min-w-0">
                   <span className="flex items-center gap-2"><b className="text-[14px] font-semibold truncate" title={e.title}>{e.title}</b>{unreadKeys.has(e.key) && <i className="ml-auto w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" data-testid="work-unread" aria-label="Có thảo luận mới" />}</span>
@@ -114,14 +114,14 @@ export function WorkDetail({ entry, me, meName, employees, today, onBack }: {
         <div className="flex items-start gap-3">
           <button type="button" onClick={onBack} className="lg:hidden p-1 -ml-1 mt-0.5 text-slate-700 cursor-pointer" aria-label="Quay lại danh sách"><ChevronLeft className="w-6 h-6" /></button>
           <div className="min-w-0 flex-1">
-            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${TONE[entry.chipTone] || TONE.slate}`}>{entry.chip}</span>
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${TONE[entry.chipTone] || TONE.slate}`}>{entry.chip}</span>
             <h2 className="text-[17px] font-extrabold tracking-tight mt-1 leading-snug" data-testid="work-title">{entry.title}</h2>
             <div className="text-[12.5px] text-slate-500 flex items-center gap-2 flex-wrap mt-0.5">{entry.meta}<DueChip due={entry.due} today={today} /></div>
           </div>
           {entry.amount ? <b className="text-[19px] text-rose-600 whitespace-nowrap">{money(entry.amount)}</b> : entry.rate !== null ? <Ring pct={entry.rate} /> : null}
         </div>
         <div className="flex gap-2 flex-wrap mt-2.5" data-testid="work-actions">
-          {entry.actions.map(a => <button key={a.label} type="button" onClick={a.onClick} className={`px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold cursor-pointer ${btnCls(a.tone)}`}>{a.label}</button>)}
+          {entry.actions.map(a => <button key={a.label} type="button" onClick={a.onClick} className={`h-9 px-4 rounded-xl text-[13px] font-bold cursor-pointer ${btnCls(a.tone)}`}>{a.label}</button>)}
         </div>
       </header>
       <div className="flex-1 overflow-y-auto min-h-0 px-3 sm:px-5 py-3 bg-[#f3f6fc]" data-testid="work-thread">

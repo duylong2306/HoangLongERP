@@ -671,13 +671,13 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
         {selected.type === 'personal' && otherOf(selected)?.position && <small className="text-slate-500">{otherOf(selected)?.position}</small>}
       </div>
       <div className="grid grid-cols-3 gap-1 px-3 pt-2 pb-4 text-center text-[11.5px] text-slate-600">
-        <button type="button" onClick={() => toggleMute(selected.id)} className="cursor-pointer" data-testid="zalo-mute"><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full ${mutedSel ? 'bg-[#e8efff] text-[#0d47c9]' : 'bg-slate-100'}`}>{mutedSel ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}</span>{mutedSel ? 'Bật thông báo' : 'Tắt thông báo'}</button>
-        <button type="button" onClick={() => toggleStar(selected.id)} className="cursor-pointer" data-testid="zalo-star" aria-pressed={isStarredConv(selected, prefs)}><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full ${isStarredConv(selected, prefs) ? 'bg-amber-100 text-amber-500' : 'bg-slate-100'}`}><Star className="w-4 h-4" fill={isStarredConv(selected, prefs) ? 'currentColor' : 'none'} /></span>{isStarredConv(selected, prefs) ? 'Bỏ quan tâm' : 'Quan tâm'}</button>
-        <button type="button" onClick={() => (selected.type === 'personal' ? (setGroupMembers([otherOf(selected)?.id || '']), setGroupOpen(true)) : setAddMemberOpen(true))} className="cursor-pointer"><span className="mx-auto mb-1 grid place-items-center w-9 h-9 rounded-full bg-slate-100"><UserPlus className="w-4 h-4" /></span>{selected.type === 'personal' ? 'Tạo nhóm' : 'Thêm thành viên'}</button>
+        <button type="button" onClick={() => toggleMute(selected.id)} className="cursor-pointer" data-testid="zalo-mute"><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-xl ${mutedSel ? 'bg-[#e8efff] text-[#0d47c9]' : 'bg-slate-100'}`}>{mutedSel ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}</span>{mutedSel ? 'Bật thông báo' : 'Tắt thông báo'}</button>
+        <button type="button" onClick={() => toggleStar(selected.id)} className="cursor-pointer" data-testid="zalo-star" aria-pressed={isStarredConv(selected, prefs)}><span className={`mx-auto mb-1 grid place-items-center w-9 h-9 rounded-xl ${isStarredConv(selected, prefs) ? 'bg-amber-100 text-amber-500' : 'bg-slate-100'}`}><Star className="w-4 h-4" fill={isStarredConv(selected, prefs) ? 'currentColor' : 'none'} /></span>{isStarredConv(selected, prefs) ? 'Bỏ quan tâm' : 'Quan tâm'}</button>
+        <button type="button" onClick={() => (selected.type === 'personal' ? (setGroupMembers([otherOf(selected)?.id || '']), setGroupOpen(true)) : setAddMemberOpen(true))} className="cursor-pointer"><span className="mx-auto mb-1 grid place-items-center w-9 h-9 rounded-xl bg-slate-100"><UserPlus className="w-4 h-4" /></span>{selected.type === 'personal' ? 'Tạo nhóm' : 'Thêm thành viên'}</button>
       </div>
       {(selected.projectId || selected.taskId) && (
-        <div className="border-t-8 border-slate-100 px-4 py-3">
-          <div className="font-bold text-[13px] mb-1.5">{selected.taskId ? 'Công việc liên quan' : 'Dự án'}</div>
+        <div className="mx-3 mb-3 px-3.5 py-3 border border-slate-200 rounded-2xl">
+          <div className="font-extrabold text-[13px] text-slate-800 mb-1.5">{selected.taskId ? 'Công việc liên quan' : 'Dự án'}</div>
           {selected.taskId ? (
             <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('hl-open-task', { detail: { taskId: selected.taskId } }))} className="text-[12px] font-bold text-[#0d47c9] bg-[#e8efff] border border-[#bcd0ff] rounded-lg px-3 py-1.5 cursor-pointer">Mở công việc</button>
           ) : (() => {
@@ -699,54 +699,54 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
         </div>
       )}
       {selected.type !== 'personal' && (
-        <div className="border-t-8 border-slate-100 px-4 py-3" data-testid="zalo-members">
-          <div className="font-bold text-[13px] mb-2">Thành viên ({new Set(selected.participantIds).size})</div>
+        <div className="mx-3 mb-3 px-3.5 py-3 border border-slate-200 rounded-2xl" data-testid="zalo-members">
+          <div className="font-extrabold text-[13px] text-slate-800 mb-2">Thành viên ({new Set(selected.participantIds).size})</div>
           {Array.from(new Set(selected.participantIds)).slice(0, 8).map(id => { const e = employees.find(x => x.id === id); return (
             <div key={id} className="flex items-center gap-2.5 my-1.5 text-[13px]"><UserAvatar employee={e || null} name={e?.name || id} size="sm" noRing /><span className="truncate">{e?.name || id}{id === me ? ' (Bạn)' : ''}</span>{isOnline(id) && <i className="w-2 h-2 rounded-full bg-emerald-500 ml-auto" />}</div>); })}
         </div>
       )}
-      <div className="border-t-8 border-slate-100 px-4 py-3" data-testid="zalo-media">
-        <div className="font-bold text-[13px] mb-2">Ảnh/Video</div>
+      <div className="mx-3 mb-3 px-3.5 py-3 border border-slate-200 rounded-2xl" data-testid="zalo-media">
+        <div className="font-extrabold text-[13px] text-slate-800 mb-2">Ảnh/Video</div>
         {media.images.length === 0 ? <small className="text-slate-400">Chưa có ảnh/video</small> : (
           <div className="grid grid-cols-4 gap-1">{media.images.slice(0, 8).map(i => <button key={i.id} type="button" onClick={() => setExpanded(i.url)} className="aspect-square rounded-md overflow-hidden bg-slate-100 cursor-pointer"><img src={i.url} alt={i.name} className="w-full h-full object-cover" /></button>)}</div>)}
         {media.images.length > 8 && <div className="text-[11.5px] text-slate-500 mt-1.5">+{media.images.length - 8} ảnh khác</div>}
       </div>
-      <div className="border-t-8 border-slate-100 px-4 py-3" data-testid="zalo-files">
-        <div className="font-bold text-[13px] mb-2">File</div>
+      <div className="mx-3 mb-3 px-3.5 py-3 border border-slate-200 rounded-2xl" data-testid="zalo-files">
+        <div className="font-extrabold text-[13px] text-slate-800 mb-2">File</div>
         {media.files.length === 0 ? <small className="text-slate-400">Chưa có tệp</small> : media.files.slice(0, 6).map(f => (
           <a key={f.id} href={f.url} download={f.name} className="flex items-center gap-2.5 my-2 hover:bg-slate-50 rounded-lg">
             <span className="w-9 h-9 rounded-lg bg-sky-100 text-sky-700 grid place-items-center text-[10px] font-extrabold shrink-0">{(f.name.split('.').pop() || 'FILE').slice(0, 4).toUpperCase()}</span>
             <span className="min-w-0"><b className="block text-[12.5px] font-semibold truncate">{f.name}</b><small className="text-slate-500">{new Date(f.at).toLocaleDateString('vi-VN')}</small></span><Download className="w-4 h-4 ml-auto text-slate-400" />
           </a>))}
       </div>
-      <div className="border-t-8 border-slate-100 px-4 py-3" data-testid="zalo-links">
-        <div className="font-bold text-[13px] mb-2">Link</div>
+      <div className="mx-3 mb-3 px-3.5 py-3 border border-slate-200 rounded-2xl" data-testid="zalo-links">
+        <div className="font-extrabold text-[13px] text-slate-800 mb-2">Link</div>
         {links.length === 0 ? <small className="text-slate-400">Chưa có link</small> : links.slice(0, 6).map(l => <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="block text-[12.5px] text-[#0d47c9] truncate my-1.5">{l.url}</a>)}
       </div>
-      <div className="border-t-8 border-slate-100 px-4 py-3">
+      <div className="mx-3 mb-3 px-3.5 py-3 border border-slate-200 rounded-2xl">
         <button type="button" onClick={deleteConv} className="flex items-center gap-2 text-[12.5px] font-bold text-rose-600 cursor-pointer"><Trash2 className="w-4 h-4" />Xóa cuộc trò chuyện</button>
       </div>
     </aside>
   );
 
   return (
-    <div className="relative bg-white overflow-hidden text-slate-900 h-full min-h-0" data-testid="zalo-root">
+    <div className="relative bg-white overflow-hidden text-slate-900 h-full min-h-0 border border-slate-200 rounded-2xl" data-testid="zalo-root">
       {/* Độ rộng 3 cột theo Zalo: danh sách 340px · khung chat co giãn · Thông tin hội thoại 340px (trước đây 300px, hẹp hơn Zalo) */}
       <div className={`grid h-full ${leftMode === 'chat' && infoOpen && selected ? 'lg:grid-cols-[340px_minmax(0,1fr)_340px]' : 'lg:grid-cols-[340px_minmax(0,1fr)]'} grid-cols-1`}>
         {/* ── DANH SÁCH ── */}
         <section className={`${showList ? 'flex' : 'hidden'} lg:flex flex-col min-h-0 border-r border-slate-200`}>
           <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-            <label className="flex-1 flex items-center gap-2 bg-slate-100 rounded-lg px-2.5 py-2 text-[13px] text-slate-500">
+            <label className="flex-1 flex items-center gap-2 bg-white border border-slate-200 focus-within:border-[#0d47c9] rounded-xl px-3 h-9 text-[13px] text-slate-500">
               <Search className="w-4 h-4 shrink-0" />
               <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Tìm kiếm" aria-label="Tìm kiếm hội thoại" className="chat-plain-input bg-transparent outline-none w-full text-slate-900" />
             </label>
-            <button type="button" title="Nhắn tin mới" aria-label="Nhắn tin mới" onClick={() => setNewChatOpen(true)} className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><UserPlus className="w-[18px] h-[18px]" /></button>
-            <button type="button" title="Tạo nhóm" aria-label="Tạo nhóm" onClick={() => { setGroupMembers([]); setGroupOpen(true); }} className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"><Users className="w-[18px] h-[18px]" /></button>
+            <button type="button" title="Nhắn tin mới" aria-label="Nhắn tin mới" onClick={() => setNewChatOpen(true)} className="w-9 h-9 grid place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer"><UserPlus className="w-[18px] h-[18px]" /></button>
+            <button type="button" title="Tạo nhóm" aria-label="Tạo nhóm" onClick={() => { setGroupMembers([]); setGroupOpen(true); }} className="w-9 h-9 grid place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer"><Users className="w-[18px] h-[18px]" /></button>
           </div>
           {/* Chuyển Tin nhắn | Việc của tôi */}
-          <div className="grid grid-cols-2 mx-3 mb-2 p-1 rounded-full bg-slate-100 border border-slate-200" role="group" aria-label="Chọn danh sách" data-testid="zalo-left-switch">
-            <button type="button" aria-pressed={leftMode === 'chat'} onClick={() => setLeftMode('chat')} data-testid="zalo-mode-chat" className={`flex items-center justify-center gap-1.5 py-1.5 rounded-full text-[12.5px] font-bold cursor-pointer ${leftMode === 'chat' ? 'bg-white text-slate-900 shadow ring-1 ring-slate-200' : 'text-slate-500'}`}><MessageSquare className="w-4 h-4" />Tin nhắn</button>
-            <button type="button" aria-pressed={leftMode === 'work'} onClick={() => setLeftMode('work')} data-testid="zalo-mode-work" className={`flex items-center justify-center gap-1.5 py-1.5 rounded-full text-[12.5px] font-bold cursor-pointer ${leftMode === 'work' ? 'bg-white text-slate-900 shadow ring-1 ring-slate-200' : 'text-slate-500'}`}><ClipboardList className="w-4 h-4" />Việc của tôi{workEntries.length > 0 && <span className="min-w-[17px] h-[17px] px-1 rounded-full bg-red-500 text-white text-[10.5px] grid place-items-center" data-testid="zalo-work-badge">{workEntries.length}</span>}</button>
+          <div className="grid grid-cols-2 gap-1.5 mx-3 mb-2" role="group" aria-label="Chọn danh sách" data-testid="zalo-left-switch">
+            <button type="button" aria-pressed={leftMode === 'chat'} onClick={() => setLeftMode('chat')} data-testid="zalo-mode-chat" className={`flex items-center justify-center gap-1.5 h-9 rounded-xl border text-[13px] font-bold cursor-pointer ${leftMode === 'chat' ? 'bg-[#e8efff] border-[#bcd0ff] text-[#0d47c9]' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}><MessageSquare className="w-4 h-4" />Tin nhắn</button>
+            <button type="button" aria-pressed={leftMode === 'work'} onClick={() => setLeftMode('work')} data-testid="zalo-mode-work" className={`flex items-center justify-center gap-1.5 h-9 rounded-xl border text-[13px] font-bold cursor-pointer ${leftMode === 'work' ? 'bg-[#e8efff] border-[#bcd0ff] text-[#0d47c9]' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}><ClipboardList className="w-4 h-4" />Việc của tôi{workEntries.length > 0 && <span className="min-w-[17px] h-[17px] px-1 rounded-full bg-red-500 text-white text-[10.5px] grid place-items-center" data-testid="zalo-work-badge">{workEntries.length}</span>}</button>
           </div>
           {leftMode === 'work' && <div className="flex-1 overflow-y-auto min-h-0" data-testid="zalo-worklist"><WorkList entries={workEntries} selectedKey={workKey} unreadKeys={workUnreadKeys} today={today} query={query} onSelect={k => { setWorkKey(k); setMobileView('chat'); }} /></div>}
           {leftMode === 'chat' && <>
@@ -775,11 +775,11 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
               const unread = c.unreadCount || 0; const muted = prefs.muted.includes(c.id); const starred = isStarredConv(c, prefs); const o = otherOf(c);
               return (
                 <button key={c.id} type="button" data-testid="zalo-conv" data-conv={c.id} onClick={() => { if (selectedId === c.id) setReloadTick(t => t + 1); setSelectedId(c.id); setPendingEmpId(null); setMobileView('chat'); }}
-                  className={`group w-full grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3.5 py-2.5 text-left items-center cursor-pointer ${selectedId === c.id ? 'bg-[#e8efff]' : 'hover:bg-slate-50'}`}>
+                  className={`group w-[calc(100%-1rem)] mx-2 my-0.5 rounded-xl grid grid-cols-[auto_minmax(0,1fr)] gap-3 px-3 py-2.5 text-left items-center cursor-pointer border ${selectedId === c.id ? 'bg-[#e8efff] border-[#bcd0ff]' : 'border-transparent hover:bg-slate-50'}`}>
                   <span className="relative"><ConvAvatar conv={c} employees={employees} me={me} size={48} />{c.type === 'personal' && isOnline(o?.id) && <i className="absolute right-0 bottom-0 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white" />}</span>
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5"><b className={`truncate text-[14.5px] ${unread > 0 && !muted ? 'font-extrabold' : 'font-medium'}`}>{convName(c)}</b>
-                      {categoryOf(c) === 'project' && <span className="text-[9.5px] font-extrabold text-[#0d47c9] bg-[#e8efff] rounded px-1.5 py-px shrink-0">Dự án</span>}
+                      {categoryOf(c) === 'project' && <span className="text-[10.5px] font-bold text-[#0d47c9] bg-[#e8efff] rounded-full px-2 py-px shrink-0">Dự án</span>}
                       <span className="ml-auto text-[11.5px] text-slate-500 shrink-0 flex items-center gap-1">{muted && <BellOff className="w-3 h-3" aria-label="Đã tắt thông báo" />}{listTime(c.lastMessageAt)}</span></span>
                     <span className="flex items-center gap-2"><span className={`truncate text-[13px] ${unread > 0 && !muted ? 'text-slate-900 font-semibold' : 'text-slate-500'}`}>{previewOf(c)}</span>
                       {/* Bên phải: số chưa đọc + ⭐ Quan tâm (thay cho biểu tượng ghim). Sao tô vàng = đã quan tâm; chưa quan tâm chỉ hiện mờ khi rê chuột (điện thoại luôn hiện mờ). Bấm sao KHÔNG mở hội thoại. */}
@@ -816,8 +816,8 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
               {selected ? <ConvAvatar conv={selected} employees={employees} me={me} size={44} /> : <UserAvatar employee={pendingEmp || null} size="lg" noRing />}
               <div className="min-w-0"><b className="block text-[16px] truncate">{selected ? convName(selected) : pendingEmp?.name}</b><small className="block text-[12px] text-slate-500 truncate">{selected ? statusLine(selected) : 'Nhắn tin mới'}</small></div>
               <div className="ml-auto flex items-center gap-1">
-                {selected && <button type="button" onClick={() => { setSearchOpen(v => !v); setSearchQ(''); }} title="Tìm trong hội thoại" aria-label="Tìm trong hội thoại" className={`p-2 rounded-lg cursor-pointer ${searchOpen ? 'bg-slate-100 text-[#0d47c9]' : 'text-slate-600 hover:bg-slate-100'}`}><Search className="w-[18px] h-[18px]" /></button>}
-                {selected && <button type="button" onClick={() => setInfoOpen(v => !v)} title="Thông tin hội thoại" aria-label="Thông tin hội thoại" aria-pressed={infoOpen} className={`p-2 rounded-lg cursor-pointer ${infoOpen ? 'bg-[#e8efff] text-[#0d47c9]' : 'text-slate-600 hover:bg-slate-100'}`}><PanelRight className="w-[18px] h-[18px]" /></button>}
+                {selected && <button type="button" onClick={() => { setSearchOpen(v => !v); setSearchQ(''); }} title="Tìm trong hội thoại" aria-label="Tìm trong hội thoại" className={`w-9 h-9 grid place-items-center rounded-xl border cursor-pointer ${searchOpen ? 'bg-[#e8efff] border-[#bcd0ff] text-[#0d47c9]' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}><Search className="w-[18px] h-[18px]" /></button>}
+                {selected && <button type="button" onClick={() => setInfoOpen(v => !v)} title="Thông tin hội thoại" aria-label="Thông tin hội thoại" aria-pressed={infoOpen} className={`w-9 h-9 grid place-items-center rounded-xl border cursor-pointer ${infoOpen ? 'bg-[#e8efff] border-[#bcd0ff] text-[#0d47c9]' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}><PanelRight className="w-[18px] h-[18px]" /></button>}
               </div>
             </header>
             {/* Dải "Cập nhật mới": tóm tắt hoạt động dự án chưa xem, bấm mở nhật ký; đã xem thì tự ẩn */}
@@ -965,11 +965,11 @@ export default function MessagesZalo({ currentUser, employees, tasks = [], onUpd
                 <input ref={imgRef} type="file" accept="image/*" multiple hidden onChange={e => onFiles(e, 'image')} data-testid="zalo-img-input" />
                 <input ref={fileRef} type="file" multiple hidden onChange={e => onFiles(e, 'file')} data-testid="zalo-file-input" />
               </div>
-              <div className="flex items-center gap-2 px-4 pb-3 pt-1">
+              <div className="flex items-center gap-2 mx-3 mb-3 mt-1 pl-3 pr-1.5 border border-slate-200 focus-within:border-[#0d47c9] rounded-xl bg-white">
                 <input value={text} onChange={e => onTextChange(e.target.value)} onPaste={onPasteComposer} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) { e.preventDefault(); send(); } }}   /* đang ghép chữ tiếng Việt thì Enter chỉ chốt chữ, chưa gửi */
                   placeholder={`Nhập @, tin nhắn tới ${selected ? convName(selected) : pendingEmp?.name || ''}`} aria-label="Nhập tin nhắn" className="chat-plain-input flex-1 outline-none text-[14px] py-1.5" />
                 {text.trim() || attachments.length || uploading > 0 || editing
-                  ? <button type="button" onClick={() => send()} disabled={sending || uploading > 0} aria-label="Gửi" className="p-2 rounded-lg text-[#0d47c9] hover:bg-[#e8efff] cursor-pointer disabled:opacity-50"><Send className="w-5 h-5" /></button>
+                  ? <button type="button" onClick={() => send()} disabled={sending || uploading > 0} aria-label="Gửi" style={{ color: '#ffffff' }} className="w-8 h-8 grid place-items-center rounded-lg bg-[#0d47c9] hover:bg-[#0a3aa8] cursor-pointer disabled:opacity-50"><Send className="w-4 h-4" /></button>
                   : <button type="button" onClick={() => send('👍')} aria-label="Gửi 👍" className="p-2 rounded-lg text-amber-500 hover:bg-amber-50 cursor-pointer"><ThumbsUp className="w-5 h-5" /></button>}
               </div>
             </footer>

@@ -128,8 +128,8 @@ export function WorkCardView({ card, entry, onOpen, task, employees = [], onAddM
       {!entry && !isTask && <span className="block text-[11.5px] text-slate-500 mt-1" data-testid="work-card-done">Không còn chờ bạn xử lý (đã xử lý hoặc không thuộc quyền của bạn)</span>}
       {isTask && task && <MissionBlock task={task} employees={employees} onAdd={onAddMission} />}
       <div className="flex gap-1.5 justify-end flex-wrap mt-2">
-        {entry && entry.actions.map(a => <button key={a.label} type="button" onClick={a.onClick} className={`px-3 py-1 rounded-lg text-[12px] font-bold cursor-pointer ${btn(a.tone)}`}>{a.label}</button>)}
-        {isTask && !entry && onOpen && <button type="button" onClick={onOpen} className="px-3 py-1 rounded-lg text-[12px] font-bold cursor-pointer bg-slate-100 text-slate-700 hover:bg-slate-200">Mở công việc</button>}
+        {entry && entry.actions.map(a => <button key={a.label} type="button" onClick={a.onClick} className={`h-8 px-3 rounded-xl text-[12px] font-bold cursor-pointer ${btn(a.tone)}`}>{a.label}</button>)}
+        {isTask && !entry && onOpen && <button type="button" onClick={onOpen} className="h-8 px-3 rounded-xl text-[12px] font-bold cursor-pointer bg-slate-100 text-slate-700 hover:bg-slate-200">Mở công việc</button>}
       </div>
     </div>
   );
