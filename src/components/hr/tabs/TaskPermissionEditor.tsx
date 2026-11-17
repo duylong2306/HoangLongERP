@@ -83,7 +83,7 @@ export default function TaskPermissionEditor({ value, onChange, savedValue }: Pr
   return (
     <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 text-left" data-testid="task-permission-editor">
       <div className="bg-slate-950 p-4 rounded-xl border border-slate-850">
-        <h4 className="font-extrabold text-sm text-white flex items-center gap-2"><Shield className="w-4 h-4 text-sky-500" /> Cấu hình Quyền Công việc</h4>
+        <h4 className="font-extrabold text-sm text-white flex items-center gap-2"><Shield className="w-4 h-4 text-[#0d47c9]" /> Cấu hình Quyền Công việc</h4>
         <p className="text-[10.5px] text-slate-400 mt-1">
           Quyết định ai được làm thao tác nào BÊN TRONG một công việc và các nhiệm vụ con của nó: nhận việc, hoàn thành, duyệt/từ chối, thêm người tham gia, ghi vi phạm,
           đề xuất tạm ứng thầu phụ, đổi người phụ trách chính, và thao tác trên từng nhiệm vụ (tạo/nhập, sửa/xóa, phân công, thực hiện).
@@ -91,8 +91,8 @@ export default function TaskPermissionEditor({ value, onChange, savedValue }: Pr
         </p>
       </div>
 
-      <div className="flex gap-2 text-[10px] text-slate-400 bg-slate-950/60 border border-slate-850 rounded-lg p-3" role="note">
-        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-sky-400" />
+      <div className="flex gap-2 text-[10px] text-slate-400 bg-slate-950/60 border border-slate-850 rounded-xl p-3" role="note">
+        <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[#0d47c9]" />
         <ul className="space-y-0.5 list-disc pl-3.5">
           <li>Mỗi người chỉ được tính MỘT vai trò ở mỗi công việc, theo thứ tự ưu tiên: Giám đốc → Trưởng DA → Người giao việc → Phụ trách CV → Phụ trách NV → Kế toán. (Người vừa là Người giao việc vừa là Phụ trách CV được tính là Người giao việc.)</li>
           <li><b>Nhận việc / Hoàn thành</b> chỉ dành cho người được giao (Phụ trách CV, Phụ trách NV) — kể cả Giám đốc cũng không nhận hộ việc của người khác; các ô khác ở 2 dòng này bị khóa.</li>
@@ -115,7 +115,7 @@ export default function TaskPermissionEditor({ value, onChange, savedValue }: Pr
             {GROUPS.map(g => (
               <React.Fragment key={g.group}>
                 <tr className="bg-slate-950/60">
-                  <td colSpan={COT.length + 1} className="p-2 px-3 text-[10px] text-sky-400 font-extrabold uppercase tracking-wider">
+                  <td colSpan={COT.length + 1} className="p-2 px-3 text-[10px] text-[#0d47c9] font-extrabold uppercase tracking-wider">
                     <span className="inline-flex items-center gap-1.5">{g.icon} {g.group}</span>
                   </td>
                 </tr>
@@ -141,7 +141,7 @@ export default function TaskPermissionEditor({ value, onChange, savedValue }: Pr
                             checked={checked}
                             disabled={khoa}
                             onChange={() => toggle(action, c.key)}
-                            className="w-4 h-4 rounded accent-sky-500 cursor-pointer mx-auto disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="w-4 h-4 rounded accent-[#0d47c9] cursor-pointer mx-auto disabled:opacity-40 disabled:cursor-not-allowed"
                           />
                         </td>
                       );

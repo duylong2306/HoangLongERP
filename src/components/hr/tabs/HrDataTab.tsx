@@ -560,10 +560,10 @@ export default function HrDataTab(props: HrDataTabProps) {
   // chip chuyển 6 danh mục (kèm số lượng) → thanh công cụ gọn (tìm kiếm + Xuất/Nhập chỉ biểu tượng + nút xanh "Thêm")
   // → bảng (máy tính) / thẻ (điện thoại) → thanh xóa hàng loạt chỉ hiện khi có dòng được tích.
   const PILL = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap';
-  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] outline-none focus:border-blue-400';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] outline-none focus:border-[#bcd0ff]';
   const iconBtn36 = 'w-9 h-9 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
-  const rowIcon = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
-  const rowDel = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer';
+  const rowIcon = 'w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  const rowDel = 'w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer';
   const chk = 'w-4 h-4 rounded cursor-pointer';
   const th = 'py-2.5 px-3 text-left';
   const money = (n: number) => `${(Number(n) || 0).toLocaleString('vi-VN')} đ`;
@@ -582,9 +582,9 @@ export default function HrDataTab(props: HrDataTabProps) {
   const filteredCriteria = allCriteria.filter(c => removeVietnameseTones(c.content).includes(critQ) || removeVietnameseTones(c.id).includes(critQ));
   // Nhãn + màu pill theo nhóm tiêu chí
   const critMeta = (cat: string) =>
-    cat === 'progress' ? { label: 'Hiệu suất & Tiến độ', cls: 'bg-sky-50 text-sky-700 border-sky-200' }
+    cat === 'progress' ? { label: 'Hiệu suất & Tiến độ', cls: 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]' }
     : cat === 'reporting' ? { label: 'Báo cáo & Đạo đức', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
-    : { label: 'Tác phong & Chuyên cần', cls: 'bg-violet-50 text-violet-700 border-violet-200' };
+    : { label: 'Tác phong & Chuyên cần', cls: 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]' };
 
   const scaleQ = salaryScalesSearch.toLowerCase();
   const filteredScales = salaryScales.filter(item => {
@@ -703,7 +703,7 @@ export default function HrDataTab(props: HrDataTabProps) {
       <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {hrSelectedRows.size}</span>
       <span className="flex-1" />
       <button type="button" onClick={handleBulkDeleteHrData} data-testid="hrdata-bulk-delete"
-        style={{ background: '#e11d48', color: '#ffffff' }} className="h-8 px-3 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
+        style={{ background: '#e11d48', color: '#ffffff' }} className="h-8 px-3 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
     </div>
   );
 
@@ -733,7 +733,7 @@ export default function HrDataTab(props: HrDataTabProps) {
       {!o.empty && <TablePagination {...pg.props(o.total)} unit={o.unit} testId="hrdata-pager" />}
     </div>
   );
-  const rowCls = (id: string) => `hover:bg-blue-50/40 ${hrSelectedRows.has(id) ? 'bg-blue-50/60' : ''}`;
+  const rowCls = (id: string) => `hover:bg-[#d6e2ff] ${hrSelectedRows.has(id) ? 'bg-[#e8efff]' : ''}`;
   const actions = (onEdit: (() => void) | null, onDelete: () => void, what: string) => (
     <div className="flex items-center justify-end gap-1.5">
       {onEdit && <button type="button" className={rowIcon} title={`Sửa ${what}`} aria-label={`Sửa ${what}`} onClick={onEdit}><Pencil className="w-3.5 h-3.5" /></button>}
@@ -781,7 +781,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                 <td className="py-2.5 px-3">{actions(() => onEditHoliday(item), () => handleDeleteHoliday(item.id), 'ngày nghỉ')}</td>
               </tr>)),
             cards: pg.slice(filteredHolidays).map(item => (
-              <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
+              <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(item.id) ? 'bg-[#e8efff]' : ''}`}>
                 <div className="pt-1">{rowCheck(item.id)}</div>
                 <div className="flex-1 min-w-0">
                   <div className="font-bold text-slate-900 text-sm">{item.name}</div>
@@ -808,7 +808,7 @@ export default function HrDataTab(props: HrDataTabProps) {
             const coefInput = (item: LeaveCoefficient) => (
               <input type="number" step="0.1" value={item.coefficient} data-testid={`hrdata-coef-${item.id}`} aria-label="Hệ số"
                 onChange={(e) => { const val = Number(e.target.value); setLeaveCoefficients(prev => prev.map(c => c.id === item.id ? { ...c, coefficient: val } : c)); }}
-                className="w-16 h-8 bg-white border border-slate-200 rounded-lg px-1.5 text-center font-mono font-bold text-[13px] outline-none focus:border-blue-400" />);
+                className="w-16 h-8 bg-white border border-slate-200 rounded-xl px-1.5 text-center font-mono font-bold text-[13px] outline-none focus:border-[#bcd0ff]" />);
             return shell({
               total: filteredCoefs.length, unit: 'hệ số', empty: filteredCoefs.length === 0, emptyText: 'Không tìm thấy hệ số chấm công nào khớp với bộ lọc.',
               count: <>Tổng cộng <b className="text-slate-700">{leaveCoefficients.length}</b> loại hệ số chấm công</>,
@@ -823,7 +823,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                   <td className="py-2.5 px-3">{actions(null, () => handleDeleteCoefficient(item.id), 'hệ số')}</td>
                 </tr>)),
               cards: pg.slice(filteredCoefs).map(item => (
-                <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
+                <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(item.id) ? 'bg-[#e8efff]' : ''}`}>
                   <div className="flex items-start gap-3">
                     <div className="pt-1">{rowCheck(item.id)}</div>
                     <div className="flex-1 min-w-0"><div className="font-bold text-slate-900 text-sm">{item.type}</div><span className={`${PILL} bg-slate-50 text-slate-600 border-slate-200 font-mono mt-1`}>{item.id}</span></div>
@@ -861,7 +861,7 @@ export default function HrDataTab(props: HrDataTabProps) {
             cards: pg.slice(filteredCriteria).map(crit => {
               const m = critMeta(crit.category);
               return (
-                <div key={crit.id} data-testid={`hrdata-card-${crit.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(crit.id) ? 'bg-blue-50/60' : ''}`}>
+                <div key={crit.id} data-testid={`hrdata-card-${crit.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(crit.id) ? 'bg-[#e8efff]' : ''}`}>
                   <div className="pt-1">{rowCheck(crit.id)}</div>
                   <div className="flex-1 min-w-0"><span className={`${PILL} ${m.cls}`}>{m.label}</span><div className="mt-1.5 font-bold text-slate-900 text-sm break-words">{crit.content}</div><div className="font-mono text-[11px] text-slate-400 mt-0.5">{crit.id}</div></div>
                   {actions(() => handleEditCriteriaTrigger('dept_all', crit), () => handleDeleteCriteria('dept_all', crit.id), 'tiêu chí')}
@@ -894,7 +894,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                 <td className="py-2.5 px-3">{rowCheck(item.id)}</td>
                 <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">{item.id}</td>
                 <td className="py-2.5 px-3"><div className="font-bold text-slate-900">{item.groupName}</div><div className="text-[11px] text-slate-500"><span className="font-mono">{item.groupCode}</span>{item.groupDesc ? ` · ${item.groupDesc}` : ''}</div></td>
-                <td className="py-2.5 px-3"><span className={`${PILL} bg-sky-50 text-sky-700 border-sky-200 font-mono`}>{item.level}</span> <span className="text-slate-700">{item.levelName}</span></td>
+                <td className="py-2.5 px-3"><span className={`${PILL} bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff] font-mono`}>{item.level}</span> <span className="text-slate-700">{item.levelName}</span></td>
                 <td className="py-2.5 px-3 text-right font-mono text-slate-800">{money(item.baseSalary)}</td>
                 <td className="py-2.5 px-3 text-center"><span className={`${PILL} bg-amber-50 text-amber-700 border-amber-200 font-mono`}>{item.allocationRate}%</span></td>
                 <td className="py-2.5 px-3 text-right font-mono text-slate-800">{money(item.performanceSalary)}</td>
@@ -903,19 +903,19 @@ export default function HrDataTab(props: HrDataTabProps) {
                 <td className="py-2.5 px-3">{actions(() => handleEditSalaryScaleClick(item), () => handleDeleteSalaryScale(item.id), 'bậc lương')}</td>
               </tr>)),
             cards: pg.slice(filteredScales).map(item => (
-              <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(item.id) ? 'bg-blue-50/60' : ''}`}>
+              <div key={item.id} data-testid={`hrdata-card-${item.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(item.id) ? 'bg-[#e8efff]' : ''}`}>
                 <div className="flex items-start gap-3">
                   <div className="pt-1">{rowCheck(item.id)}</div>
                   <div className="flex-1 min-w-0">
                     <div className="font-bold text-slate-900 text-sm">{item.groupName}</div>
-                    <div className="mt-1 flex items-center gap-1.5 flex-wrap"><span className={`${PILL} bg-sky-50 text-sky-700 border-sky-200 font-mono`}>{item.level}</span><span className="text-xs text-slate-600">{item.levelName}</span><span className="font-mono text-[11px] text-slate-400">{item.id}</span></div>
+                    <div className="mt-1 flex items-center gap-1.5 flex-wrap"><span className={`${PILL} bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff] font-mono`}>{item.level}</span><span className="text-xs text-slate-600">{item.levelName}</span><span className="font-mono text-[11px] text-slate-400">{item.id}</span></div>
                   </div>
                   {actions(() => handleEditSalaryScaleClick(item), () => handleDeleteSalaryScale(item.id), 'bậc lương')}
                 </div>
                 <div className="grid grid-cols-3 gap-2 pl-7 text-center">
-                  <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Cơ bản</div><div className="text-xs font-bold font-mono text-slate-800">{(item.baseSalary || 0).toLocaleString('vi-VN')}</div></div>
-                  <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Hiệu suất ({item.allocationRate}%)</div><div className="text-xs font-bold font-mono text-slate-800">{(item.performanceSalary || 0).toLocaleString('vi-VN')}</div></div>
-                  <div className="rounded-lg py-1.5" style={{ background: '#ecfdf5' }}><div className="text-[10px] text-emerald-700">Tổng 100%</div><div className="text-xs font-black font-mono text-emerald-700">{(item.totalSalary || 0).toLocaleString('vi-VN')}</div></div>
+                  <div className="rounded-xl bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Cơ bản</div><div className="text-xs font-bold font-mono text-slate-800">{(item.baseSalary || 0).toLocaleString('vi-VN')}</div></div>
+                  <div className="rounded-xl bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Hiệu suất ({item.allocationRate}%)</div><div className="text-xs font-bold font-mono text-slate-800">{(item.performanceSalary || 0).toLocaleString('vi-VN')}</div></div>
+                  <div className="rounded-xl py-1.5" style={{ background: '#ecfdf5' }}><div className="text-[10px] text-emerald-700">Tổng 100%</div><div className="text-xs font-black font-mono text-emerald-700">{(item.totalSalary || 0).toLocaleString('vi-VN')}</div></div>
                 </div>
               </div>)),
           })}
@@ -967,26 +967,26 @@ export default function HrDataTab(props: HrDataTabProps) {
                   <td className="py-2.5 px-3"><div className="text-slate-700">{emp.department}</div><div className="text-[11px] text-slate-500">{emp.position}</div></td>
                   <td className="py-2.5 px-3">{bookPill(emp)}</td>
                   <td className="py-2.5 px-3 text-right font-mono text-slate-800">{money(c.sal)}</td>
-                  <td className="py-2.5 px-3 text-center font-mono font-bold text-sky-700">{c.rate}%</td>
-                  <td className="py-2.5 px-3 text-right font-mono font-bold text-teal-700">{money(Math.round(c.pay))}</td>
+                  <td className="py-2.5 px-3 text-center font-mono font-bold text-[#0d47c9]">{c.rate}%</td>
+                  <td className="py-2.5 px-3 text-right font-mono font-bold text-[#0d47c9]">{money(Math.round(c.pay))}</td>
                   <td className="py-2.5 px-3 font-mono text-[12px] text-slate-500">{emp.bhxhDate || '2026-04-01'}</td>
                   <td className="py-2.5 px-3 text-right font-mono text-slate-600">{money(c.relief)}</td>
                   <td className="py-2.5 px-3 text-center font-mono font-bold">{c.dep}</td>
-                  <td className="py-2.5 px-3 text-right"><button type="button" onClick={() => handleOpenEditIns(emp)} data-testid={`hrdata-ins-edit-${emp.id}`} className="h-8 px-3 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1"><Sliders className="w-3.5 h-3.5" />Thiết lập</button></td>
+                  <td className="py-2.5 px-3 text-right"><button type="button" onClick={() => handleOpenEditIns(emp)} data-testid={`hrdata-ins-edit-${emp.id}`} className="h-8 px-3 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1"><Sliders className="w-3.5 h-3.5" />Thiết lập</button></td>
                 </tr>); }),
               cards: pg.slice(filteredIns).map((emp: any) => { const c = calc(emp); return (
-                <div key={emp.id} data-testid={`hrdata-card-${emp.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(emp.id) ? 'bg-blue-50/60' : ''}`}>
+                <div key={emp.id} data-testid={`hrdata-card-${emp.id}`} className={`p-3.5 space-y-2 ${hrSelectedRows.has(emp.id) ? 'bg-[#e8efff]' : ''}`}>
                   <div className="flex items-start gap-3">
                     <div className="pt-1">{rowCheck(emp.id)}</div>
                     <div className="flex-1 min-w-0"><div className="font-bold text-slate-900 text-sm">{emp.name} <span className="font-mono text-[11px] text-slate-400 font-normal">{emp.id}</span></div><div className="text-[11px] text-slate-500">{emp.position} · {emp.department}</div></div>
                     {bookPill(emp)}
                   </div>
                   <div className="grid grid-cols-3 gap-2 pl-7 text-center">
-                    <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Mức đóng</div><div className="text-xs font-bold font-mono text-slate-800">{c.sal.toLocaleString('vi-VN')}</div></div>
-                    <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Trích ({c.rate}%)</div><div className="text-xs font-bold font-mono text-teal-700">{Math.round(c.pay).toLocaleString('vi-VN')}</div></div>
-                    <div className="rounded-lg bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Người PT</div><div className="text-xs font-bold font-mono text-slate-800">{c.dep}</div></div>
+                    <div className="rounded-xl bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Mức đóng</div><div className="text-xs font-bold font-mono text-slate-800">{c.sal.toLocaleString('vi-VN')}</div></div>
+                    <div className="rounded-xl bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Trích ({c.rate}%)</div><div className="text-xs font-bold font-mono text-[#0d47c9]">{Math.round(c.pay).toLocaleString('vi-VN')}</div></div>
+                    <div className="rounded-xl bg-slate-50 py-1.5"><div className="text-[10px] text-slate-500">Người PT</div><div className="text-xs font-bold font-mono text-slate-800">{c.dep}</div></div>
                   </div>
-                  <div className="pl-7"><button type="button" onClick={() => handleOpenEditIns(emp)} className="h-8 px-3 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 cursor-pointer inline-flex items-center gap-1"><Sliders className="w-3.5 h-3.5" />Thiết lập</button></div>
+                  <div className="pl-7"><button type="button" onClick={() => handleOpenEditIns(emp)} className="h-8 px-3 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-700 cursor-pointer inline-flex items-center gap-1"><Sliders className="w-3.5 h-3.5" />Thiết lập</button></div>
                 </div>); }),
             });
           })()}
@@ -1011,7 +1011,7 @@ export default function HrDataTab(props: HrDataTabProps) {
                 <td className="py-2.5 px-3">{actions(() => handleEditTravelNormClick(norm), () => handleDeleteTravelNorm(norm.id), 'định mức')}</td>
               </tr>)),
             cards: pg.slice(filteredNorms).map(norm => (
-              <div key={norm.id} data-testid={`hrdata-card-${norm.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(norm.id) ? 'bg-blue-50/60' : ''}`}>
+              <div key={norm.id} data-testid={`hrdata-card-${norm.id}`} className={`p-3.5 flex items-start gap-3 ${hrSelectedRows.has(norm.id) ? 'bg-[#e8efff]' : ''}`}>
                 <div className="pt-1">{rowCheck(norm.id)}</div>
                 <div className="flex-1 min-w-0">
                   <div className="font-bold text-slate-900 text-sm">{norm.content}</div>

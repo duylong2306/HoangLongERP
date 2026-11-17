@@ -222,7 +222,7 @@ export default function CheckInModal({
                 <button
                   key={shift}
                   onClick={() => setSelectedShift(shift)}
-                  className={`px-3 py-2 rounded-lg text-[11px] font-bold transition-all cursor-pointer border ${
+                  className={`px-3 py-2 rounded-xl text-[11px] font-bold transition-all cursor-pointer border ${
                     selectedShift === shift
                       ? 'bg-amber-500/20 border-amber-500 text-amber-400'
                       : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
@@ -247,13 +247,13 @@ export default function CheckInModal({
               {geoStatus === 'error' && <AlertCircle className="w-4 h-4 text-rose-400" />}
             </div>
             {geoStatus === 'success' && coords && (
-              <div className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 rounded-lg p-2 border border-emerald-500/20">
+              <div className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 rounded-xl p-2 border border-emerald-500/20">
                 📍 {coords}
                 {locationName && <div className="text-[9px] text-slate-400 mt-1">{locationName}</div>}
               </div>
             )}
             {geoStatus === 'error' && (
-              <div className="text-[10px] text-rose-400 bg-rose-500/10 rounded-lg p-2 border border-rose-500/20">
+              <div className="text-[10px] text-rose-400 bg-rose-500/10 rounded-xl p-2 border border-rose-500/20">
                 ⚠️ {geoError}
               </div>
             )}
@@ -285,7 +285,7 @@ export default function CheckInModal({
                 <img
                   src={photo}
                   alt="Ảnh check-in"
-                  className="w-full h-40 object-cover rounded-lg border border-slate-600"
+                  className="w-full h-40 object-cover rounded-xl border border-slate-600"
                 />
                 <button
                   onClick={() => { setPhoto(null); setCameraStatus('idle'); }}
@@ -297,7 +297,7 @@ export default function CheckInModal({
             ) : (
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full h-32 border-2 border-dashed border-slate-600 hover:border-amber-500 rounded-lg flex flex-col items-center justify-center gap-2 text-slate-400 hover:text-amber-400 transition-colors cursor-pointer"
+                className="w-full h-32 border-2 border-dashed border-slate-600 hover:border-amber-500 rounded-xl flex flex-col items-center justify-center gap-2 text-slate-400 hover:text-amber-400 transition-colors cursor-pointer"
               >
                 <Camera className="w-8 h-8" />
                 <span className="text-[11px] font-bold">Chụp ảnh check-in</span>
@@ -315,7 +315,7 @@ export default function CheckInModal({
           </div>
 
           {/* Summary */}
-          <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+          <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">
             <div className="grid grid-cols-2 gap-2 text-[10px]">
               <div className="text-slate-400">Nhân viên:</div>
               <div className="text-white font-bold">{empName} ({empId})</div>
@@ -341,13 +341,13 @@ export default function CheckInModal({
         <div className="border-t border-slate-700 px-5 py-4 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg cursor-pointer transition-colors"
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl cursor-pointer transition-colors"
           >
             Hủy
           </button>
           <button
             onClick={handleCheckIn}
-            className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors flex items-center gap-2"
+            style={{ color: '#ffffff' }} className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors flex items-center gap-2"
           >
             <CheckCircle className="w-4 h-4" />
             Chấm công ngay

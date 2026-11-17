@@ -192,10 +192,10 @@ export default function LeavesTab({
     return (
       <div className="flex flex-wrap gap-1 mt-1">
         {pairOf.has(l.id)
-          ? <span className={`${PILL} bg-sky-50 text-sky-700 border-sky-200`}>Cả ngày (sáng + chiều)</span>
+          ? <span className={`${PILL} bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]`}>Cả ngày (sáng + chiều)</span>
           : isShiftLeave(l)
             // Nghỉ phép THẬT chỉ 1 ca: nhãn nổi bật để nhận ra ngay lịch nghỉ nửa ngày
-            ? <span className={`${PILL} bg-sky-50 text-sky-700 border-sky-200`}>Nghỉ 1 {shiftLabel(l.shift)}</span>
+            ? <span className={`${PILL} bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]`}>Nghỉ 1 {shiftLabel(l.shift)}</span>
             : ((l.type === 'Báo cáo nghỉ ca' || l.type === 'Báo cáo quên chấm công') && l.shift
               ? <span className={`${PILL} bg-slate-100 text-slate-600 border-slate-200`}>{l.shift === 'morning' ? 'Ca sáng' : 'Ca chiều'}</span> : null)}
         {ln.late && <span className={`${PILL} bg-amber-50 text-amber-700 border-amber-200`} title={ln.detail}>⚠ Xin muộn</span>}
@@ -209,7 +209,7 @@ export default function LeavesTab({
       setTimeout(() => document.getElementById('hr-leave-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
     }
   };
-  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-blue-400';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-[#bcd0ff]';
   const pageSizeNum = globalPageSize === 'all' ? 0 : (globalPageSize as number);
   const totalPages = pageSizeNum ? Math.ceil(visibleLeaves.length / pageSizeNum) : 1;
   const InfoField = ({ label, value, mono, wide }: { label: string; value: React.ReactNode; mono?: boolean; wide?: boolean }) => (
@@ -264,10 +264,10 @@ export default function LeavesTab({
 
       {/* Thanh thao tác hàng loạt — chỉ hiện khi đã tick chọn */}
       {leaveSelectedRows.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50" data-testid="leaves-bulkbar">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-[#bcd0ff] bg-[#e8efff]" data-testid="leaves-bulkbar">
           <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {leaveSelectedRows.size}</span>
           <span className="flex-1" />
-          <button type="button" onClick={handleBulkDeleteLeaves} className="h-8 px-3 rounded-lg bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
+          <button type="button" onClick={handleBulkDeleteLeaves} className="h-8 px-3 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
         </div>
       )}
 
@@ -300,7 +300,7 @@ export default function LeavesTab({
                       <tr><td colSpan={7} className="py-10 text-center text-slate-500 text-sm">Không có đơn nào khớp bộ lọc.</td></tr>
                     ) : paginatedLeaves.map(l => (
                       <tr key={l.id} onClick={() => openRow(l.id)} data-testid={`leave-row-${l.id}`}
-                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${selectedLeaveId === l.id || leaveSelectedRows.has(l.id) ? 'bg-blue-50' : ''}`}>
+                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-[#d6e2ff] ${selectedLeaveId === l.id || leaveSelectedRows.has(l.id) ? 'bg-[#e8efff]' : ''}`}>
                         <td className="px-3 py-2.5 text-center">
                           <input type="checkbox" aria-label={`Chọn đơn ${l.id}`} className="w-4 h-4 rounded cursor-pointer"
                             checked={leaveSelectedRows.has(l.id)} onClick={(e) => e.stopPropagation()}
@@ -330,7 +330,7 @@ export default function LeavesTab({
                   <div className="py-10 text-center text-slate-500 text-sm">Không có đơn nào khớp bộ lọc.</div>
                 ) : paginatedLeaves.map(l => (
                   <div key={l.id} onClick={() => openRow(l.id)} data-testid={`leave-card-${l.id}`}
-                    className={`flex items-start gap-2.5 px-3 py-3 border-b border-slate-100 last:border-b-0 cursor-pointer ${selectedLeaveId === l.id || leaveSelectedRows.has(l.id) ? 'bg-blue-50' : ''}`}>
+                    className={`flex items-start gap-2.5 px-3 py-3 border-b border-slate-100 last:border-b-0 cursor-pointer ${selectedLeaveId === l.id || leaveSelectedRows.has(l.id) ? 'bg-[#e8efff]' : ''}`}>
                     <input type="checkbox" aria-label={`Chọn đơn ${l.id}`} className="w-4 h-4 rounded cursor-pointer mt-1"
                       checked={leaveSelectedRows.has(l.id)} onClick={(e) => e.stopPropagation()}
                       onChange={(e) => handleLeaveRowSelect(l.id, e.target.checked)} />
@@ -372,7 +372,7 @@ export default function LeavesTab({
                     <div className="flex items-center gap-2 mt-1.5"><StatusPill l={l} /><span className="font-mono text-[11px] text-slate-500">{l.id}</span></div>
                   </div>
                   <button type="button" onClick={() => setSelectedLeaveId(null)} aria-label="Đóng chi tiết" title="Đóng chi tiết" data-testid="leave-detail-close"
-                    className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 cursor-pointer"><X className="w-4 h-4" /></button>
+                    className="w-8 h-8 shrink-0 flex items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 cursor-pointer"><X className="w-4 h-4" /></button>
                 </div>
 
                 {/* Nút thao tác: Sửa ngày (chỉ đơn đã duyệt + có quyền) và Xóa */}
@@ -433,7 +433,7 @@ export default function LeavesTab({
                     const ln = parseLateNotice(l.reason);
                     return (
                       <>
-                        {ln.late && <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">⚠ XIN MUỘN — {ln.detail}. Người duyệt cân nhắc khi quyết định.</p>}
+                        {ln.late && <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2">⚠ XIN MUỘN — {ln.detail}. Người duyệt cân nhắc khi quyết định.</p>}
                         <p className="text-[13px] text-slate-700 italic">"{ln.reason}"</p>
                       </>
                     );
@@ -448,7 +448,7 @@ export default function LeavesTab({
                 {l.status === 'pending' && canAct && (
                   <div className="space-y-2 pt-3 border-t border-slate-200">
                     {sibling && (
-                      <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg p-2">
+                      <p className="text-xs text-[#0d47c9] bg-[#e8efff] border border-[#bcd0ff] rounded-xl p-2">
                         Đây là báo cáo <strong>CẢ NGÀY</strong>: đi cùng đơn <span className="font-mono">{sibling.id}</span> ({sibling.shift === 'morning' ? 'ca sáng' : 'ca chiều'}).
                         Duyệt hoặc Từ chối sẽ áp dụng cho cả hai đơn.
                       </p>

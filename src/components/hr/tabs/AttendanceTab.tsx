@@ -332,7 +332,7 @@ export default function AttendanceTab({
   };
   // Nút thao tác theo từng bản ghi: Sửa / Chốt-Mở khóa / Xóa. Giữ nguyên quy tắc quyền cũ:
   //  - đã chốt + không có quyền chốt → chỉ hiện ổ khóa;  - Chốt/Mở khóa chỉ cho người có quyền chốt công.
-  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
   const RowActions = ({ log }: { log: AttendanceLog }) => {
     const canManage = canManageLockedAttendance();
     if (log.isLocked && !canManage) {
@@ -350,7 +350,7 @@ export default function AttendanceTab({
           </button>
         )}
         <button type="button" title="Xóa bản ghi" aria-label="Xóa bản ghi" data-testid={`att-delete-${log.id}`}
-          className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"
+          className="w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"
           onClick={(e) => { e.stopPropagation(); handleDeleteAttendance(log); }}><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
     );
@@ -365,7 +365,7 @@ export default function AttendanceTab({
   );
 
   const hrm = readHrmConfigFromStorage();
-  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold cursor-pointer outline-none focus:border-blue-400';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold cursor-pointer outline-none focus:border-[#bcd0ff]';
   const pageSizeNum = globalPageSize === 'all' ? 0 : (globalPageSize as number);
   const totalPages = pageSizeNum ? Math.ceil(filteredAttendance.length / pageSizeNum) : 1;
 
@@ -373,7 +373,7 @@ export default function AttendanceTab({
   if (isLoadingAttendance) {
     return (
       <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3" data-testid="att-loading">
-        {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-9 bg-slate-100 rounded-lg animate-pulse" />)}
+        {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-9 bg-slate-100 rounded-xl animate-pulse" />)}
         <p className="text-center text-xs text-slate-500">Đang tải dữ liệu chấm công...</p>
       </div>
     );
@@ -477,10 +477,10 @@ export default function AttendanceTab({
 
           {/* Thanh thao tác hàng loạt — chỉ hiện khi đã tick chọn */}
           {attSelectedRows.size > 0 && (
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50" data-testid="att-bulkbar">
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-[#bcd0ff] bg-[#e8efff]" data-testid="att-bulkbar">
               <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {attSelectedRows.size}</span>
               <span className="flex-1" />
-              <button type="button" onClick={handleBulkDeleteAttendance} className="h-8 px-3 rounded-lg bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
+              <button type="button" onClick={handleBulkDeleteAttendance} className="h-8 px-3 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
             </div>
           )}
 
@@ -511,7 +511,7 @@ export default function AttendanceTab({
                   ) : slicedAttendance.map(log => (
                     <React.Fragment key={log.id}>
                       <tr data-testid={`att-row-${log.id}`} onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
-                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${attSelectedRows.has(log.id) || expandedId === log.id ? 'bg-blue-50' : ''}`}>
+                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-[#d6e2ff] ${attSelectedRows.has(log.id) || expandedId === log.id ? 'bg-[#e8efff]' : ''}`}>
                         <td className="px-3 py-2.5 text-center">
                           <input type="checkbox" aria-label={`Chọn ${log.empName}`} className="w-4 h-4 rounded cursor-pointer"
                             checked={attSelectedRows.has(log.id)} onClick={(e) => e.stopPropagation()}
@@ -546,7 +546,7 @@ export default function AttendanceTab({
                 <div className="py-10 text-center text-slate-500 text-sm">Không có bản ghi chấm công nào.</div>
               ) : slicedAttendance.map(log => (
                 <div key={log.id} data-testid={`att-card-${log.id}`} onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
-                  className={`px-3 py-3 border-b border-slate-100 last:border-b-0 ${attSelectedRows.has(log.id) || expandedId === log.id ? 'bg-blue-50' : ''}`}>
+                  className={`px-3 py-3 border-b border-slate-100 last:border-b-0 ${attSelectedRows.has(log.id) || expandedId === log.id ? 'bg-[#e8efff]' : ''}`}>
                   <div className="flex items-start gap-2.5">
                     <input type="checkbox" aria-label={`Chọn ${log.empName}`} className="w-4 h-4 rounded cursor-pointer mt-1"
                       checked={attSelectedRows.has(log.id)} onClick={(e) => e.stopPropagation()}

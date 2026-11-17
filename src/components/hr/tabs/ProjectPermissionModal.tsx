@@ -178,12 +178,12 @@ export const actionLabelOf = (action: string): string => {
 const isAdminRoleGroup = (id: string) => id === 'role_admin' || id === 'role_superadmin';
 
 const roleScopeLabels: Record<ProjectRoleScope, { label: string; desc: string; color: string }> = {
-  director: { label: 'Giám Đốc', desc: 'Role Group role_admin — luôn full quyền mọi dự án', color: 'text-violet-400 bg-violet-500/10' },
+  director: { label: 'Giám Đốc', desc: 'Role Group role_admin — luôn full quyền mọi dự án', color: 'text-[#0d47c9] bg-[#e8efff]' },
   pm: { label: 'Trưởng Dự Án', desc: 'project.pmId — người quản lý chính dự án', color: 'text-emerald-400 bg-emerald-500/10' },
-  assigner: { label: 'Người Giao Việc', desc: 'task.assignerId — người khởi tạo & giao việc', color: 'text-sky-400 bg-sky-500/10' },
+  assigner: { label: 'Người Giao Việc', desc: 'task.assignerId — người khởi tạo & giao việc', color: 'text-[#0d47c9] bg-[#e8efff]' },
   assignee: { label: 'Phụ Trách CV', desc: 'task.assigneeId — phụ trách thực hiện công việc', color: 'text-amber-400 bg-amber-500/10' },
-  missionAssignee: { label: 'Phụ Trách NV', desc: 'mission.mainAssigneeId — phụ trách nhiệm vụ con', color: 'text-teal-400 bg-teal-500/10' },
-  accountant: { label: 'Kế Toán', desc: 'Role Group role_accounting — nhân viên kế toán', color: 'text-indigo-400 bg-indigo-500/10' },
+  missionAssignee: { label: 'Phụ Trách NV', desc: 'mission.mainAssigneeId — phụ trách nhiệm vụ con', color: 'text-[#0d47c9] bg-[#e8efff]' },
+  accountant: { label: 'Kế Toán', desc: 'Role Group role_accounting — nhân viên kế toán', color: 'text-[#0d47c9] bg-[#e8efff]' },
   teamMember: { label: 'Thành Viên', desc: 'Ở công việc cụ thể: người có tên trong nhiệm vụ (mission.memberIds). Ở cấp dự án/bảng Kanban: mọi nhân viên', color: 'text-slate-400 bg-slate-500/10' },
 };
 
@@ -269,7 +269,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
   const contextCount = savedValue ? countProjectMatrixChanges(matrix as any, savedValue as any) : undefined;
   // Nhãn đỏ nhỏ cạnh tên tab con: còn bao nhiêu thay đổi CHƯA LƯU trong tab đó (để chuyển tab không làm người dùng quên)
   const unsavedBadge = (n?: number) => (n && n > 0)
-    ? <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black" title={`${n} thay đổi chưa lưu`}>{n}</span>
+    ? <span style={{ color: '#ffffff' }} className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black" title={`${n} thay đổi chưa lưu`}>{n}</span>
     : null;
   // Ô đã đổi so với bản đã lưu được tô nổi để nhìn ra ngay
   const CHANGED_CELL = ' bg-amber-100 ring-2 ring-inset ring-amber-400 rounded';
@@ -483,7 +483,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           </div>
           <button
             onClick={handleResetToDefault}
-            className="px-3 py-1.5 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1"
+            className="px-3 py-1.5 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1"
           >
             <RotateCcw className="w-3 h-3" /> Khôi phục mặc định
           </button>
@@ -493,7 +493,7 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
       </div>
 
       {/* Ghi chú: thao tác bên trong công việc do tab Quyền Công việc quản lý */}
-      <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-800" data-testid="ghi-chu-quyen-cong-viec">
+      <div className="mb-3 rounded-xl border border-[#bcd0ff] bg-[#e8efff] px-3 py-2 text-[11px] text-[#0d47c9]" data-testid="ghi-chu-quyen-cong-viec">
         ℹ️ Bảng này chỉ gồm thao tác ở cấp <strong>dự án và bảng Kanban</strong> (tạo/sửa/xóa dự án, cột, công việc, xem tài chính, công cụ hồ sơ liên thông, tệp...).
         Các thao tác <strong>bên trong một công việc</strong> (nhận việc, hoàn thành, duyệt/từ chối, nhiệm vụ con, ghi nhận vi phạm, đề xuất tạm ứng...) được cấu hình ở tab <strong>Quyền Công việc</strong>.
       </div>
@@ -555,13 +555,13 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
         <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg cursor-pointer transition-all"
+            className="px-4 py-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl cursor-pointer transition-all"
           >
             Hủy
           </button>
           <button
             onClick={handleSave}
-            className="px-5 py-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-lg cursor-pointer transition-all shadow-md flex items-center gap-1.5"
+            style={{ color: '#ffffff' }} className="px-5 py-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl cursor-pointer transition-all shadow-md flex items-center gap-1.5"
           >
             <Save className="w-3.5 h-3.5" /> Lưu cấu hình
           </button>
@@ -580,14 +580,14 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
           <button
             type="button"
             onClick={() => setRgTab('context')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'context' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+            style={{ color: '#ffffff' }} className={`px-3 py-1.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'context' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
           >
             <Shield className="w-3 h-3" /> Theo vị trí trong dự án{unsavedBadge(contextCount)}
           </button>
           <button
             type="button"
             onClick={() => setRgTab('roleGroup')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'roleGroup' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+            style={{ color: '#ffffff' }} className={`px-3 py-1.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'roleGroup' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
           >
             <UserCog className="w-3 h-3" /> Vai trò nhóm HRM{unsavedBadge(rgCount)}
           </button>
@@ -646,21 +646,21 @@ export default function ProjectPermissionModal({ isOpen, onClose, roleId, roleNa
             <button
               type="button"
               onClick={() => setRgTab('context')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'context' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+              style={{ color: '#ffffff' }} className={`px-3 py-1.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'context' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
             >
               <Shield className="w-3 h-3" /> Theo vị trí{unsavedBadge(contextCount)}
             </button>
             <button
               type="button"
               onClick={() => setRgTab('roleGroup')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'roleGroup' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+              style={{ color: '#ffffff' }} className={`px-3 py-1.5 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${rgTab === 'roleGroup' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
             >
               <UserCog className="w-3 h-3" /> Nhóm HRM{unsavedBadge(rgCount)}
             </button>
           </div>
           <button
             onClick={onClose}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors"
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors"
             title="Đóng"
           >
             <X className="w-5 h-5" />

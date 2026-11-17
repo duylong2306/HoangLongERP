@@ -127,8 +127,8 @@ export default function PayrollTab({
   const deductOf = (p: any) => (p.advances || 0) + (p.insurance || 0) + (p.tax || 0);
   const positionOf = (empId: string) => (employees || []).find((e: any) => e.id === empId)?.position || '';
   const PILL = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap';
-  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-blue-400';
-  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-[#bcd0ff]';
+  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
   const pageSizeNum = globalPageSize === 'all' ? 0 : (globalPageSize as number);
   const totalPages = pageSizeNum ? Math.ceil(filteredPayroll.length / pageSizeNum) : 1;
   const startIndex = pageSizeNum ? (payrollPage - 1) * pageSizeNum : 0;
@@ -179,7 +179,7 @@ export default function PayrollTab({
               {nameSuggestions.map((emp: any) => (
                 <li key={emp.id || emp.name}
                   onMouseDown={() => { setPayrollNameSearch(emp.name); setShowNameSuggest(false); setPayrollPage(1); }}
-                  className="px-3 py-2 text-[13px] text-slate-700 hover:bg-blue-50 cursor-pointer">{emp.name}</li>
+                  className="px-3 py-2 text-[13px] text-slate-700 hover:bg-[#d6e2ff] cursor-pointer">{emp.name}</li>
               ))}
             </ul>
           )}
@@ -271,7 +271,7 @@ export default function PayrollTab({
                   ) : paginated.map((pay: any) => (
                     <React.Fragment key={pay.id}>
                       <tr data-testid={`payroll-row-${pay.id}`} onClick={() => setExpandedId(expandedId === pay.id ? null : pay.id)}
-                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${expandedId === pay.id ? 'bg-blue-50' : ''}`}>
+                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-[#d6e2ff] ${expandedId === pay.id ? 'bg-[#e8efff]' : ''}`}>
                         <td className="px-3 py-2.5">
                           <div className="font-bold text-slate-900">{pay.empName}</div>
                           <div className="text-[11px] text-slate-500"><span className="font-mono">{pay.empId}</span>{positionOf(pay.empId) ? ` · ${positionOf(pay.empId)}` : ''}</div>
@@ -315,7 +315,7 @@ export default function PayrollTab({
                 <div className="py-10 text-center text-slate-500 text-sm">Chưa có dữ liệu kỳ lương {payrollMonth}/{payrollYear}.</div>
               ) : paginated.map((pay: any) => (
                 <div key={pay.id} data-testid={`payroll-card-${pay.id}`} onClick={() => setExpandedId(expandedId === pay.id ? null : pay.id)}
-                  className={`px-3 py-3 border-b border-slate-100 last:border-b-0 ${expandedId === pay.id ? 'bg-blue-50' : ''}`}>
+                  className={`px-3 py-3 border-b border-slate-100 last:border-b-0 ${expandedId === pay.id ? 'bg-[#e8efff]' : ''}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="font-bold text-slate-900 text-sm leading-snug">{pay.empName}</div>
@@ -357,7 +357,7 @@ export default function PayrollTab({
                 {paginated.length === 0 ? (
                   <tr><td colSpan={34} className="py-10 text-center text-slate-500 text-sm" data-testid="payroll-empty">Chưa có dữ liệu kỳ lương {payrollMonth}/{payrollYear}.</td></tr>
                 ) : paginated.map((pay: any, idx) => (
-                  <tr key={pay.id} data-testid={`payroll-wrow-${pay.id}`} className={`${idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'} hover:bg-blue-50/50 font-mono`}>
+                  <tr key={pay.id} data-testid={`payroll-wrow-${pay.id}`} className={`${idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'} hover:bg-[#d6e2ff] font-mono`}>
                     <td className="py-2 text-center text-slate-400">{startIndex + idx + 1}</td>
                     <td className={`py-2 font-sans sticky left-0 z-10 ${idx % 2 === 1 ? 'bg-slate-50' : 'bg-white'}`}>
                       <b className="text-slate-900 block">{pay.empName}</b>
@@ -378,7 +378,7 @@ export default function PayrollTab({
                     <td className="py-2 text-amber-700 font-bold">{money(pay.otHolidaySalary)}</td>
                     <td className="py-2 text-slate-600">{pay.otHours || 0}h</td>
                     <td className="py-2 text-slate-500">{pay.otCount || 0} lần</td>
-                    <td className="py-2 text-indigo-700 font-bold">{money(pay.otHoursSalary)}</td>
+                    <td className="py-2 text-[#0d47c9] font-bold">{money(pay.otHoursSalary)}</td>
                     <td className="py-2 text-slate-600">{money(pay.expenses)}</td>
                     <td className="py-2 text-emerald-700">{money(pay.bonusHoliday)}</td>
                     <td className="py-2 text-emerald-700">{money(pay.bonusCreative)}</td>
@@ -386,7 +386,7 @@ export default function PayrollTab({
                     <td className="py-2 text-rose-700">{money(pay.insurance)}</td>
                     <td className="py-2 text-rose-700">{money(pay.otherDeductions)}</td>
                     <td className="py-2 text-rose-700">{money(pay.advances)}</td>
-                    <td className="py-2 text-teal-700">{money(pay.taxExemptIncome)}</td>
+                    <td className="py-2 text-[#0d47c9]">{money(pay.taxExemptIncome)}</td>
                     <td className="py-2 text-slate-600">{money(pay.taxableIncome)}</td>
                     <td className="py-2 text-slate-500">{money(pay.personalDeduction)}</td>
                     <td className="py-2 text-center text-slate-500">{pay.dependentCount || 0}</td>

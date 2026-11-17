@@ -84,7 +84,7 @@ const PunchMediaList: React.FC<Props> = ({
                 href={mapsUrl(s.coords)}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sky-400 hover:underline font-mono text-[9px]"
+                className="text-[#0d47c9] hover:underline font-mono text-[9px]"
                 title={`Vị trí ${s.label}: ${s.location || fallbackLocation} (${s.coords})`}
               >
                 🗺️
@@ -99,7 +99,7 @@ const PunchMediaList: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => onZoomImage(legacy.photoIn!)}
-                className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
+                className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-[#bcd0ff] transition-colors"
                 title="Bản ghi cũ: ảnh lượt VÀO gần nhất trong ngày"
               >
                 <img src={legacy.photoIn} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Ảnh Vào" referrerPolicy="no-referrer" />
@@ -110,7 +110,7 @@ const PunchMediaList: React.FC<Props> = ({
               <button
                 type="button"
                 onClick={() => onZoomImage(legacy.photoOut!)}
-                className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-sky-500/50 transition-colors"
+                className="flex items-center gap-1 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 text-[10px] cursor-zoom-in hover:border-[#bcd0ff] transition-colors"
                 title="Bản ghi cũ: ảnh lượt RA gần nhất trong ngày"
               >
                 <img src={legacy.photoOut} className="w-4.5 h-4.5 rounded object-cover border border-slate-705" alt="Ảnh Ra" referrerPolicy="no-referrer" />
@@ -122,7 +122,7 @@ const PunchMediaList: React.FC<Props> = ({
                 href={mapsUrl(legacy.coordsIn)}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sky-400 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
+                className="text-[#0d47c9] hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
                 title="Bản ghi cũ: tọa độ lượt VÀO gần nhất"
               >
                 🗺️ Vào: {legacy.locationIn || fallbackLocation} ({legacy.coordsIn})
@@ -133,7 +133,7 @@ const PunchMediaList: React.FC<Props> = ({
                 href={mapsUrl(legacy.coordsOut)}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sky-400 hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
+                className="text-[#0d47c9] hover:underline bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono text-[9px]"
                 title="Bản ghi cũ: tọa độ lượt RA gần nhất"
               >
                 🗺️ Ra: {legacy.locationOut || fallbackLocation} ({legacy.coordsOut})
@@ -161,7 +161,7 @@ const PunchMediaList: React.FC<Props> = ({
         {slotsWithMedia.map((s: SlotView) => (
           <div
             key={s.key}
-            className="bg-slate-900/70 border border-slate-800 rounded-lg p-2 flex items-start gap-2"
+            className="bg-slate-900/70 border border-slate-800 rounded-xl p-2 flex items-start gap-2"
           >
             {s.photo ? (
               <button
@@ -202,7 +202,7 @@ const PunchMediaList: React.FC<Props> = ({
                   href={mapsUrl(s.coords)}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-sky-400 hover:underline text-[9px] font-mono block truncate mt-0.5"
+                  className="text-[#0d47c9] hover:underline text-[9px] font-mono block truncate mt-0.5"
                   title={`Xem trên Google Maps: ${s.location || fallbackLocation} (${s.coords})`}
                 >
                   🗺️ {s.location || fallbackLocation}
@@ -231,7 +231,7 @@ const PunchMediaList: React.FC<Props> = ({
             {legacy.photoIn && (
               <button
                 type="button"
-                className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 cursor-zoom-in hover:border-sky-500/50 transition-all"
+                className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 cursor-zoom-in hover:border-[#bcd0ff] transition-all"
                 onClick={() => onZoomImage(legacy.photoIn!)}
               >
                 <img src={legacy.photoIn} className="w-8 h-8 rounded-md object-cover border border-slate-700" alt="Ảnh Vào" referrerPolicy="no-referrer" />
@@ -241,7 +241,7 @@ const PunchMediaList: React.FC<Props> = ({
             {legacy.photoOut && (
               <button
                 type="button"
-                className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-800 cursor-zoom-in hover:border-sky-500/50 transition-all"
+                className="flex items-center gap-1.5 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800 cursor-zoom-in hover:border-[#bcd0ff] transition-all"
                 onClick={() => onZoomImage(legacy.photoOut!)}
               >
                 <img src={legacy.photoOut} className="w-8 h-8 rounded-md object-cover border border-slate-700" alt="Ảnh Ra" referrerPolicy="no-referrer" />
@@ -255,7 +255,7 @@ const PunchMediaList: React.FC<Props> = ({
                 href={mapsUrl(legacy.coordsIn)}
                 target="_blank"
                 rel="noreferrer"
-                className="hover:underline text-sky-400"
+                className="hover:underline text-[#0d47c9]"
               >
                 🗺️ Vào: {legacy.locationIn || fallbackLocation} ({legacy.coordsIn})
               </a>
@@ -265,7 +265,7 @@ const PunchMediaList: React.FC<Props> = ({
                 href={mapsUrl(legacy.coordsOut)}
                 target="_blank"
                 rel="noreferrer"
-                className="hover:underline text-sky-400"
+                className="hover:underline text-[#0d47c9]"
               >
                 🗺️ Ra: {legacy.locationOut || fallbackLocation} ({legacy.coordsOut})
               </a>

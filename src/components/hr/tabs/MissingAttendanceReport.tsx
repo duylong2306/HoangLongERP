@@ -31,7 +31,7 @@ const PHEP_OPTIONS = [
 
 const TYPE_META: Record<string, { label: string; cls: string }> = {
   absent: { label: 'Vắng KP', cls: 'text-rose-700 bg-rose-50 border-rose-200' },
-  holiday: { label: 'Nghỉ lễ', cls: 'text-violet-700 bg-violet-50 border-violet-200' },
+  holiday: { label: 'Nghỉ lễ', cls: 'text-[#0d47c9] bg-[#e8efff] border-[#bcd0ff]' },
   weekend: { label: 'Nghỉ cuối tuần', cls: 'text-slate-600 bg-slate-100 border-slate-200' },
 };
 
@@ -215,7 +215,7 @@ export default function MissingAttendanceReport({
   const fmtDate = (d: string) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : d; };
   const allChecked = visible.length > 0 && selected.size >= visible.length;
   const toggleOne = (k: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
-  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold cursor-pointer outline-none focus:border-blue-400';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold cursor-pointer outline-none focus:border-[#bcd0ff]';
   const resetSel = () => setSelected(new Set());
 
   return (
@@ -262,7 +262,7 @@ export default function MissingAttendanceReport({
 
       {/* Thanh duyệt hàng loạt — chỉ hiện khi đã tick chọn */}
       {selected.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50" data-testid="miss-bulkbar">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-[#bcd0ff] bg-[#e8efff]" data-testid="miss-bulkbar">
           <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {selected.size}</span>
           <span className="flex-1" />
           <select value={batchAction} onChange={(e) => setBatchAction(e.target.value)} aria-label="Hành động" data-testid="miss-action" className={`${inputCls} h-8 text-xs`}>
@@ -279,7 +279,7 @@ export default function MissingAttendanceReport({
           )}
           <button type="button" onClick={applyBatch} data-testid="miss-apply"
             style={{ background: '#0d47c9', color: '#ffffff' }}
-            className="h-8 px-3.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Layers className="w-3.5 h-3.5" /> Áp dụng</button>
+            className="h-8 px-3.5 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Layers className="w-3.5 h-3.5" /> Áp dụng</button>
         </div>
       )}
 
@@ -311,7 +311,7 @@ export default function MissingAttendanceReport({
                     const checked = selected.has(k);
                     return (
                       <tr key={k} data-testid={`miss-row-${k}`} onClick={() => toggleOne(k)}
-                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${checked ? 'bg-blue-50' : ''}`}>
+                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-[#d6e2ff] ${checked ? 'bg-[#e8efff]' : ''}`}>
                         <td className="px-3 py-2.5 text-center">
                           <input type="checkbox" checked={checked} aria-label={`Chọn ${e.empName}`} onClick={(ev) => ev.stopPropagation()} onChange={() => toggleOne(k)} className="w-4 h-4 rounded cursor-pointer" />
                         </td>
@@ -339,7 +339,7 @@ export default function MissingAttendanceReport({
                 const checked = selected.has(k);
                 return (
                   <div key={k} data-testid={`miss-card-${k}`} onClick={() => toggleOne(k)}
-                    className={`flex items-start gap-2.5 px-3 py-3 border-b border-slate-100 last:border-b-0 cursor-pointer ${checked ? 'bg-blue-50' : ''}`}>
+                    className={`flex items-start gap-2.5 px-3 py-3 border-b border-slate-100 last:border-b-0 cursor-pointer ${checked ? 'bg-[#e8efff]' : ''}`}>
                     <input type="checkbox" checked={checked} aria-label={`Chọn ${e.empName}`} onClick={(ev) => ev.stopPropagation()} onChange={() => toggleOne(k)} className="w-4 h-4 rounded cursor-pointer mt-1" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">

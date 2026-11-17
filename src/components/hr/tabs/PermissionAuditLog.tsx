@@ -30,10 +30,10 @@ export default function PermissionAuditLog() {
     <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 text-left" data-testid="permission-audit-log">
       <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 flex items-start justify-between gap-3">
         <div>
-          <h4 className="font-extrabold text-sm text-white flex items-center gap-2"><History className="w-4 h-4 text-violet-400" /> Nhật ký thay đổi phân quyền</h4>
+          <h4 className="font-extrabold text-sm text-white flex items-center gap-2"><History className="w-4 h-4 text-[#0d47c9]" /> Nhật ký thay đổi phân quyền</h4>
           <p className="text-[10.5px] text-slate-400 mt-1">Mỗi lần bấm "Lưu thay đổi" ở các tab phân quyền được ghi lại: ai đổi, lúc nào, đổi gì (từ → sang). Hiển thị 100 lần gần nhất.</p>
         </div>
-        <button type="button" onClick={tai} disabled={state.loading} className="px-3 py-1.5 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg cursor-pointer flex items-center gap-1 disabled:opacity-50">
+        <button type="button" onClick={tai} disabled={state.loading} className="px-3 py-1.5 text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl cursor-pointer flex items-center gap-1 disabled:opacity-50">
           {state.loading ? <MiniLoader size={12} /> : <RefreshCw className="w-3 h-3" />} Tải lại
         </button>
       </div>
@@ -41,13 +41,13 @@ export default function PermissionAuditLog() {
       {state.loading && <ListSkeleton rows={4} avatar={false} label="Đang tải nhật ký…" />}
 
       {!state.loading && state.notEnabled && (
-        <div role="alert" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+        <div role="alert" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
           Nhật ký chưa được bật cho hệ thống này. Quản trị cần chạy file <b>supabase/migrations/20261019_permission_audit_log.sql</b> trong Supabase SQL Editor.
           Việc lưu phân quyền vẫn hoạt động bình thường — chỉ là chưa có nhật ký.
         </div>
       )}
       {!state.loading && state.error && !state.notEnabled && (
-        <div role="alert" className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg p-3">Không tải được nhật ký: {state.error}</div>
+        <div role="alert" className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3">Không tải được nhật ký: {state.error}</div>
       )}
       {!state.loading && !state.error && state.rows.length === 0 && (
         <p className="text-xs text-slate-500 italic">Chưa có thay đổi nào được ghi lại. Nhật ký chỉ ghi từ lần Lưu tiếp theo.</p>

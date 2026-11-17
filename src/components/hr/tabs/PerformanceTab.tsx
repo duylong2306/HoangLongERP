@@ -205,12 +205,12 @@ export default function PerformanceTab({
   // ── Hiển thị ──
   // Huy hiệu dùng chung (cùng kiểu các tab khác): bo tròn hẳn, chữ 11px đậm, viền nhạt
   const PILL = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap';
-  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-blue-400 cursor-pointer';
-  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-[#bcd0ff] cursor-pointer';
+  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
   // Màu huy hiệu điểm: 100 xanh lá · ≥95 xanh dương · ≥85 vàng · 80 cam · còn lại đỏ
   const scoreTone = (score: number) => {
     if (score === 100) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    if (score >= 95) return 'bg-sky-50 text-sky-700 border-sky-200';
+    if (score >= 95) return 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]';
     if (score >= 85) return 'bg-yellow-50 text-yellow-700 border-yellow-200';
     if (score === 80) return 'bg-orange-50 text-orange-700 border-orange-200';
     return 'bg-rose-50 text-rose-700 border-rose-200';
@@ -369,7 +369,7 @@ export default function PerformanceTab({
               <div className="px-3.5 pt-3 pb-1 text-[11px] font-black uppercase tracking-wide text-amber-700">Cần chú ý · {attention.length}</div>
               {attention.map(sum => (
                 <div key={sum.id} onClick={() => setErrorSearchEmpId(sum.id)} data-testid={`perf-rank-${sum.id}`}
-                  className={`px-3.5 py-2.5 border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${errorSearchEmpId === sum.id ? 'bg-blue-50' : ''}`}>
+                  className={`px-3.5 py-2.5 border-b border-slate-100 cursor-pointer transition-colors hover:bg-[#d6e2ff] ${errorSearchEmpId === sum.id ? 'bg-[#e8efff]' : ''}`}>
                   <div className="flex items-center gap-2.5">
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initials(sum.name)}</div>
                     <div className="flex-1 min-w-0">
@@ -394,7 +394,7 @@ export default function PerformanceTab({
               <div className="flex flex-wrap gap-1.5">
                 {cleanShown.map(sum => (
                   <button key={sum.id} type="button" onClick={() => setErrorSearchEmpId(sum.id)} data-testid={`perf-rank-${sum.id}`} title={`${sum.name} — ${sum.position} · 100 điểm`}
-                    className={`inline-flex items-center gap-1.5 pl-1 pr-2.5 h-8 rounded-full border text-[12px] font-bold cursor-pointer hover:bg-emerald-50 ${errorSearchEmpId === sum.id ? 'border-blue-300 bg-blue-50' : 'border-emerald-200 bg-white'} text-slate-800`}>
+                    className={`inline-flex items-center gap-1.5 pl-1 pr-2.5 h-8 rounded-full border text-[12px] font-bold cursor-pointer hover:bg-emerald-50 ${errorSearchEmpId === sum.id ? 'border-[#bcd0ff] bg-[#e8efff]' : 'border-emerald-200 bg-white'} text-slate-800`}>
                     <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold" style={{ background: '#d1fae5', color: '#047857' }}>{initials(sum.name)}</span>
                     {sum.name.trim().split(/\s+/).slice(-2).join(' ')}
                     <span className="sr-only">0 lỗi</span>
@@ -451,7 +451,7 @@ export default function PerformanceTab({
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                               <span className="font-bold text-slate-900 text-sm">{err.employeeName}</span>
                               <span className="font-mono text-[11px] text-slate-500">{err.employeeId}</span>
-                              <span className={`${PILL} bg-violet-50 text-violet-700 border-violet-200`}>{getCatText(err.category)}</span>
+                              <span className={`${PILL} bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]`}>{getCatText(err.category)}</span>
                             </div>
                             <div className="mt-1 text-[13px] font-bold text-amber-700 break-words">{err.criterionContent}</div>
                             {err.notes && <div className="mt-0.5 text-[12px] text-slate-600 italic break-words">"{err.notes}"</div>}
@@ -460,7 +460,7 @@ export default function PerformanceTab({
                               <div className="flex gap-1.5 flex-wrap pt-2">
                                 {err.images.map((imgUrl, imgIdx) => (
                                   <img key={imgIdx} src={imgUrl} alt={`Ảnh vi phạm ${imgIdx + 1}`}
-                                    className="w-14 h-14 object-cover rounded-lg border border-slate-200 hover:border-blue-400 transition-all cursor-zoom-in"
+                                    className="w-14 h-14 object-cover rounded-xl border border-slate-200 hover:border-[#bcd0ff] transition-all cursor-zoom-in"
                                     onClick={() => {
                                       const w = window.open();
                                       if (w) {
@@ -476,7 +476,7 @@ export default function PerformanceTab({
                             <div className="flex items-center gap-1.5 shrink-0">
                               <button type="button" className={iconBtn} title="Sửa lỗi" aria-label="Sửa lỗi" data-testid={`perf-edit-${err.id}`} onClick={() => handleEditErrorTrigger(err)}><Pencil className="w-3.5 h-3.5" /></button>
                               <button type="button" title="Xóa lỗi" aria-label="Xóa lỗi" data-testid={`perf-delete-${err.id}`} onClick={() => setDeletingErrorId(err.id)}
-                                className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
+                                className="w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
                             </div>
                           )}
                         </div>
@@ -484,9 +484,9 @@ export default function PerformanceTab({
                           <div className="flex items-center justify-end gap-2 mt-2.5 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
                             <span className="text-xs font-bold text-rose-700 mr-auto">Xác nhận xóa lỗi này?</span>
                             <button type="button" data-testid={`perf-confirm-delete-${err.id}`} onClick={() => { handleDeleteError(err.id); setDeletingErrorId(null); }}
-                              className="h-7 px-2.5 rounded-lg text-xs font-bold cursor-pointer" style={{ background: '#e11d48', color: '#ffffff' }}>Đồng ý</button>
+                              className="h-7 px-2.5 rounded-xl text-xs font-bold cursor-pointer" style={{ background: '#e11d48', color: '#ffffff' }}>Đồng ý</button>
                             <button type="button" onClick={() => setDeletingErrorId(null)}
-                              className="h-7 px-2.5 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-700 cursor-pointer">Hủy</button>
+                              className="h-7 px-2.5 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-700 cursor-pointer">Hủy</button>
                           </div>
                         )}
                       </div>

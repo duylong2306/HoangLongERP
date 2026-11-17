@@ -38,7 +38,7 @@ function BulkRoleSelectModal({ isOpen, onClose, onConfirm, employees, availableR
 
         <div className="space-y-3 max-h-96 overflow-y-auto mb-4 pr-2">
           {employees.map(emp => (
-            <div key={emp.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-slate-950/50 border border-slate-800 rounded-lg">
+            <div key={emp.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-slate-950/50 border border-slate-800 rounded-xl">
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-white truncate">{emp.name}</p>
                 <p className="text-[10px] text-slate-400 font-mono">{emp.id}</p>
@@ -46,7 +46,7 @@ function BulkRoleSelectModal({ isOpen, onClose, onConfirm, employees, availableR
               <select
                 value={assignments[emp.id] || ''}
                 onChange={e => handleChange(emp.id, e.target.value)}
-                className="w-full sm:w-56 bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-200 text-sm focus:border-amber-500 focus:outline-none"
+                className="w-full sm:w-56 bg-slate-900 border border-slate-700 rounded-xl p-2 text-slate-200 text-sm focus:border-amber-500 focus:outline-none"
               >
                 <option value="">— Không phân quyền —</option>
                 {availableRoles.map(role => (
@@ -60,13 +60,13 @@ function BulkRoleSelectModal({ isOpen, onClose, onConfirm, employees, availableR
         <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg transition-colors"
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors"
           >
             Hủy
           </button>
           <button
             onClick={() => { onConfirm(assignments); onClose(); }}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg transition-colors"
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-xl transition-colors"
           >
             Tạo tài khoản
           </button>
@@ -125,7 +125,7 @@ function StatusPill({ emp }: { emp: EmployeeProfile }) {
   const k = statusKeyOf(emp);
   const cls = k === 'working' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
     : k === 'leave' ? 'bg-amber-50 text-amber-700 border-amber-200'
-    : k === 'director_board' ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+    : k === 'director_board' ? 'bg-[#e8efff] text-[#0d47c9] border-[#bcd0ff]'
     : 'bg-slate-100 text-slate-600 border-slate-200';
   const label = k === 'working' ? 'Đang làm' : k === 'leave' ? 'Nghỉ phép' : k === 'director_board' ? 'Ban giám đốc' : 'Nghỉ làm';
   return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap ${cls}`}>{label}</span>;
@@ -511,12 +511,12 @@ export default function ProfilesTab({
 
         {/* Thanh thao tác hàng loạt — chỉ hiện khi đã tick chọn */}
         {selectedRows.size > 0 && (
-          <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50" data-testid="profiles-bulkbar">
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-[#bcd0ff] bg-[#e8efff]" data-testid="profiles-bulkbar">
             <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {selectedRows.size}</span>
             <span className="flex-1" />
-            <button onClick={handleBulkCreateSystemAccounts} className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><UserPlus className="w-3.5 h-3.5" /> Tạo tài khoản</button>
-            <button onClick={handleBulkResetPhepNam} className="h-8 px-3 rounded-lg bg-white border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><RotateCcw className="w-3.5 h-3.5" /> Reset phép năm</button>
-            <button onClick={handleBulkDelete} className="h-8 px-3 rounded-lg bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
+            <button onClick={handleBulkCreateSystemAccounts} className="h-8 px-3 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><UserPlus className="w-3.5 h-3.5" /> Tạo tài khoản</button>
+            <button onClick={handleBulkResetPhepNam} className="h-8 px-3 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><RotateCcw className="w-3.5 h-3.5" /> Reset phép năm</button>
+            <button onClick={handleBulkDelete} className="h-8 px-3 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
           </div>
         )}
 
@@ -561,7 +561,7 @@ export default function ProfilesTab({
                       <tr><td colSpan={9}>{empty}</td></tr>
                     ) : paginatedEmployees.map(emp => (
                       <tr key={emp.id} onClick={() => openRow(emp)} data-testid={`profile-row-${emp.id}`}
-                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-blue-50/50 ${selectedEmpId === emp.id ? 'bg-blue-50' : ''}`}>
+                        className={`border-b border-slate-100 cursor-pointer transition-colors hover:bg-[#d6e2ff] ${selectedEmpId === emp.id ? 'bg-[#e8efff]' : ''}`}>
                         <td className="px-3 py-2.5 text-center">
                           <input type="checkbox" checked={selectedRows.has(emp.id)} aria-label={`Chọn ${emp.name}`}
                             onClick={(e) => e.stopPropagation()} onChange={(e) => handleRowSelect(emp.id, e.target.checked)} className="w-4 h-4 rounded cursor-pointer" />
@@ -587,7 +587,7 @@ export default function ProfilesTab({
                         <td className="px-3 py-2.5 text-center">{statusPill(emp)}</td>
                         <td className="px-3 py-2.5 text-right">
                           <button type="button" aria-label={`Sửa ${emp.name}`} title="Sửa" onClick={(e) => { e.stopPropagation(); editRow(emp); }}
-                            className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
+                            className="w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"><Pencil className="w-3.5 h-3.5" /></button>
                         </td>
                       </tr>
                     ))}
@@ -599,7 +599,7 @@ export default function ProfilesTab({
               <div className="md:hidden" data-testid="profiles-cards">
                 {paginatedEmployees.length === 0 ? empty : paginatedEmployees.map(emp => (
                   <div key={emp.id} onClick={() => openRow(emp)} data-testid={`profile-card-${emp.id}`}
-                    className={`flex gap-3 px-3 py-3 border-b border-slate-100 last:border-b-0 cursor-pointer ${selectedEmpId === emp.id ? 'bg-blue-50' : ''}`}>
+                    className={`flex gap-3 px-3 py-3 border-b border-slate-100 last:border-b-0 cursor-pointer ${selectedEmpId === emp.id ? 'bg-[#e8efff]' : ''}`}>
                     <div className="flex flex-col items-center gap-2 pt-0.5">
                       <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: '#e8efff', color: '#0d47c9' }}>{initials(emp.name)}</div>
                       <input type="checkbox" checked={selectedRows.has(emp.id)} aria-label={`Chọn ${emp.name}`}
@@ -649,7 +649,7 @@ export default function ProfilesTab({
                 </div>
               </div>
               <button type="button" onClick={() => { setSelectedEmpId(null); setIsEditingEmp(false); }} aria-label="Đóng chi tiết" title="Đóng" data-testid="profile-detail-close"
-                className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 cursor-pointer"><X className="w-4 h-4" /></button>
+                className="w-8 h-8 shrink-0 flex items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
 
             {!isEditingEmp ? (
@@ -849,7 +849,7 @@ export default function ProfilesTab({
                         <option value="retired">Nghỉ hẳn</option>
                       </select>
                       {editingEmpData.status === 'retired' && (
-                        <p className="mt-1.5 text-[11px] leading-relaxed rounded-lg border border-amber-200 bg-amber-50 text-amber-700 px-2.5 py-1.5" data-testid="edit-retired-warning">
+                        <p className="mt-1.5 text-[11px] leading-relaxed rounded-xl border border-amber-200 bg-amber-50 text-amber-700 px-2.5 py-1.5" data-testid="edit-retired-warning">
                           ⚠️ Nhân viên "Nghỉ hẳn" sẽ bị xóa tài khoản + mật khẩu đăng nhập khi lưu, không thể đăng nhập hệ thống nữa.
                         </p>
                       )}

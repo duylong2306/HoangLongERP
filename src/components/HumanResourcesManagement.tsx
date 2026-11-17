@@ -4179,19 +4179,19 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                         setShowEmpModal(true);
                       }}
                       disabled={!hasModulePermission(currentUser?.id, 'employees', 'create')}
-                      className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg px-3 py-1.5 text-sm font-bold shadow-md shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:from-amber-500 disabled:hover:to-orange-500"
+                      className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl px-3 py-1.5 text-sm font-bold shadow-md shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:from-amber-500 disabled:hover:to-orange-500"
                     >
                       <Plus className="w-3.5 h-3.5" /> Thêm nhân viên
                     </button>
                     <button
                       onClick={handleExportProfilesExcel}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                      style={{ color: '#ffffff' }} className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-colors"
                     >
                       <Download className="w-3.5 h-3.5" /> Xuất Excel
                     </button>
                     <button
                       onClick={() => profileFileInputRef.current?.click()}
-                      className="bg-sky-600 hover:bg-sky-500 text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                      style={{ color: '#ffffff' }} className="bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-bold px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer transition-colors"
                     >
                       <FileUp className="w-3.5 h-3.5" /> Nhập Excel
                     </button>
@@ -4520,7 +4520,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
               {targetEmp && (
                 <div className="bg-slate-950 p-3 rounded-xl border border-slate-850 flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-lg bg-orange-555/10 border border-orange-500/20 flex items-center justify-center font-black text-orange-400 text-xs font-mono">
+                  <div className="h-9 w-9 rounded-xl bg-orange-555/10 border border-orange-500/20 flex items-center justify-center font-black text-orange-400 text-xs font-mono">
                     {targetEmp.id}
                   </div>
                   <div className="text-xs font-sans">
@@ -4624,7 +4624,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <button
                   type="button"
                   onClick={handleSaveInsurance}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-555 text-white font-black rounded-xl transition-all shadow-md cursor-pointer text-center"
+                  style={{ color: '#ffffff' }} className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-555 text-white font-black rounded-xl transition-all shadow-md cursor-pointer text-center"
                 >
                   Lưu cấu hình
                 </button>
@@ -4657,7 +4657,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               {targetEmp && (
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-2">
                   <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-lg bg-orange-550/10 border border-orange-500/20 flex items-center justify-center font-black text-orange-400 text-xs font-mono">
+                    <div className="h-9 w-9 rounded-xl bg-orange-550/10 border border-orange-500/20 flex items-center justify-center font-black text-orange-400 text-xs font-mono">
                       {targetEmp.id}
                     </div>
                     <div className="text-xs">
@@ -4684,7 +4684,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   THÔNG TIN CHẤM CÔNG &amp; PHỤ CẤP (CÓ THỂ GHI ĐÈ)
                 </h6>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-sans">
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-xl space-y-1">
                     <label className="text-[10px] text-slate-500 font-bold block">Công nhật:</label>
                     <input
                       type="number"
@@ -4693,7 +4693,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
                     />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-xl space-y-1">
                     <label className="text-[10px] text-slate-500 font-bold block">Điểm hiệu suất (%):</label>
                     <input
                       type="number"
@@ -4702,7 +4702,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
                     />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-xl space-y-1">
                     <label className="text-[10px] text-slate-500 font-bold block">TC Chủ Nhật (ngày):</label>
                     <input
                       type="number"
@@ -4711,7 +4711,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
                     />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-xl space-y-1">
                     <label className="text-[10px] text-slate-500 font-bold block">TC Ngày Lễ (ngày):</label>
                     <input
                       type="number"
@@ -4720,7 +4720,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
                     />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-xl space-y-1">
                     <label className="text-[10px] text-slate-500 font-bold block">Giờ tăng ca (h):</label>
                     <input
                       type="number"
@@ -4729,7 +4729,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
                     />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-xl space-y-1">
                     <label className="text-[10px] text-slate-500 font-bold block">Số lần tăng ca:</label>
                     <input
                       type="number"
@@ -4738,7 +4738,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
                     />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-xl space-y-1">
                     <label className="text-[10px] text-slate-500 font-bold block">Tạm ứng (đ):</label>
                     <input
                       type="number"
@@ -4748,7 +4748,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-semibold rounded px-1.5 py-1 focus:border-amber-500 focus:outline-none"
                     />
                   </div>
-                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-lg space-y-1">
+                  <div className="p-2 bg-slate-900/60 border border-slate-850 rounded-xl space-y-1">
                     <label className="text-[10px] text-slate-500 font-bold block">Công tác phí (đ):</label>
                     <input
                       type="number"
@@ -4777,7 +4777,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       step="10000"
                       value={editBonusHoliday}
                       onChange={(e) => setEditBonusHoliday(Math.max(0, Number(e.target.value) || 0))}
-                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-bold rounded-lg px-2.5 py-2 focus:border-amber-500 focus:outline-none transition-colors"
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-bold rounded-xl px-2.5 py-2 focus:border-amber-500 focus:outline-none transition-colors"
                       placeholder="0"
                     />
                   </div>
@@ -4790,7 +4790,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       step="10000"
                       value={editBonusCreative}
                       onChange={(e) => setEditBonusCreative(Math.max(0, Number(e.target.value) || 0))}
-                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-bold rounded-lg px-2.5 py-2 focus:border-amber-500 focus:outline-none transition-colors"
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-bold rounded-xl px-2.5 py-2 focus:border-amber-500 focus:outline-none transition-colors"
                       placeholder="0"
                     />
                   </div>
@@ -4803,7 +4803,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       step="10000"
                       value={editOtherDeductions}
                       onChange={(e) => setEditOtherDeductions(Math.max(0, Number(e.target.value) || 0))}
-                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-bold rounded-lg px-2.5 py-2 focus:border-amber-500 focus:outline-none transition-colors"
+                      className="w-full bg-slate-950 border border-slate-800 text-white font-mono font-bold rounded-xl px-2.5 py-2 focus:border-amber-500 focus:outline-none transition-colors"
                       placeholder="0"
                     />
                   </div>
@@ -4822,7 +4822,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <button
                   type="button"
                   onClick={handleSaveEditPayroll}
-                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-550 text-white font-black rounded-xl transition-all shadow-md cursor-pointer text-center"
+                  style={{ color: '#ffffff' }} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-550 text-white font-black rounded-xl transition-all shadow-md cursor-pointer text-center"
                 >
                   Ghi đè & Tái tính toán lương
                 </button>
@@ -4848,7 +4848,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               {/* Drawer Header */}
               <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 shrink-0 flex justify-between items-center gap-2">
                 <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 bg-orange-500 rounded-lg flex items-center justify-center shadow-md shrink-0">
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 bg-orange-500 rounded-xl flex items-center justify-center shadow-md shrink-0">
                     <Calculator className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -4856,7 +4856,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       <span className="font-mono font-extrabold text-[10px] text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
                         {pay.empId}
                       </span>
-                      <span className="font-bold text-[9px] sm:text-[9.5px] uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded bg-teal-100 text-teal-700 border border-teal-200">
+                      <span className="font-bold text-[9px] sm:text-[9.5px] uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded bg-[#e8efff] text-[#0d47c9] border border-[#bcd0ff]">
                         Phiếu lương {pay.month}
                       </span>
                     </div>
@@ -4869,7 +4869,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <button
                   type="button"
                   onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
-                  className="p-1.5 px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-lg border border-slate-300 font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0"
+                  className="p-1.5 px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-xl border border-slate-300 font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0"
                 >
                   <X className="w-4 h-4" />
                   <span className="hidden sm:inline">Đóng</span>
@@ -4892,7 +4892,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <div className="p-3 sm:p-5 overflow-y-auto border-b lg:border-b-0 lg:border-r border-slate-200" id="payslip_drawer_left_pane">
                   <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-3 sm:p-4 mx-auto" style={{ maxWidth: 480 }}>
                     <div
-                      className="bg-white text-black rounded-lg border border-slate-200 mx-auto overflow-hidden"
+                      className="bg-white text-black rounded-xl border border-slate-200 mx-auto overflow-hidden"
                       style={{ width: '420px' }}
                       dangerouslySetInnerHTML={{ __html: payslipPreviewFragment }}
                       onBlur={(e) => {
@@ -4931,7 +4931,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       <button
                         type="button"
                         onClick={() => handlePrintPayslip(pay)}
-                        className="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        style={{ color: '#ffffff' }} className="w-full bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                       >
                         <Printer className="w-4 h-4" /> In
                       </button>
@@ -4939,7 +4939,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       <button
                         type="button"
                         onClick={() => downloadPDFPayslip(pay)}
-                        className="w-full bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        style={{ color: '#ffffff' }} className="w-full bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                       >
                         <Download className="w-4 h-4" /> Tải
                       </button>
@@ -4947,7 +4947,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       <button
                         type="button"
                         onClick={() => sharePayslip(pay)}
-                        className="w-full bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-black py-2.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        style={{ color: '#ffffff' }} className="w-full bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[11px] font-black py-2.5 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                       >
                         <Share2 className="w-4 h-4" /> Chia sẻ
                       </button>
@@ -4955,7 +4955,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       <button
                         type="button"
                         onClick={() => { setShowPrintPayslipModal(false); setPrintingPayrollItem(null); }}
-                        className="w-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-lg cursor-pointer transition-all"
+                        style={{ color: '#ffffff' }} className="w-full bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-black py-2.5 rounded-xl cursor-pointer transition-all"
                       >
                         Hủy &amp; Đóng lại
                       </button>
@@ -5011,7 +5011,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <button
                 type="button"
                 onClick={executeClearData}
-                className="flex-1 py-2 font-extrabold rounded-xl bg-rose-600 hover:bg-rose-500 text-white shadow-lg active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                style={{ color: '#ffffff' }} className="flex-1 py-2 font-extrabold rounded-xl bg-rose-600 hover:bg-rose-500 text-white shadow-lg active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-1.5"
                 id="confirm_clear_btn"
               >
                 <Trash2 className="w-3.5 h-3.5" /> Xác nhận xóa
@@ -5082,7 +5082,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   placeholder="Ví dụ: Giám sát công trình, Tổ trưởng tổ mộc..."
                   value={newRoleName}
                   onChange={(e) => setNewRoleName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-amber-500/50"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white outline-none focus:border-amber-500/50"
                 />
               </div>
 
@@ -5093,7 +5093,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                   value={newRoleDesc}
                   onChange={(e) => setNewRoleDesc(e.target.value)}
                   rows={3}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-amber-500/50 resize-none"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white outline-none focus:border-amber-500/50 resize-none"
                 />
               </div>
 
@@ -5391,13 +5391,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <button
                   type="button"
                   onClick={() => setShowEmpModal(false)}
-                  className="bg-slate-800 hover:bg-slate-705 text-white px-3 py-1.5 rounded-lg cursor-pointer"
+                  className="bg-slate-800 hover:bg-slate-705 text-white px-3 py-1.5 rounded-xl cursor-pointer"
                 >
                   Bỏ qua
                 </button>
                 <button
                   type="submit"
-                  className="bg-amber-600 hover:bg-amber-550 text-white font-extrabold px-4 py-1.5 rounded-lg cursor-pointer"
+                  style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 text-white font-extrabold px-4 py-1.5 rounded-xl cursor-pointer"
                 >
                   Đăng ký Hồ sơ ✅
                 </button>
@@ -5549,7 +5549,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     return (
                       <div className="w-full bg-slate-950 border border-slate-800 rounded p-1.5 text-white flex items-center justify-between gap-2">
                         <span className="font-bold">{configuredApprovers.map(a => a.position ? `${a.name} (${a.position})` : a.name).join(', ')}</span>
-                        <span className="text-[10px] bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động từ Quyền Phê Duyệt</span>
+                        <span className="text-[10px] bg-[#e8efff] text-[#0d47c9] px-1.5 py-0.5 rounded shrink-0">Đã khóa · Tự động từ Quyền Phê Duyệt</span>
                       </div>
                     );
                   }
@@ -5580,7 +5580,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button type="button" onClick={() => setShowLeaveModal(false)} className="bg-slate-800 px-3 py-1 rounded">Hủy</button>
-                <button type="submit" className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded">Gửi đơn phép 🚀</button>
+                <button type="submit" style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded">Gửi đơn phép 🚀</button>
               </div>
             </form>
           </div>
@@ -5592,7 +5592,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm w-full text-left space-y-4">
             <h4 className="font-extrabold text-white text-sm border-b border-slate-805 pb-1 flex items-center gap-1.5 animate-pulse">
-              <MapPin className="w-4 h-4 text-indigo-400" /> Tạo Kế Hoạch Đi Công Tác & Tạm Ứng Phí
+              <MapPin className="w-4 h-4 text-[#0d47c9]" /> Tạo Kế Hoạch Đi Công Tác & Tạm Ứng Phí
             </h4>
             <form onSubmit={handleCreateTrip} className="space-y-3 text-[11px] text-slate-300">
               <div>
@@ -5673,7 +5673,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button type="button" onClick={() => setShowTripModal(false)} className="bg-slate-800 px-3 py-1 rounded">Huỷ</button>
-                <button type="submit" className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded">Trình Giám Đốc 🚀</button>
+                <button type="submit" style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded">Trình Giám Đốc 🚀</button>
               </div>
             </form>
           </div>
@@ -5763,7 +5763,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button type="button" onClick={resetAddTravelExpenseForm} className="bg-slate-800 px-3 py-1 rounded cursor-pointer">Huỷ</button>
-                <button type="button" onClick={handleSubmitAddTravelExpense} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">Thêm mới</button>
+                <button type="button" onClick={handleSubmitAddTravelExpense} style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">Thêm mới</button>
               </div>
             </div>
           </div>
@@ -5862,7 +5862,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button type="button" onClick={closeHolidayModal} className="bg-slate-800 px-3 py-1 rounded cursor-pointer">Huỷ</button>
-                <button type="submit" className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">{editingHolidayId ? 'Lưu thay đổi' : 'Thêm mới'}</button>
+                <button type="submit" style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">{editingHolidayId ? 'Lưu thay đổi' : 'Thêm mới'}</button>
               </div>
             </form>
           </div>
@@ -5941,7 +5941,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button type="button" onClick={() => setShowCoefModal(false)} className="bg-slate-800 px-3 py-1 rounded cursor-pointer">Huỷ</button>
-                <button type="submit" className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">Thêm mới</button>
+                <button type="submit" style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer">Thêm mới</button>
               </div>
             </form>
           </div>
@@ -5980,7 +5980,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     onClick={() => setNewCritCategory('readiness')}
                     className={`py-1.5 px-2 rounded font-bold text-center border transition-all cursor-pointer ${
                       newCritCategory === 'readiness' 
-                        ? 'bg-purple-950 text-purple-400 border-purple-500' 
+                        ? 'bg-[#e8efff] text-[#0d47c9] border-[#0d47c9]' 
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
@@ -5991,7 +5991,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     onClick={() => setNewCritCategory('progress')}
                     className={`py-1.5 px-2 rounded font-bold text-center border transition-all cursor-pointer ${
                       newCritCategory === 'progress' 
-                        ? 'bg-sky-950 text-sky-400 border-sky-500' 
+                        ? 'bg-[#e8efff] text-[#0d47c9] border-[#0d47c9]' 
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
                     }`}
                   >
@@ -6038,7 +6038,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 </button>
                 <button 
                   type="submit" 
-                  className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer"
+                  style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 font-bold text-white px-4 py-1 rounded cursor-pointer"
                 >
                   {editingCritId ? "Cập nhật" : "Thêm mới"}
                 </button>
@@ -6157,12 +6157,12 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 {errFormImages.length > 0 && (
                   <div className="grid grid-cols-5 gap-2 bg-slate-950 p-2 rounded-xl border border-slate-850">
                     {errFormImages.map((img, idx) => (
-                      <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-slate-800 group">
+                      <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-800 group">
                         <img src={img} alt="Evidence" className="w-full h-full object-cover" />
                         <button
                           type="button"
                           onClick={() => setErrFormImages(prev => prev.filter((_, i) => i !== idx))}
-                          className="absolute -top-1 -right-1 bg-red-650 hover:bg-red-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px] cursor-pointer font-bold shadow"
+                          style={{ color: '#ffffff' }} className="absolute -top-1 -right-1 bg-rose-600 hover:bg-red-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px] cursor-pointer font-bold shadow"
                         >
                           ✕
                         </button>
@@ -6237,9 +6237,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                         }
                       }
                     }}
-                    className={`flex-1 p-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    style={errFormCameraActive ? { color: '#ffffff' } : undefined} className={`flex-1 p-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                       errFormCameraActive 
-                        ? 'bg-rose-650 hover:bg-rose-550 border-none text-white animate-pulse' 
+                        ? 'bg-rose-600 hover:bg-rose-500 border-none text-white animate-pulse' 
                         : 'bg-slate-950 hover:bg-slate-850 border border-slate-800 hover:border-slate-705 text-slate-300'
                     }`}
                   >
@@ -6260,7 +6260,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                         setErrFormCameraStream(null);
                         setErrFormCameraActive(false);
                       }}
-                      className="absolute top-2 right-2 bg-black/60 hover:bg-black/90 text-white text-[10px] p-1 px-2 rounded-lg border border-slate-800 cursor-pointer"
+                      className="absolute top-2 right-2 bg-black/60 hover:bg-black/90 text-white text-[10px] p-1 px-2 rounded-xl border border-slate-800 cursor-pointer"
                     >
                       ✕ Tắt Camera
                     </button>
@@ -6277,13 +6277,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     setErrFormNotes('');
                     setErrorFormCritSearch('');
                   }}
-                  className="bg-slate-800 hover:bg-slate-750 text-slate-300 px-4 py-1.5 rounded-lg cursor-pointer transition-colors"
+                  className="bg-slate-800 hover:bg-slate-750 text-slate-300 px-4 py-1.5 rounded-xl cursor-pointer transition-colors"
                 >
                   Huỷ bỏ
                 </button>
                 <button
                   type="submit"
-                  className="bg-amber-600 hover:bg-amber-550 active:translate-y-0.5 font-bold text-white px-5 py-1.5 rounded-lg cursor-pointer transition-all shadow-md"
+                  style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 active:translate-y-0.5 font-bold text-white px-5 py-1.5 rounded-xl cursor-pointer transition-all shadow-md"
                 >
                   {editingErrorId ? "Cập nhật lỗi" : "Ghi nhận lỗi"}
                 </button>
@@ -6324,7 +6324,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       setSsLevelName(`Bậc lương ${val}`);
                     }}
                     placeholder="E.g., QLDHB1"
-                    className="w-full bg-slate-950 border border-slate-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg p-2.5 text-white outline-none focus:border-amber-500 font-mono font-bold"
+                    className="w-full bg-slate-950 border border-slate-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl p-2.5 text-white outline-none focus:border-amber-500 font-mono font-bold"
                   />
                   {!editingSalaryScale && <span className="text-[9px] text-slate-500 block mt-1">Dành để xác định khóa chính bảng SQL</span>}
                 </div>
@@ -6340,7 +6340,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       else if (code === 'KTTC') setSsGroupName('KỸ THUẬT - THI CÔNG');
                       else if (code === 'HCKT') setSsGroupName('HÀNH CHÍNH - KẾ TOÁN - NHÂN SỰ - KINH DOANH');
                     }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-amber-500 font-bold"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white outline-none focus:border-amber-500 font-bold"
                   >
                     <option value="QLDH">QLDH - Quản Lý - Điều Hành</option>
                     <option value="KTTC">KTTC - Kỹ Thuyết - Thi Công</option>
@@ -6356,7 +6356,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     value={ssLevel}
                     onChange={(e) => setSsLevel(e.target.value)}
                     placeholder="E.g., B1"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-amber-500 font-mono text-center font-bold"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white outline-none focus:border-amber-500 font-mono text-center font-bold"
                   />
                 </div>
 
@@ -6368,7 +6368,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     value={ssLevelName}
                     onChange={(e) => setSsLevelName(e.target.value)}
                     placeholder="E.g., Bậc lương QLDHB1"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-amber-500 font-bold"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white outline-none focus:border-amber-500 font-bold"
                   />
                 </div>
 
@@ -6382,7 +6382,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                       step="50000"
                       value={ssBaseSalary}
                       onChange={(e) => setSsBaseSalary(Number(e.target.value))}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-amber-500 font-mono text-right font-bold text-amber-500"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white outline-none focus:border-amber-500 font-mono text-right font-bold text-amber-500"
                     />
                   </div>
 
@@ -6395,7 +6395,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                         max="200"
                         value={ssAllocationRate}
                         onChange={(e) => setSsAllocationRate(Number(e.target.value))}
-                        className="w-20 bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:border-amber-500 font-mono font-bold text-center"
+                        className="w-20 bg-slate-950 border border-slate-800 rounded-xl p-2 text-white outline-none focus:border-amber-500 font-mono font-bold text-center"
                       />
                       <input
                         type="range"
@@ -6409,7 +6409,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     </div>
                   </div>
 
-                  <div className="col-span-2 grid grid-cols-2 gap-3 text-[10.5px] bg-slate-950/60 p-2.5 rounded-lg border border-slate-850 mt-1">
+                  <div className="col-span-2 grid grid-cols-2 gap-3 text-[10.5px] bg-slate-950/60 p-2.5 rounded-xl border border-slate-850 mt-1">
                     <div className="text-slate-400">
                       <span>Lương Hiệu Suất tự tính:</span>
                       <strong className="block text-xs font-mono font-extrabold text-white mt-0.5">
@@ -6432,7 +6432,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     onChange={(e) => setSsNotes(e.target.value)}
                     placeholder="Nhập ghi chú hoặc điều kiện xếp loại lương khác biệt..."
                     rows={2}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-amber-500 text-xs"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white outline-none focus:border-amber-500 text-xs"
                   />
                 </div>
               </div>
@@ -6441,13 +6441,13 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <button
                   type="button"
                   onClick={() => setShowSalaryScaleModal(false)}
-                  className="bg-slate-805 hover:bg-slate-800 text-slate-300 font-bold px-4 py-2 rounded-lg cursor-pointer transition-colors"
+                  className="bg-slate-805 hover:bg-slate-800 text-slate-300 font-bold px-4 py-2 rounded-xl cursor-pointer transition-colors"
                 >
                   Huỷ bỏ
                 </button>
                 <button
                   type="submit"
-                  className="bg-amber-600 hover:bg-amber-550 active:translate-y-0.5 font-extrabold text-white px-5 py-2 rounded-lg cursor-pointer transition-all shadow-lg flex items-center gap-1.5"
+                  style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 active:translate-y-0.5 font-extrabold text-white px-5 py-2 rounded-xl cursor-pointer transition-all shadow-lg flex items-center gap-1.5"
                 >
                   {editingSalaryScale ? 'Cập nhật Quyết định' : 'Lưu Bậc Lương'}
                 </button>
@@ -6524,7 +6524,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black transition-colors shadow-lg shadow-amber-950/20 cursor-pointer"
+                  style={{ color: '#ffffff' }} className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black transition-colors shadow-lg shadow-amber-950/20 cursor-pointer"
                 >
                   {editingTravelNorm ? 'Cập nhật' : 'Thêm định mức'}
                 </button>
@@ -6551,7 +6551,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <select
                 value={editForm.status}
                 onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-xs text-white focus:border-amber-500 focus:outline-none cursor-pointer"
               >
                 <option value="valid">Hợp Lệ</option>
                 <option value="late">Đi muộn</option>
@@ -6565,8 +6565,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             </div>
 
             {/* Morning shift */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-850 space-y-2">
-              <h5 className="text-[10px] font-bold text-sky-400 uppercase tracking-wider">🌅 Ca Sáng</h5>
+            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 space-y-2">
+              <h5 className="text-[10px] font-bold text-[#0d47c9] uppercase tracking-wider">🌅 Ca Sáng</h5>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[10px] text-slate-500 font-bold">Giờ vào:</label>
@@ -6590,7 +6590,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             </div>
 
             {/* Afternoon shift */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-850 space-y-2">
+            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 space-y-2">
               <h5 className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">☀️ Ca Chiều</h5>
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -6615,8 +6615,8 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             </div>
 
             {/* Overtime shift */}
-            <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-850 space-y-2">
-              <h5 className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">🌙 Tăng Ca (OT)</h5>
+            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850 space-y-2">
+              <h5 className="text-[10px] font-bold text-[#0d47c9] uppercase tracking-wider">🌙 Tăng Ca (OT)</h5>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[10px] text-slate-500 font-bold">Giờ vào:</label>
@@ -6655,14 +6655,14 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <button
                 type="button"
                 onClick={() => { setEditingAttendance(null); setEditForm(null); }}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-1.5 rounded-lg cursor-pointer text-xs font-bold"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-1.5 rounded-xl cursor-pointer text-xs font-bold"
               >
                 Huỷ bỏ
               </button>
               <button
                 type="button"
                 onClick={handleSaveAttendanceEdit}
-                className="bg-amber-600 hover:bg-amber-550 text-white px-4 py-1.5 rounded-lg cursor-pointer text-xs font-bold"
+                style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-550 text-white px-4 py-1.5 rounded-xl cursor-pointer text-xs font-bold"
               >
                 💾 Lưu thay đổi
               </button>
@@ -6690,7 +6690,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setBulkLockScope('page')}
-                className={`px-3 py-2.5 rounded-lg text-[12px] font-bold border transition-all cursor-pointer ${
+                className={`px-3 py-2.5 rounded-xl text-[12px] font-bold border transition-all cursor-pointer ${
                   bulkLockScope === 'page'
                     ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'
                     : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -6703,7 +6703,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               </button>
               <button
                 onClick={() => setBulkLockScope('month')}
-                className={`px-3 py-2.5 rounded-lg text-[12px] font-bold border transition-all cursor-pointer ${
+                className={`px-3 py-2.5 rounded-xl text-[12px] font-bold border transition-all cursor-pointer ${
                   bulkLockScope === 'month'
                     ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'
                     : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -6720,14 +6720,14 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <button
                 type="button"
                 onClick={() => setShowBulkLockModal(false)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-1.5 rounded-lg cursor-pointer text-xs font-bold"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-1.5 rounded-xl cursor-pointer text-xs font-bold"
               >
                 Huỷ bỏ
               </button>
               <button
                 type="button"
                 onClick={handleBulkLock}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg cursor-pointer text-xs font-bold flex items-center gap-1.5"
+                style={{ color: '#ffffff' }} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-xl cursor-pointer text-xs font-bold flex items-center gap-1.5"
               >
                 <Lock className="w-3.5 h-3.5" />
                 Xác nhận chốt
@@ -6770,7 +6770,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
             <div className="flex justify-between items-start pb-4 border-b border-slate-800 shrink-0">
               <div>
                 <h3 className="font-extrabold text-base text-white flex items-center gap-2">
-                  <Workflow className="w-5 h-5 text-indigo-400" />
+                  <Workflow className="w-5 h-5 text-[#0d47c9]" />
                   CẤU TRÚC PHÂN HỆ & ĐỒNG BỘ PHÂN QUYỀN ERP
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
@@ -6780,7 +6780,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
               <button
                 type="button"
                 onClick={() => setIsSyncModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                className="text-slate-400 hover:text-white p-1 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -6803,9 +6803,9 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                           key={r.id}
                           type="button"
                           onClick={() => setSyncModalSelectedRoleId(r.id)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          style={isSelected ? { color: '#ffffff' } : undefined} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                             isSelected 
-                              ? 'bg-indigo-650 text-white shadow-md border border-indigo-500/30' 
+                              ? 'bg-[#0d47c9] text-white shadow-md border border-[#bcd0ff]' 
                               : 'bg-slate-900/60 text-slate-400 hover:text-white border border-transparent'
                           }`}
                         >
@@ -6817,7 +6817,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 </div>
 
                 <div className="text-[10px] text-slate-400 max-w-xs md:text-right">
-                  Thay đổi trạng thái bên dưới sẽ áp dụng trực tiếp cho nhóm <span className="text-indigo-400 font-bold">{(roles.find(r => r.id === syncModalSelectedRoleId)?.name) || ''}</span>.
+                  Thay đổi trạng thái bên dưới sẽ áp dụng trực tiếp cho nhóm <span className="text-[#0d47c9] font-bold">{(roles.find(r => r.id === syncModalSelectedRoleId)?.name) || ''}</span>.
                 </div>
               </div>
 
@@ -6828,7 +6828,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                     {
                       parentName: 'PHÒNG DỰ ÁN (Menu Cha)',
                       icon: 'Folder',
-                      color: 'text-sky-400 bg-sky-500/10 border-sky-500/20',
+                      color: 'text-[#0d47c9] bg-[#e8efff] border-[#bcd0ff]',
                       submenus: [
                         { code: 'projects_construction', name: 'Công trình & Thi công mộc (Xây Dựng)', desc: 'Theo dõi hợp đồng xây dựng, thi công thô và hoàn thiện thợ thầu.' },
                         { code: 'projects_furniture', name: 'Sản xuất Nội thất cao cấp', desc: 'Đơn hàng xưởng gỗ, tiến độ sản xuất bệ tủ kịch trần, lắp đặt.' },
@@ -6871,7 +6871,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                         {/* Parent Menu Header */}
                         <div className="bg-slate-950 px-4 py-2.5 border-b border-slate-800/80 flex justify-between items-center">
                           <span className="text-[11px] font-black tracking-wider text-slate-300 flex items-center gap-1.5 uppercase">
-                            <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                            <span className="w-2 h-2 rounded-full bg-[#0d47c9]" />
                             {group.parentName}
                           </span>
                           
@@ -6889,7 +6889,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                                   return next;
                                 });
                               }}
-                              className="text-[9.5px] font-bold text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                              className="text-[9.5px] font-bold text-[#0d47c9] hover:text-[#0d47c9] cursor-pointer"
                             >
                               Chọn tất cả quyền
                             </button>
@@ -6921,7 +6921,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                               <div key={sIdx} className="p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-slate-800/20 transition-colors">
                                 <div className="space-y-1 max-w-md">
                                   <div className="font-bold text-slate-100 text-xs flex items-center gap-2">
-                                    <span className="font-mono text-[9px] bg-indigo-950/60 border border-indigo-900/30 text-indigo-400 px-1.5 py-0.2 rounded font-extrabold uppercase">
+                                    <span className="font-mono text-[9px] bg-[#e8efff] border border-[#bcd0ff] text-[#0d47c9] px-1.5 py-0.2 rounded font-extrabold uppercase">
                                       {sub.code}
                                     </span>
                                     {sub.name}
@@ -7045,7 +7045,7 @@ export default function HumanResourcesManagement({ currentUser, projects = [], c
                 <button
                   type="button"
                   onClick={handleSaveSyncPermissions}
-                  className="px-5 py-2.5 bg-indigo-650 hover:bg-indigo-600 text-white font-black text-xs rounded-xl transition-all shadow-lg shadow-indigo-950/30 cursor-pointer flex items-center justify-center gap-1.5 active:scale-98"
+                  style={{ color: '#ffffff' }} className="px-5 py-2.5 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-black text-xs rounded-xl transition-all shadow-lg shadow-md cursor-pointer flex items-center justify-center gap-1.5 active:scale-98"
                 >
                   <Workflow className="w-4 h-4" />
                   <span>🔄 LƯU CẤU HÌNH & ĐỒNG BỘ ERP</span>

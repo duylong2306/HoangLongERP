@@ -89,7 +89,7 @@ export function QuickSearchFilter({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-3 text-[13px] font-bold outline-none focus:border-blue-400 cursor-pointer flex items-center gap-1.5 max-w-[200px]"
+        className="h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-3 text-[13px] font-bold outline-none focus:border-[#bcd0ff] cursor-pointer flex items-center gap-1.5 max-w-[200px]"
       >
         <span className="truncate max-w-[160px] text-left">
           {value === 'all' ? placeholder : selectedLabel}
@@ -114,7 +114,7 @@ export function QuickSearchFilter({
             <button
               type="button"
               onClick={() => { onChange('all'); setIsOpen(false); }}
-              className={`w-full text-left px-3 py-2 text-[13px] font-medium hover:bg-blue-50 transition-colors ${value === 'all' ? 'text-blue-700 bg-blue-50' : 'text-slate-500'}`}
+              className={`w-full text-left px-3 py-2 text-[13px] font-medium hover:bg-[#d6e2ff] transition-colors ${value === 'all' ? 'text-[#0d47c9] bg-[#e8efff]' : 'text-slate-500'}`}
             >
               {placeholder}
             </button>
@@ -124,7 +124,7 @@ export function QuickSearchFilter({
                   key={opt.value}
                   type="button"
                   onClick={() => { onChange(opt.value); setIsOpen(false); }}
-                  className={`w-full text-left px-3 py-2 text-[13px] font-medium hover:bg-blue-50 transition-colors ${value === opt.value ? 'text-blue-700 bg-blue-50' : 'text-slate-700'}`}
+                  className={`w-full text-left px-3 py-2 text-[13px] font-medium hover:bg-[#d6e2ff] transition-colors ${value === opt.value ? 'text-[#0d47c9] bg-[#e8efff]' : 'text-slate-700'}`}
                 >
                   <span className="truncate block">{opt.label}</span>
                 </button>
@@ -281,8 +281,8 @@ export default function TripsTab({
   // ── Hiển thị dùng chung ──
   const money = (n?: number) => `${Number(n || 0).toLocaleString('vi-VN')} đ`;
   const PILL = 'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border text-[11px] font-bold whitespace-nowrap';
-  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-blue-400 cursor-pointer';
-  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
+  const inputCls = 'h-9 bg-white border border-slate-200 text-slate-800 rounded-xl px-2.5 text-[13px] font-bold outline-none focus:border-[#bcd0ff] cursor-pointer';
+  const iconBtn = 'w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer';
   const empNames = Array.from(new Set(travelExpensesSummary.map(i => i.employeeName).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'vi'));
   const projNames = Array.from(new Set([...(projectNames || []), ...travelExpensesSummary.map(i => i.projectName).filter(Boolean) as string[]])).sort((a, b) => a.localeCompare(b, 'vi'));
   const resetFilters = () => { setSelectedEmpFilter('all'); setSelectedProjectFilter('all'); setSelectedMonthFilter('all'); setSelectedYearFilter('all'); setStatusFilter(''); };
@@ -302,10 +302,10 @@ export default function TripsTab({
       <div className="flex items-center gap-1.5 mt-1.5">
         <button type="button" title="Duyệt công tác phí" data-testid={`trip-approve-${rowId}`}
           onClick={(e) => { e.stopPropagation(); onApproveTravelExpense(rowId, 'approved'); }}
-          style={{ background: '#0d47c9', color: '#ffffff' }} className="h-7 px-2.5 rounded-lg text-xs font-bold inline-flex items-center gap-1 cursor-pointer"><Check className="w-3 h-3" /> Duyệt</button>
+          style={{ background: '#0d47c9', color: '#ffffff' }} className="h-7 px-2.5 rounded-xl text-xs font-bold inline-flex items-center gap-1 cursor-pointer"><Check className="w-3 h-3" /> Duyệt</button>
         <button type="button" title="Từ chối công tác phí" data-testid={`trip-reject-${rowId}`}
           onClick={(e) => { e.stopPropagation(); onApproveTravelExpense(rowId, 'rejected'); }}
-          className="h-7 px-2.5 rounded-lg text-xs font-bold inline-flex items-center gap-1 bg-white border border-rose-200 text-rose-700 hover:bg-rose-50 cursor-pointer"><X className="w-3 h-3" /> Từ chối</button>
+          className="h-7 px-2.5 rounded-xl text-xs font-bold inline-flex items-center gap-1 bg-white border border-rose-200 text-rose-700 hover:bg-rose-50 cursor-pointer"><X className="w-3 h-3" /> Từ chối</button>
       </div>
     );
   };
@@ -316,7 +316,7 @@ export default function TripsTab({
         <button type="button" className={iconBtn} title="Sửa công tác phí này" aria-label="Sửa công tác phí" data-testid={`trip-edit-${rowId}`}
           onClick={(e) => { e.stopPropagation(); openEditModal(item); }}><Pencil className="w-3.5 h-3.5" /></button>
         <button type="button" title="Xóa công tác phí này" aria-label="Xóa công tác phí" data-testid={`trip-delete-${rowId}`}
-          className="w-8 h-8 inline-flex items-center justify-center rounded-lg bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"
+          className="w-8 h-8 inline-flex items-center justify-center rounded-xl bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 cursor-pointer"
           onClick={(e) => { e.stopPropagation(); handleDeleteSingle(item); }}><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
     );
@@ -389,11 +389,11 @@ export default function TripsTab({
 
       {/* Thanh thao tác hàng loạt — chỉ hiện khi đã tick chọn */}
       {selectedRows.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-blue-200 bg-blue-50" data-testid="trips-bulkbar">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl border border-[#bcd0ff] bg-[#e8efff]" data-testid="trips-bulkbar">
           <span className="text-[13px] font-bold" style={{ color: '#0d47c9' }}>Đã chọn {selectedRows.size}</span>
           <button type="button" onClick={clearSelection} className="text-xs font-bold text-slate-500 cursor-pointer">Bỏ chọn</button>
           <span className="flex-1" />
-          <button type="button" onClick={handleBulkDelete} className="h-8 px-3 rounded-lg bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
+          <button type="button" onClick={handleBulkDelete} className="h-8 px-3 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Xóa</button>
         </div>
       )}
 
@@ -429,7 +429,7 @@ export default function TripsTab({
                     const rowId = item.rowId || item.id;
                     const isSelected = selectedRows.has(rowId);
                     return (
-                      <tr key={rowId || idx} data-testid={`trip-row-${rowId}`} className={`border-b border-slate-100 align-top transition-colors hover:bg-blue-50/50 ${isSelected ? 'bg-blue-50' : ''}`}>
+                      <tr key={rowId || idx} data-testid={`trip-row-${rowId}`} className={`border-b border-slate-100 align-top transition-colors hover:bg-[#d6e2ff] ${isSelected ? 'bg-[#e8efff]' : ''}`}>
                         <td className="px-3 py-2.5 text-center">
                           <input type="checkbox" checked={isSelected} aria-label={`Chọn ${item.code || rowId}`} onChange={() => toggleRow(rowId)} className="w-4 h-4 rounded cursor-pointer" />
                         </td>
@@ -475,7 +475,7 @@ export default function TripsTab({
                 const rowId = item.rowId || item.id;
                 const isSelected = selectedRows.has(rowId);
                 return (
-                  <div key={rowId || idx} data-testid={`trip-card-${rowId}`} className={`flex items-start gap-2.5 px-3 py-3 border-b border-slate-100 last:border-b-0 ${isSelected ? 'bg-blue-50' : ''}`}>
+                  <div key={rowId || idx} data-testid={`trip-card-${rowId}`} className={`flex items-start gap-2.5 px-3 py-3 border-b border-slate-100 last:border-b-0 ${isSelected ? 'bg-[#e8efff]' : ''}`}>
                     <input type="checkbox" checked={isSelected} aria-label={`Chọn ${item.code || rowId}`} onChange={() => toggleRow(rowId)} className="w-4 h-4 rounded cursor-pointer mt-1" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
@@ -510,16 +510,16 @@ export default function TripsTab({
           <div className="bg-white border border-slate-200 rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-base font-black text-slate-900">Sửa công tác phí</h3>
-              <button type="button" onClick={closeEditModal} aria-label="Đóng" className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 cursor-pointer"><X className="w-4 h-4" /></button>
+              <button type="button" onClick={closeEditModal} aria-label="Đóng" className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
             <div className="text-xs text-slate-500">{editingItem.employeeName} · <span className="font-mono">{editingItem.code || editingItem.id}</span></div>
             <label className="block text-xs font-bold text-slate-600">Nội dung
               <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={2} data-testid="trips-edit-content"
-                className="mt-1 w-full bg-white border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-[13px] outline-none focus:border-blue-400" />
+                className="mt-1 w-full bg-white border border-slate-200 text-slate-800 rounded-xl px-3 py-2 text-[13px] outline-none focus:border-[#bcd0ff]" />
             </label>
             <label className="block text-xs font-bold text-slate-600">Số tiền (đ)
               <input type="number" value={editAmount} onChange={(e) => setEditAmount(Number(e.target.value) || 0)} data-testid="trips-edit-amount"
-                className="mt-1 w-full h-10 bg-white border border-slate-200 text-slate-800 rounded-xl px-3 text-[13px] font-mono outline-none focus:border-blue-400" />
+                className="mt-1 w-full h-10 bg-white border border-slate-200 text-slate-800 rounded-xl px-3 text-[13px] font-mono outline-none focus:border-[#bcd0ff]" />
             </label>
             <div className="flex gap-2 pt-1">
               <button type="button" onClick={closeEditModal} className="flex-1 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 text-[13px] font-bold cursor-pointer">Hủy</button>

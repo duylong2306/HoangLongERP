@@ -150,7 +150,7 @@ export default function RolesTab(props: RolesTabProps) {
     return true;
   };
   const unsavedBadge = (n: number) => n > 0
-    ? <span className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black" title={`${n} thay đổi chưa lưu`}>{n}</span>
+    ? <span style={{ color: '#ffffff' }} className="ml-1 inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black" title={`${n} thay đổi chưa lưu`}>{n}</span>
     : null;
 
   // Ref theo dõi cờ "chưa lưu" để đọc được giá trị MỚI NHẤT bên trong listener
@@ -524,7 +524,7 @@ export default function RolesTab(props: RolesTabProps) {
   return (
     <div className="flex flex-col gap-6 animate-fadeIn text-slate-200">
       {!coQuyenSua && (
-        <div role="note" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 text-left">
+        <div role="note" className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-left">
           Bạn chỉ có quyền XEM phân hệ này — mọi thay đổi (tick, lưu, thêm, xóa) đều bị từ chối.
         </div>
       )}
@@ -534,21 +534,21 @@ export default function RolesTab(props: RolesTabProps) {
         <button
           type="button"
           onClick={() => requestMainTab('group')}
-          className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'group' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+          style={{ color: '#ffffff' }} className={`px-4 py-2 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'group' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
         >
           <Shield className="w-3.5 h-3.5" /> Phân Quyền Nhóm Vai Trò{unsavedBadge(groupCount)}
         </button>
         <button
           type="button"
           onClick={() => requestMainTab('task')}
-          className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'task' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+          style={{ color: '#ffffff' }} className={`px-4 py-2 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'task' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
         >
           <Shield className="w-3.5 h-3.5" /> Quyền Dự Án{unsavedBadge(projectCount)}
         </button>
         <button
           type="button"
           onClick={() => requestMainTab('taskperm')}
-          className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'taskperm' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+          style={{ color: '#ffffff' }} className={`px-4 py-2 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'taskperm' ? 'bg-[#0d47c9] text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
         >
           <Shield className="w-3.5 h-3.5" /> Quyền Công việc{unsavedBadge(taskCount)}
         </button>
@@ -562,14 +562,14 @@ export default function RolesTab(props: RolesTabProps) {
               setSelectedRoleId(adminRole ? adminRole.id : roles[0].id);
             }
           }}
-          className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'approval' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+          style={{ color: '#ffffff' }} className={`px-4 py-2 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'approval' ? 'bg-[#0d47c9] text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
         >
           <Shield className="w-3.5 h-3.5" /> Quyền Phê Duyệt{unsavedBadge(approvalCount)}
         </button>
         <button
           type="button"
           onClick={() => requestMainTab('audit')}
-          className={`px-4 py-2 text-xs font-bold rounded-lg cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'audit' ? 'bg-violet-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+          style={{ color: '#ffffff' }} className={`px-4 py-2 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 ${roleMainTab === 'audit' ? 'bg-[#0d47c9] text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
         >
           <Shield className="w-3.5 h-3.5" /> Nhật ký
         </button>
@@ -613,7 +613,7 @@ export default function RolesTab(props: RolesTabProps) {
               setNewRoleDesc('');
               setShowAddRoleModal(true);
             }}
-            className="bg-amber-600 hover:bg-amber-550 text-slate-950 font-extrabold text-[10px] px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-all uppercase tracking-wider"
+            className="bg-amber-600 hover:bg-amber-550 text-slate-950 font-extrabold text-[10px] px-2.5 py-1 rounded-xl flex items-center gap-1 cursor-pointer transition-all uppercase tracking-wider"
           >
             <Plus className="w-3 h-3" /> Thêm nhóm
           </button>
@@ -751,7 +751,7 @@ export default function RolesTab(props: RolesTabProps) {
         const groupedModules = [
           {
             department: 'PHÒNG GIÁM ĐỐC',
-            color: 'border-violet-200 text-violet-700 bg-violet-50',
+            color: 'border-[#bcd0ff] text-[#0d47c9] bg-[#e8efff]',
             modules: [
               { code: 'director_office', name: 'Menu Cha: Phòng Giám Đốc', desc: 'Phòng Giám Đốc - Dashboard Tổng Hợp' },
               { code: 'director_dashboard', name: '↳ Dashboard Tổng Hợp', desc: 'Bảng điều hành tổng hợp các chỉ số doanh nghiệp' }
@@ -778,7 +778,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'PHÒNG KẾ TOÁN',
-            color: 'border-sky-200 text-sky-700 bg-sky-50',
+            color: 'border-[#bcd0ff] text-[#0d47c9] bg-[#e8efff]',
             modules: [
               { code: 'accounting_office', name: 'Menu Cha: Phòng Kế Toán', desc: 'Nghiệp vụ tài chính kế toán doanh nghiệp' },
               { code: 'finance', name: '↳ Tài Chính - Kế Toán', desc: 'Đề xuất thu chi, quản lý dòng tiền' },
@@ -787,7 +787,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'KHO & VẬT TƯ',
-            color: 'border-teal-200 text-teal-700 bg-teal-50',
+            color: 'border-[#bcd0ff] text-[#0d47c9] bg-[#e8efff]',
             modules: [
               { code: 'warehouse_office', name: 'Menu Cha: Kho & Vật Tư', desc: 'Quản lý chuỗi cung ứng & vật tư' },
               { code: 'material_coordination', name: '↳ Điều phối vật tư', desc: 'Điều phối & yêu cầu cấp phát vật tư' },
@@ -805,7 +805,7 @@ export default function RolesTab(props: RolesTabProps) {
           },
           {
             department: 'THƯ VIỆN & BÁO GIÁ',
-            color: 'border-blue-200 text-blue-700 bg-blue-50',
+            color: 'border-[#bcd0ff] text-[#0d47c9] bg-[#e8efff]',
             modules: [
               { code: 'library_office', name: 'Menu Cha: Thư Viện', desc: 'Thư viện báo giá & định mức dự toán' },
               { code: 'quotes_construction', name: '↳ Hồ Sơ Xây Dựng', desc: 'Thư viện báo giá mẫu xây dựng' },
@@ -849,7 +849,7 @@ export default function RolesTab(props: RolesTabProps) {
                     <select
                       value={currentKind || ''}
                       onChange={(e) => setRoleKind((e.target.value || null) as RoleGroupKind | null)}
-                      className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[10.5px] text-white outline-none focus:border-amber-500 cursor-pointer"
+                      className="bg-slate-900 border border-slate-800 rounded-xl px-2 py-1 text-[10.5px] text-white outline-none focus:border-amber-500 cursor-pointer"
                       title="Đánh dấu nhóm này tương đương vai trò hệ thống nào, để các đặc quyền riêng (VD: duyệt tạm ứng, xem toàn bộ hồ sơ lưu trữ...) nhận diện đúng thành viên nhóm — không phụ thuộc tên/id nhóm."
                     >
                       <option value="">— Không gán (mặc định) —</option>
@@ -866,14 +866,14 @@ export default function RolesTab(props: RolesTabProps) {
                 <button
                   type="button"
                   onClick={() => setRoleGroupTab('permissions')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all ${roleGroupTab === 'permissions' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+                  style={{ color: '#ffffff' }} className={`px-3 py-1.5 text-xs font-bold rounded-xl cursor-pointer transition-all ${roleGroupTab === 'permissions' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
                 >
                   1. Chi tiết phân quyền
                 </button>
                 <button
                   type="button"
                   onClick={() => setRoleGroupTab('members')}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-all ${roleGroupTab === 'members' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
+                  style={{ color: '#ffffff' }} className={`px-3 py-1.5 text-xs font-bold rounded-xl cursor-pointer transition-all ${roleGroupTab === 'members' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white bg-transparent'}`}
                 >
                   2. Thành viên nhóm ({activeRole.memberIds.length})
                 </button>
@@ -1059,7 +1059,7 @@ export default function RolesTab(props: RolesTabProps) {
                     {/* Control bar / Dropdown header */}
                     <div
                       onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-xs text-white outline-none font-sans font-bold cursor-pointer flex justify-between items-center hover:border-slate-700 transition-all select-none min-h-[38px] flex-wrap gap-1.5"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-xs text-white outline-none font-sans font-bold cursor-pointer flex justify-between items-center hover:border-slate-700 transition-all select-none min-h-[38px] flex-wrap gap-1.5"
                     >
                       {selectedTempEmpIds.length === 0 ? (
                         <span className="text-slate-400">
@@ -1097,7 +1097,7 @@ export default function RolesTab(props: RolesTabProps) {
 
                     {/* Dropdown list popover */}
                     {isRoleDropdownOpen && (
-                      <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-800 rounded-lg shadow-2xl z-50 p-3 space-y-2.5 max-h-80 overflow-y-auto flex flex-col">
+                      <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 p-3 space-y-2.5 max-h-80 overflow-y-auto flex flex-col">
                         {/* Inline Search Input */}
                         <div className="relative sticky top-0 bg-slate-900 pb-1 shrink-0 z-10">
                           <input
@@ -1223,7 +1223,7 @@ export default function RolesTab(props: RolesTabProps) {
                         <button
                           type="button"
                           onClick={() => setSelectedTempEmpIds([])}
-                          className="px-3 py-1.5 text-xs bg-slate-900 hover:bg-slate-800 text-slate-400 font-bold rounded-lg cursor-pointer transition-all"
+                          className="px-3 py-1.5 text-xs bg-slate-900 hover:bg-slate-800 text-slate-400 font-bold rounded-xl cursor-pointer transition-all"
                         >
                           Hủy
                         </button>
@@ -1246,7 +1246,7 @@ export default function RolesTab(props: RolesTabProps) {
                             setSelectedTempEmpIds([]);
                             setIsRoleDropdownOpen(false);
                           }}
-                          className="px-4 py-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold rounded-lg cursor-pointer transition-all shadow-md"
+                          className="px-4 py-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold rounded-xl cursor-pointer transition-all shadow-md"
                         >
                           Gán ngay
                         </button>
@@ -1300,7 +1300,7 @@ export default function RolesTab(props: RolesTabProps) {
                                           setDraftRoles(updated);
                                           setConfirmRemoveMember(null);
                                         }}
-                                        className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white font-bold text-[10px] rounded cursor-pointer transition-all"
+                                        style={{ color: '#ffffff' }} className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white font-bold text-[10px] rounded cursor-pointer transition-all"
                                       >
                                         Xác nhận
                                       </button>
@@ -1347,7 +1347,7 @@ export default function RolesTab(props: RolesTabProps) {
                                         setDraftRoles(updated);
                                         setConfirmRemoveMember(null);
                                       }}
-                                      className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white font-bold text-[10px] rounded cursor-pointer transition-all"
+                                      style={{ color: '#ffffff' }} className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white font-bold text-[10px] rounded cursor-pointer transition-all"
                                     >
                                       Xác nhận
                                     </button>
@@ -1428,7 +1428,7 @@ export default function RolesTab(props: RolesTabProps) {
         <div className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-5 text-left">
           <div className="bg-slate-950 p-4 rounded-xl border border-slate-850">
             <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
-              <Shield className="w-4 h-4 text-sky-500" /> Cấu hình Quyền Phê Duyệt
+              <Shield className="w-4 h-4 text-[#0d47c9]" /> Cấu hình Quyền Phê Duyệt
             </h4>
             <p className="text-[10.5px] text-slate-400 mt-1">
               Đây là cấu hình TOÀN CỤC (không phụ thuộc Nhóm Vai Trò). Chỉ định người duyệt/điều phối cho: hồ sơ dự án (Báo Giá, Hợp Đồng, Nghiệm Thu, Thanh Lý, điều phối và xét duyệt vật tư), hồ sơ nhân sự (Đơn Xin Nghỉ Phép, Tạm Ứng Lương Nhanh, Công Tác Phí, Phiếu Lương) và tài chính (Đề Xuất Chi Phí, Tạm Ứng Thầu Phụ). Người được chỉ định hiển thị tự động trong biểu mẫu tương ứng. Giám đốc (nhóm quản trị) luôn duyệt được mọi loại, không phụ thuộc danh sách. Loại đã bật mà chưa chọn người sẽ hiện cảnh báo.
@@ -1438,8 +1438,8 @@ export default function RolesTab(props: RolesTabProps) {
           <div className="space-y-6">
               {/* HỒ SƠ DỰ ÁN */}
               <div className="border border-slate-800 rounded-xl overflow-hidden">
-                <div className="bg-violet-50 px-4 py-2.5 border-b border-slate-800">
-                  <h5 className="font-extrabold text-[11px] text-violet-700 uppercase tracking-wider">Hồ Sơ Dự Án</h5>
+                <div className="bg-[#e8efff] px-4 py-2.5 border-b border-slate-800">
+                  <h5 className="font-extrabold text-[11px] text-[#0d47c9] uppercase tracking-wider">Hồ Sơ Dự Án</h5>
                 </div>
                 <div className="divide-y divide-slate-850">
                   {approvalDocumentTypes.filter(t => t.group === 'Hồ Sơ Dự Án').map(t => {
@@ -1452,7 +1452,7 @@ export default function RolesTab(props: RolesTabProps) {
                             type="checkbox"
                             checked={enabled}
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
+                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-[#0d47c9] focus:ring-[#0d47c9] accent-[#0d47c9] cursor-pointer"
                           />
                           <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />{enabled && getCurrentApproverIds(t.type).length === 0 && (
                             <span data-testid="approval-empty-warning" className="ml-2 text-[10px] font-bold text-amber-600" title="Đã bật nhưng chưa chọn ai: chỉ Giám đốc duyệt được (một số hồ sơ không hạn chế người duyệt khi để trống).">⚠ Chưa chọn người duyệt</span>
@@ -1491,7 +1491,7 @@ export default function RolesTab(props: RolesTabProps) {
                             type="checkbox"
                             checked={enabled}
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
+                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-[#0d47c9] focus:ring-[#0d47c9] accent-[#0d47c9] cursor-pointer"
                           />
                           <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />{enabled && getCurrentApproverIds(t.type).length === 0 && (
                             <span data-testid="approval-empty-warning" className="ml-2 text-[10px] font-bold text-amber-600" title="Đã bật nhưng chưa chọn ai: chỉ Giám đốc duyệt được (một số hồ sơ không hạn chế người duyệt khi để trống).">⚠ Chưa chọn người duyệt</span>
@@ -1546,7 +1546,7 @@ export default function RolesTab(props: RolesTabProps) {
                             type="checkbox"
                             checked={enabled}
                             onChange={(e) => handleToggleApproval(t.type as ApprovalPermission['documentType'], t.label, e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 accent-sky-500 cursor-pointer"
+                            className="w-4 h-4 rounded border-slate-800 bg-slate-950 text-[#0d47c9] focus:ring-[#0d47c9] accent-[#0d47c9] cursor-pointer"
                           />
                           <span className="font-bold text-xs text-white">{t.label}</span><HelpTip text={APPROVAL_DOC_HELP[t.type] || t.label} label={t.label} />{enabled && getCurrentApproverIds(t.type).length === 0 && (
                             <span data-testid="approval-empty-warning" className="ml-2 text-[10px] font-bold text-amber-600" title="Đã bật nhưng chưa chọn ai: chỉ Giám đốc duyệt được (một số hồ sơ không hạn chế người duyệt khi để trống).">⚠ Chưa chọn người duyệt</span>
