@@ -2182,7 +2182,7 @@ export default function MaterialCoordination({
             <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-200 shrink-0 flex justify-between items-center gap-2">
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <div className="w-8 h-8 sm:w-9 sm:h-9 bg-[#0d47c9] rounded-xl flex items-center justify-center shrink-0">
-                  <Boxes className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  <Boxes style={{ color: '#ffffff' }} className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
@@ -2498,7 +2498,7 @@ export default function MaterialCoordination({
                           <button
                             type="button"
                             onClick={() => openQuoteModal(prop)}
-                            className="bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black px-3 py-1.5 rounded-xl cursor-pointer transition-all"
+                            style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black px-3 py-1.5 rounded-xl cursor-pointer transition-all"
                           >
                             <Plus className="w-3 h-3 inline mr-1" />Thêm báo giá
                           </button>
@@ -2726,7 +2726,7 @@ export default function MaterialCoordination({
                             type="button"
                             onClick={() => createOrders(prop)}
                             disabled={hasStockViolation || isCreatingOrder}
-                            className="w-full h-10 bg-[#0d47c9] hover:bg-[#0a3aa8] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                            style={{ color: '#ffffff' }} className="w-full h-10 bg-[#0d47c9] hover:bg-[#0a3aa8] disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                           >
                             <FileText className="w-4 h-4" /> {isCreatingOrder ? 'Đang xử lý...' : 'Tạo đơn hàng / Xuất kho'}
                           </button>
@@ -2807,7 +2807,7 @@ export default function MaterialCoordination({
                                   <button
                                     type="button"
                                     onClick={() => setOrderDetailModal({ open: true, order: o, proposal: prop, project: activeDetail.project })}
-                                    className="bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[10px] font-black px-2.5 py-1 rounded-xl flex items-center gap-1 cursor-pointer transition-all"
+                                    style={{ color: '#ffffff' }} className="bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[10px] font-black px-2.5 py-1 rounded-xl flex items-center gap-1 cursor-pointer transition-all"
                                   >
                                     <Eye className="w-3 h-3" /> Xem chi tiết
                                   </button>
@@ -2822,7 +2822,7 @@ export default function MaterialCoordination({
                                   <button
                                     type="button"
                                     onClick={() => handleFinalizeShortDelivery(prop, o)}
-                                    className="bg-amber-600 hover:bg-amber-500 text-white text-[9.5px] font-black px-2 py-1 rounded-xl cursor-pointer transition-all whitespace-nowrap shrink-0"
+                                    style={{ color: '#ffffff' }} className="bg-amber-600 hover:bg-amber-500 text-white text-[9.5px] font-black px-2 py-1 rounded-xl cursor-pointer transition-all whitespace-nowrap shrink-0"
                                     title="Chốt số lượng thực nhận — không chờ giao phần còn thiếu nữa"
                                   >
                                     Chốt số lượng thực nhận
@@ -2840,7 +2840,7 @@ export default function MaterialCoordination({
                                   <button
                                     type="button"
                                     onClick={() => openReturnModal(prop, o.id)}
-                                    className="bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-black px-2 py-1 rounded-xl cursor-pointer transition-all whitespace-nowrap shrink-0"
+                                    style={{ color: '#ffffff' }} className="bg-rose-600 hover:bg-rose-500 text-white text-[9.5px] font-black px-2 py-1 rounded-xl cursor-pointer transition-all whitespace-nowrap shrink-0"
                                     title="Ghi nhận trả hàng cho nhà cung cấp"
                                   >
                                     Trả hàng NCC
@@ -2949,7 +2949,7 @@ export default function MaterialCoordination({
                               <button
                                 type="button"
                                 onClick={() => submitForApproval(prop)}
-                                className="w-full h-10 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                                style={{ color: '#ffffff' }} className="w-full h-10 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                               >
                                 <Send className="w-4 h-4" /> Gửi xét duyệt
                               </button>
@@ -2975,7 +2975,7 @@ export default function MaterialCoordination({
                               <button
                                 type="button"
                                 onClick={() => handleApprove(prop)}
-                                className="w-full h-10 bg-emerald-600 hover:bg-emerald-500 text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                                style={{ color: '#ffffff' }} className="w-full h-10 bg-emerald-600 hover:bg-emerald-500 text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                               >
                                 <Check className="w-4 h-4" /> Duyệt
                               </button>
@@ -3016,7 +3016,7 @@ export default function MaterialCoordination({
                                 onClick={() => markOrdered(prop)}
                                 disabled={(prop.purchaseOrderIds || []).length === 0}
                                 title={(prop.purchaseOrderIds || []).length === 0 ? 'Cần Tạo đơn hàng trước khi Đặt Hàng' : ''}
-                                className={`w-full h-10 ${(prop.purchaseOrderIds || []).length === 0 ? 'opacity-50 cursor-not-allowed bg-[#0d47c9]' : 'bg-[#0d47c9] hover:bg-[#0a3aa8] cursor-pointer'} text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all`}
+                                style={{ color: '#ffffff' }} className={`w-full h-10 ${(prop.purchaseOrderIds || []).length === 0 ? 'opacity-50 cursor-not-allowed bg-[#0d47c9]' : 'bg-[#0d47c9] hover:bg-[#0a3aa8] cursor-pointer'} text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all`}
                               >
                                 <Check className="w-4 h-4" /> Đặt Hàng
                               </button>
@@ -3053,7 +3053,7 @@ export default function MaterialCoordination({
                                 }}
                                 disabled={!hasSelectedOrder}
                                 title={!hasSelectedOrder ? 'Chọn một đơn hàng trong mục Đơn hàng đã tạo bên trái' : ''}
-                                className={`w-full h-10 ${!hasSelectedOrder ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all`}
+                                style={{ color: '#ffffff' }} className={`w-full h-10 ${!hasSelectedOrder ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[12px] font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all`}
                               >
                                 <PackageCheck className="w-4 h-4" /> Nhận hàng
                               </button>
@@ -3364,7 +3364,7 @@ export default function MaterialCoordination({
           </div>
           <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2">
             <button type="button" onClick={() => { setOrderEditModal({ open: false, order: null }); setOrderEditDraft(null); }} className="flex-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-600 font-bold py-2.5 rounded-xl cursor-pointer transition-all">Hủy</button>
-            <button type="button" onClick={saveOrderEdit} className="flex-1 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-bold py-2.5 rounded-xl cursor-pointer transition-all">Lưu thay đổi</button>
+            <button type="button" onClick={saveOrderEdit} style={{ color: '#ffffff' }} className="flex-1 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-bold py-2.5 rounded-xl cursor-pointer transition-all">Lưu thay đổi</button>
           </div>
         </div>
       </div>
@@ -3603,7 +3603,7 @@ export default function MaterialCoordination({
                   type="button"
                   onClick={handleReceiveOrder}
                   disabled={isReceivingOrder || Object.values(receiveQuantities).every((v) => (v as number) === 0)}
-                  className={`px-5 py-2 ${isReceivingOrder || Object.values(receiveQuantities).every((v) => (v as number) === 0) ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[11px] font-black rounded-xl flex items-center gap-1.5 transition-all`}
+                  style={{ color: '#ffffff' }} className={`px-5 py-2 ${isReceivingOrder || Object.values(receiveQuantities).every((v) => (v as number) === 0) ? 'opacity-50 cursor-not-allowed bg-emerald-600' : 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer'} text-white text-[11px] font-black rounded-xl flex items-center gap-1.5 transition-all`}
                 >
                   <PackageCheck className="w-4 h-4" /> {isReceivingOrder ? 'Đang xử lý...' : 'Nhận hàng'}
                 </button>
@@ -3735,7 +3735,7 @@ export default function MaterialCoordination({
                   type="button"
                   onClick={handleReturnOrder}
                   disabled={totalReturning === 0}
-                  className={`px-5 py-2 ${totalReturning === 0 ? 'opacity-50 cursor-not-allowed bg-rose-600' : 'bg-rose-600 hover:bg-rose-500 cursor-pointer'} text-white text-[11px] font-black rounded-xl flex items-center gap-1.5 transition-all`}
+                  style={{ color: '#ffffff' }} className={`px-5 py-2 ${totalReturning === 0 ? 'opacity-50 cursor-not-allowed bg-rose-600' : 'bg-rose-600 hover:bg-rose-500 cursor-pointer'} text-white text-[11px] font-black rounded-xl flex items-center gap-1.5 transition-all`}
                 >
                   <Undo2 className="w-4 h-4" /> Xác nhận trả hàng
                 </button>
@@ -4010,7 +4010,7 @@ export default function MaterialCoordination({
                     <button
                       type="button"
                       onClick={addQuickSupplier}
-                      className="px-2.5 py-1.5 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white rounded-xl text-[11px] font-bold cursor-pointer transition-all"
+                      style={{ color: '#ffffff' }} className="px-2.5 py-1.5 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white rounded-xl text-[11px] font-bold cursor-pointer transition-all"
                     >
                       Lưu
                     </button>
@@ -4063,7 +4063,7 @@ export default function MaterialCoordination({
                   <button
                     type="button"
                     onClick={addQuote}
-                    className="flex-1 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-black py-2.5 rounded-xl cursor-pointer transition-all"
+                    style={{ color: '#ffffff' }} className="flex-1 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-black py-2.5 rounded-xl cursor-pointer transition-all"
                   >
                     {editingQuoteId ? 'Cập nhật báo giá' : 'Thêm báo giá'}
                   </button>
