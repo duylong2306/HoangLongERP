@@ -14,7 +14,8 @@ import VoucherPrintModal from './VoucherPrintModal';
 import * as XLSX from 'xlsx';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 import { numberToVietnameseWords } from '../lib/numberToWords';
-import { getPoPayableRemaining, planPoAllocations, planPoRevert, type PoAllocation } from '../lib/poAllocation';
+import { getPoPayableRemaining, planPoAllocations, planPoRevert, planCatchUpAllocation, buildApprovedAllocations, planReconcileSuppliers, type PoAllocation, type ReconcileSupplierPlan } from '../lib/poAllocation';
+import { nextPaymentCode } from '../lib/paymentCode';
 
 import SearchableCustomerSelect from './SearchableCustomerSelect';
 import SearchableSupplierSelect from './SearchableSupplierSelect';
@@ -754,6 +755,10 @@ export default function FinanceManagement({
   const [viewingProposalDetail, setViewingProposalDetail] = useState<SubcontractorAdvanceProposal | null>(null);
   // Input "Số tiền duyệt chi" trong cửa sổ chi tiết (người xét duyệt nhập)
   const [approveAmountInput, setApproveAmountInput] = useState<string>('');
+  // Đề xuất "Chi Nhà Cung Cấp": giám đốc duyệt THEO TỪNG ĐƠN — tick/bỏ tick + chỉnh số tiền từng đơn,
+  // cộng phần chi chung (không gắn đơn: trả nợ đầu kỳ / tạm ứng). Tổng duyệt chi tính từ các dòng này.
+  const [approveLines, setApproveLines] = useState<Record<string, { checked: boolean; amount: string }>>({});
+  const [approveGeneral, setApproveGeneral] = useState<string>('0');
   // Thùng rác Đề Xuất bị Từ Chối + mục tiêu khôi phục
   const [trashOpen, setTrashOpen] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<Record<string, SubcontractorAdvanceProposal['status']>>({});
@@ -762,6 +767,11 @@ export default function FinanceManagement({
   useEffect(() => {
     if (viewingProposalDetail) {
       setApproveAmountInput(String(viewingProposalDetail.approvedAmount ?? viewingProposalDetail.amount ?? ''));
+      // Khởi tạo bảng duyệt theo đơn: mặc định duyệt đúng như kế toán đề xuất; phần chi chung = số đề xuất − tổng các đơn
+      const allocs = viewingProposalDetail.purchaseOrderAllocations || [];
+      setApproveLines(Object.fromEntries(allocs.map(a => [a.purchaseOrderId, { checked: true, amount: String(a.amount) }])));
+      const sumAlloc = allocs.reduce((sum, a) => sum + (a.amount || 0), 0);
+      setApproveGeneral(String(Math.max(0, (viewingProposalDetail.amount || 0) - sumAlloc)));
     }
   }, [viewingProposalDetail]);
 
@@ -935,6 +945,8 @@ export default function FinanceManagement({
   // Chỉ dùng cho "Chi Nhà Cung Cấp": các Đơn Mua Hàng (PO) được chọn để thanh toán.
   // key = mã PO, value = số tiền dự kiến trả cho đơn đó (chuỗi để gõ tự do trong ô nhập).
   const [quickProposalPoAlloc, setQuickProposalPoAlloc] = useState<Record<string, string>>({});
+  // Chi NCC: tick khi phần tiền KHÔNG thuộc đơn nào (trả công nợ đầu kỳ / tạm ứng) — bắt buộc phải nói rõ nếu NCC còn đơn nợ
+  const [quickProposalNoPo, setQuickProposalNoPo] = useState(false);
 
   // Helper: Mở thẳng form tạo đề xuất (bỏ qua bước chọn trong launcher) theo loại đã định.
   // Dùng cho lối tắt nhanh "Đề Xuất Chi Phí" / "Tạm Ứng Thầu Phụ" — tương thích với nút trong Công Việc.
@@ -969,6 +981,7 @@ export default function FinanceManagement({
     setQuickProposalExpenseItems([]);
     setQuickProposalSettlerId('');
     setQuickProposalPoAlloc({});
+    setQuickProposalNoPo(false);
     setQuickLaunchItem(item);
     setShowQuickProposalModal(true);
   }, [projects]);
@@ -1144,7 +1157,7 @@ export default function FinanceManagement({
 
   // Handle approver "Duyệt" action -> wait_payment
   // approvedAmount: Số tiền duyệt chi do người xét duyệt nhập (mặc định = số tiền đề xuất)
-  const handleApprove = async (proposal: SubcontractorAdvanceProposal, approvedAmount?: number) => {
+  const handleApprove = async (proposal: SubcontractorAdvanceProposal, approvedAmount?: number, approvedAllocations?: PoAllocation[]) => {
     // Kiểm tra quyền duyệt
     if (!canApproveProposal(proposal)) {
       addToast({ title: '⛔ Không có quyền', message: '❌ Bạn không phải người xét duyệt cho đề xuất này!', type: 'error' });
@@ -1162,6 +1175,8 @@ export default function FinanceManagement({
         ...proposal,
         status: 'pending_payment',
         approvedAmount: finalApproved,
+        // Chi NCC duyệt theo từng đơn: ghi ĐÈ danh sách đơn bằng đúng các đơn người duyệt đã chấp thuận (đơn bị bỏ tick biến mất)
+        ...(approvedAllocations !== undefined ? { purchaseOrderAllocations: approvedAllocations } : {}),
       };
       await dbService.subcontractorAdvances.save(updated);
       setSubcontractorAdvances(prev => prev.map(p => p.id === updated.id ? updated : p));
@@ -2635,6 +2650,60 @@ export default function FinanceManagement({
 
   // Phân trang riêng cho tab Công nợ Trả
   const [liabilityPage, setLiabilityPage] = useState(1);
+  // ── Đối chiếu công nợ NCC: phần tiền đã chi nhưng chưa gắn vào đơn → xem trước rồi áp vào các đơn cũ nhất còn nợ ──
+  const [reconcileOpen, setReconcileOpen] = useState(false);
+  const [reconcileSkip, setReconcileSkip] = useState<Record<string, boolean>>({});   // NCC bị bỏ tick (không áp)
+  const [reconcileBusy, setReconcileBusy] = useState(false);
+  const reconcilePlans = useMemo<ReconcileSupplierPlan[]>(() => {
+    if (!reconcileOpen) return [];
+    const nccLiabs = customLiabilities.filter(l => l.category === 'Nhà Cung Cấp');
+    const recordedIds = new Set<string>();
+    nccLiabs.forEach(l => (l.recordedPurchaseOrderIds || []).forEach((id: string) => recordedIds.add(id)));
+    const bySupplier = new Map<string, PurchaseOrder[]>();
+    purchaseOrders.forEach(po => {
+      if (!po.supplierId || !recordedIds.has(po.id)) return;   // chỉ đơn đã ghi nhận công nợ và có mã NCC (không đoán theo tên)
+      (bySupplier.get(po.supplierId) || bySupplier.set(po.supplierId, []).get(po.supplierId)!).push(po);
+    });
+    const inputs = Array.from(bySupplier, ([supplierId, pool]) => {
+      const name = pool[0].supplierName || supplierId;
+      // Cùng cách tính với buildAutoAllocateContext / catchUpPaymentsOnRecord
+      const openingDebt = nccLiabs.filter(l => l.name === name).reduce((sum, l) => sum + ((l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0), 0);
+      const totalPaid = payments
+        .filter(pay => pay.status === 'approved' && (pay.supplierId
+          ? pay.supplierId === supplierId
+          : pay.recipient === name && !pay.subcontractorId && pay.category !== 'subcontractor_advance'))
+        .reduce((sum, pay) => sum + (pay.amount || 0), 0);
+      return { supplierId, name, pool, openingDebt, totalPaid };
+    });
+    return planReconcileSuppliers(inputs);
+  }, [reconcileOpen, customLiabilities, purchaseOrders, payments]);
+  const applyReconcile = async () => {
+    if (!canEdit) { denyToast('Sửa'); return; }
+    setReconcileBusy(true);
+    let total = 0, suppliers = 0;
+    for (const plan of reconcilePlans) {
+      if (reconcileSkip[plan.supplierId]) continue;
+      let applied = false;
+      for (const upd of plan.updatedOrders) {
+        const amt = plan.lines.find(l => l.purchaseOrderId === upd.id)?.amount || 0;
+        const noteLine = `Đối chiếu công nợ: áp ${amt.toLocaleString('vi-VN')}đ đã chi cho NCC nhưng chưa gắn đơn, ngày ${new Date().toLocaleDateString('vi-VN')}.`;
+        const withNote = { ...upd, notes: upd.notes ? `${upd.notes}\n${noteLine}` : noteLine } as PurchaseOrder;
+        try {
+          await dbService.purchaseOrders.save(withNote);
+          setPurchaseOrders(prev => prev.map(o => o.id === withNote.id ? withNote : o));
+          total += amt; applied = true;
+        } catch (err) {
+          console.error('[FinanceManagement] Lỗi đối chiếu công nợ NCC:', upd.id, err);
+        }
+      }
+      if (applied) suppliers++;
+    }
+    setReconcileBusy(false);
+    setReconcileOpen(false);
+    setReconcileSkip({});
+    if (total > 0) window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
+    addToast({ title: total > 0 ? '✅ Đã đối chiếu công nợ' : 'ℹ️ Không có gì để áp', message: total > 0 ? `Đã áp ${total.toLocaleString('vi-VN')}đ vào đơn hàng của ${suppliers} nhà cung cấp.` : 'Không có khoản nào được áp dụng.', type: total > 0 ? 'success' : 'info' });
+  };
   const [liabilityPageSize, setLiabilityPageSize] = useState(10);
   useEffect(() => { setLiabilityPage(1); }, [liabilityFilters.category, liabilityFilters.status, liabilityFilters.fromDate, liabilityFilters.toDate, searchTerm]);
 
@@ -3987,6 +4056,21 @@ export default function FinanceManagement({
         }
         poAllocations = picked;
       }
+      // BẮT BUỘC xác định rõ khoản chi thuộc đơn nào (nguyên nhân lệch số công nợ — nhiều khoản chi NCC không gắn đơn,
+      // đơn vẫn báo còn nợ). NCC còn đơn nợ thì phải: (a) chọn đơn cho TOÀN BỘ số tiền, hoặc (b) tick rõ phần còn lại
+      // là trả công nợ đầu kỳ / tạm ứng (không thuộc đơn nào). Người duyệt sẽ thấy từng dòng này để duyệt.
+      const supplierHasOpenPos = purchaseOrders.some(po => po.supplierId === subId && isPoRecorded(po.id) && getPoPayableRemaining(po) > 0);
+      const pickedSum = picked.reduce((s2, a2) => s2 + a2.amount, 0);
+      if (supplierHasOpenPos && !quickProposalNoPo && (picked.length === 0 || amount - pickedSum > 1)) {
+        addToast({
+          title: '⚠️ Chưa xác định đơn hàng',
+          message: picked.length === 0
+            ? 'Nhà cung cấp này còn đơn hàng đang nợ. Hãy chọn đơn thanh toán, hoặc tick "Phần còn lại không thuộc đơn nào" nếu là trả công nợ đầu kỳ / tạm ứng.'
+            : `Còn ${(amount - pickedSum).toLocaleString('vi-VN')}đ chưa gắn vào đơn nào. Hãy chọn thêm đơn, giảm số tiền đề xuất, hoặc tick "Phần còn lại không thuộc đơn nào".`,
+          type: 'error'
+        });
+        return;
+      }
     }
 
     const newProposal: SubcontractorAdvanceProposal = {
@@ -4065,6 +4149,7 @@ export default function FinanceManagement({
     setQuickProposalReason('');
     setQuickProposalSubMode('advance');
     setQuickProposalPoAlloc({});
+    setQuickProposalNoPo(false);
   };
 
   const handleAddPaymentSubmit = async (e: React.FormEvent) => {
@@ -4156,7 +4241,7 @@ export default function FinanceManagement({
 
     const newPay: Payment = {
       id: `pay_${Date.now()}`,
-      code: `PC-2026-${Math.floor(Math.random() * 900 + 100)}`,
+      code: nextPaymentCode(payments),   // số lớn nhất + 1 (trước đây ngẫu nhiên 100–999 nên trùng mã, vd 2 phiếu PC-2026-127)
       date: new Date().toISOString().split('T')[0],
       employeeId: resolvedEmployeeId,
       supplierId: resolvedSupplierId,
@@ -5253,7 +5338,8 @@ export default function FinanceManagement({
       }
       // 4) Đơn từng bị trả hàng 1 phần trước khi ghi nhận → tự động bù trừ
       // phần đó vào công nợ vừa ghi nhận (xem netOwnReturnOnRecord).
-      await netOwnReturnOnRecord(updatedPo);
+      const afterReturn = await netOwnReturnOnRecord(updatedPo);
+      await catchUpPaymentsOnRecord(afterReturn);
       addToast({
         title: '✅ Đã ghi nhận',
         message: `Đơn ${order.id} đã được ghi nhận vào Công nợ Trả của ${order.supplierName}.`,
@@ -5295,13 +5381,56 @@ export default function FinanceManagement({
     }
     // Đơn từng bị trả hàng 1 phần trước khi ghi nhận → tự động bù trừ phần
     // đó vào công nợ vừa ghi nhận (xem netOwnReturnOnRecord).
-    await netOwnReturnOnRecord(updatedPo);
+    const afterReturn = await netOwnReturnOnRecord(updatedPo);
+    await catchUpPaymentsOnRecord(afterReturn);
     addToast({
       title: '✅ Đã ghi nhận',
       message: `Đơn ${order.id} đã được ghi nhận vào Công nợ Trả của ${order.supplierName}.`,
       type: 'success'
     });
     return true;
+  };
+
+  // Khi GHI NHẬN công nợ cho 1 đơn: các phiếu chi cho NCC đã lập TRƯỚC đó (lúc đơn chưa được ghi nhận nên
+  // không vào "pool" tự phân bổ) phải được áp lại vào đơn — nếu không dòng chi tiết đơn báo còn nợ trong khi
+  // dòng tổng NCC báo đã trả (sự cố PO-1792141670846-0: 107.000.000đ). Công thức ở planCatchUpAllocation:
+  // tiền đã chi − công nợ đầu kỳ − phần đã gắn vào đơn → phân bổ vào các đơn cũ nhất còn nợ.
+  const catchUpPaymentsOnRecord = async (order: PurchaseOrder) => {
+    if (!order.supplierId) return;   // không có mã NCC thì không đoán theo tên (tránh gắn nhầm)
+    const supplierName = order.supplierName;
+    // Pool = các đơn của NCC đã ghi nhận + đơn vừa ghi nhận (isPoRecorded chưa thấy đơn này vì state công nợ chưa kịp cập nhật)
+    const pool = [
+      ...purchaseOrders.filter(po => po.id !== order.id && po.supplierId === order.supplierId && isPoRecorded(po.id)),
+      order,
+    ];
+    const openingDebt = customLiabilities
+      .filter(l => l.category === 'Nhà Cung Cấp' && l.name === supplierName)
+      .reduce((sum, l) => sum + ((l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0), 0);
+    // Cùng cách khớp phiếu chi với buildAutoAllocateContext: theo MÃ NCC; phiếu cũ chưa có mã mới dự phòng theo tên
+    const totalPaid = payments
+      .filter(p => p.status === 'approved' && (p.supplierId
+        ? p.supplierId === order.supplierId
+        : p.recipient === supplierName && !p.subcontractorId && p.category !== 'subcontractor_advance'))
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+    const { applied, updatedOrders } = planCatchUpAllocation(pool, openingDebt, totalPaid);
+    if (updatedOrders.length === 0) return;
+    let total = 0;
+    for (const upd of updatedOrders) {
+      const amt = applied.find(a => a.purchaseOrderId === upd.id)?.amount || 0;
+      const noteLine = `Tự động áp ${amt.toLocaleString('vi-VN')}đ đã chi cho NCC trước khi ghi nhận công nợ, ngày ${new Date().toLocaleDateString('vi-VN')}.`;
+      const withNote = { ...upd, notes: upd.notes ? `${upd.notes}\n${noteLine}` : noteLine } as PurchaseOrder;
+      try {
+        await dbService.purchaseOrders.save(withNote);
+        setPurchaseOrders(prev => prev.map(o => o.id === withNote.id ? withNote : o));
+        total += amt;
+      } catch (err) {
+        console.error('[FinanceManagement] Lỗi áp khoản đã chi vào đơn khi ghi nhận công nợ:', upd.id, err);
+      }
+    }
+    if (total > 0) {
+      window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
+      addToast({ title: 'ℹ️ Đã áp khoản chi trước đó', message: `Đã tự áp ${total.toLocaleString('vi-VN')}đ mà NCC ${supplierName} đã được chi trước đó vào các đơn đang nợ.`, type: 'info' });
+    }
   };
 
   // Khi ghi nhận công nợ lần đầu cho 1 đơn ĐÃ bị trả hàng 1 phần (trước khi
@@ -5311,15 +5440,15 @@ export default function FinanceManagement({
   // vẫn là thao tác thủ công của kế toán qua nút "Cấn trừ nợ"
   // (xem applySupplierCredit). Tái dùng đúng công thức thanhToanThucTe/congNo
   // đã dùng ở applySupplierCredit.
-  const netOwnReturnOnRecord = async (order: PurchaseOrder) => {
+  const netOwnReturnOnRecord = async (order: PurchaseOrder): Promise<PurchaseOrder> => {
     const ownReturns = supplierReturns
       .filter((r: any) => r.purchaseOrderId === order.id && r.status === 'confirmed' && ((r.totalAmount || 0) - (r.appliedAmount || 0)) > 0)
       .sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    if (ownReturns.length === 0) return;
+    if (ownReturns.length === 0) return order;
 
     const available = ownReturns.reduce((s: number, r: any) => s + ((r.totalAmount || 0) - (r.appliedAmount || 0)), 0);
     let remain = Math.min(order.congNo || 0, available);
-    if (remain <= 0) return;
+    if (remain <= 0) return order;
     const applyAmount = remain;
 
     for (const r of ownReturns) {
@@ -5342,6 +5471,7 @@ export default function FinanceManagement({
     await dbService.purchaseOrders.save(updatedOrder).catch(() => {});
     setPurchaseOrders(prev => prev.map(o => o.id === order.id ? updatedOrder : o));
     window.dispatchEvent(new CustomEvent('hl-supplier-returns-updated'));
+    return updatedOrder;
   };
 
   // Hoàn tác ghi nhận công nợ của 1 đơn hàng — dùng khi lỡ ghi nhận nhầm (vd
@@ -7054,6 +7184,7 @@ export default function FinanceManagement({
                                     // thì "Số tiền đề xuất" là số tự điền từ các đơn đó → xóa luôn để khỏi nhầm.
                                     if (Object.keys(quickProposalPoAlloc).length > 0) setQuickProposalAmount('');
                                     setQuickProposalPoAlloc({});
+                                    setQuickProposalNoPo(false);
                                   }}
                                   placeholder="— Chọn nhà cung cấp —"
                                   searchPlaceholder="🔍 Gõ tên / lĩnh vực NCC..."
@@ -7140,12 +7271,12 @@ export default function FinanceManagement({
                               return (
                                 <div className="bg-white border border-slate-200 rounded-xl p-2.5 text-[12px] space-y-1.5">
                                   <div className="flex items-center justify-between gap-2">
-                                    <div className="text-slate-700 font-bold">Chọn đơn hàng thanh toán (không bắt buộc)</div>
+                                    <div className="text-slate-700 font-bold">Chọn đơn hàng thanh toán</div>
                                     <div className="text-slate-500">Đã chọn: <b className="text-[#0d47c9] font-mono">{pickedTotal.toLocaleString('vi-VN')} đ</b></div>
                                   </div>
-                                  <div className="bg-amber-50 border border-amber-300 rounded-xl px-2 py-1.5 text-amber-800">
-                                    ⚠️ <b>Lưu ý:</b> phần tiền chi chưa gắn vào đơn nào (chi lệch / không chọn đơn) sẽ được <b>tự trừ vào các đơn cũ nhất còn nợ</b> (sau khi trả công nợ đầu kỳ).
-                                    Hệ thống chỉ đoán theo thứ tự cũ nhất nên <b>có thể gắn không đúng hóa đơn</b> — muốn chính xác, hãy chọn đúng đơn ở đây. Khi lập phiếu sẽ có bước xác nhận.
+                                  <div className="bg-[#e8efff] border border-[#bcd0ff] rounded-xl px-2 py-1.5 text-slate-700">
+                                    <b>Bắt buộc xác định đơn:</b> chọn đơn hàng mà khoản chi này thanh toán. Giám đốc sẽ duyệt <b>từng đơn</b> (tick / bỏ tick / chỉnh số tiền).
+                                    Phần tiền không thuộc đơn nào (trả công nợ đầu kỳ, tạm ứng) phải tick ô bên dưới.
                                   </div>
                                   <div className="max-h-44 overflow-y-auto space-y-1">
                                     {supplierPos.map(po => {
@@ -7179,6 +7310,11 @@ export default function FinanceManagement({
                                       );
                                     })}
                                   </div>
+                                  <label className="flex items-start gap-2 border border-slate-200 rounded-xl px-2 py-1.5 cursor-pointer bg-white">
+                                    <input type="checkbox" checked={quickProposalNoPo} onChange={(e) => setQuickProposalNoPo(e.target.checked)} className="mt-0.5 accent-[#0d47c9] cursor-pointer" />
+                                    <span className="text-slate-700"><b>Phần còn lại không thuộc đơn nào</b> (trả công nợ đầu kỳ / tạm ứng) — phần tiền chưa gắn đơn
+                                      {Number(quickProposalAmount) > pickedTotal ? <> hiện là <b className="font-mono text-[#0d47c9]">{(Number(quickProposalAmount) - pickedTotal).toLocaleString('vi-VN')} đ</b></> : null}.</span>
+                                  </label>
                                 </div>
                               );
                             })()}
@@ -10072,6 +10208,11 @@ export default function FinanceManagement({
                     </select>
                   </div>
                   <button type="button" onClick={() => { const y = new Date().getFullYear(); updateLiabilityFilter({ category: '', status: '', fromDate: `${y}-01-01`, toDate: `${y}-12-31` }); setSearchTerm(''); }} className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đặt lại</button>
+                  <button type="button" onClick={() => { setReconcileSkip({}); setReconcileOpen(true); }}
+                    className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-[#bcd0ff] text-[#0d47c9] hover:bg-[#e8efff]"
+                    title="Tìm các khoản đã chi cho nhà cung cấp nhưng chưa gắn vào đơn hàng nào, rồi áp vào đơn cũ nhất còn nợ" data-testid="liab-reconcile-btn">
+                    <RefreshCcw className="w-4 h-4" /> Đối chiếu công nợ NCC
+                  </button>
                 </div>
 
                 {/* Tổng hợp NCC Nợ (trả hàng) khả dụng — hiển thị LUÔN, KHÔNG phụ
@@ -10748,6 +10889,84 @@ export default function FinanceManagement({
                   </div>
                 </div>
 
+                {viewingProposalDetail.type === 'supplier_payment_proposal' ? (() => {
+                  // ── CHI NHÀ CUNG CẤP: duyệt theo TỪNG ĐƠN ──
+                  const vp = viewingProposalDetail;
+                  const editable = vp.status === 'pending_approval' && canApproveProposal(vp);
+                  const allocs = vp.purchaseOrderAllocations || [];
+                  const calc = buildApprovedAllocations(
+                    allocs.map(a => ({
+                      purchaseOrderId: a.purchaseOrderId,
+                      amount: Number(approveLines[a.purchaseOrderId]?.amount ?? a.amount),
+                      checked: approveLines[a.purchaseOrderId]?.checked ?? true,
+                    })),
+                    Number(approveGeneral) || 0, purchaseOrders);
+                  const sumAllocs = allocs.reduce((sum, a) => sum + (a.amount || 0), 0);
+                  // Đã duyệt/đã lập phiếu: phần chi chung = số duyệt − tổng các đơn
+                  const generalRO = Math.max(0, (vp.approvedAmount ?? vp.amount ?? 0) - sumAllocs);
+                  return (
+                    <div className="pt-3 border-t border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-500 block text-[11px] font-bold">{editable ? 'Duyệt chi theo từng đơn hàng' : 'Đơn hàng được duyệt chi'}</span>
+                        {editable
+                          ? <span className="text-[9px] text-[#0d47c9] font-semibold">Tick để duyệt · bỏ tick để không chi · chỉnh số tiền từng đơn</span>
+                          : vp.approvedAmount != null ? <span className="text-[9px] text-emerald-700 font-semibold">✅ Đã duyệt: {vp.approvedAmount.toLocaleString('vi-VN')} đ</span> : null}
+                      </div>
+                      {allocs.length === 0 && (
+                        <div className="text-[11px] text-slate-500 italic bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                          Đề xuất này không gắn đơn hàng nào (đề xuất cũ hoặc trả công nợ đầu kỳ / tạm ứng).
+                        </div>
+                      )}
+                      <div className="space-y-1">
+                        {allocs.map(a => {
+                          const po = purchaseOrders.find(o => o.id === a.purchaseOrderId);
+                          const ln = approveLines[a.purchaseOrderId] ?? { checked: true, amount: String(a.amount) };
+                          return (
+                            <div key={a.purchaseOrderId} className={`flex items-center gap-2 border rounded-xl px-2.5 py-1.5 ${editable && !ln.checked ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-[#bcd0ff] bg-[#e8efff]'}`}>
+                              {editable && (
+                                <input type="checkbox" checked={ln.checked} className="accent-[#0d47c9] cursor-pointer"
+                                  onChange={(e) => setApproveLines(prev => ({ ...prev, [a.purchaseOrderId]: { ...ln, checked: e.target.checked } }))} />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="font-mono font-bold text-[12px] text-slate-800 truncate">{a.purchaseOrderId}</div>
+                                <div className="text-[11px] text-slate-500 truncate">
+                                  {po ? `${po.projectName || 'Không gắn dự án'} · tổng đơn ${Math.round(po.tongTien || 0).toLocaleString('vi-VN')} đ · còn phải trả ${Math.round(getPoPayableRemaining(po)).toLocaleString('vi-VN')} đ` : 'Đơn không còn tồn tại'}
+                                </div>
+                              </div>
+                              {editable ? (
+                                <input type="number" min={0} value={ln.amount} disabled={!ln.checked}
+                                  onChange={(e) => setApproveLines(prev => ({ ...prev, [a.purchaseOrderId]: { ...ln, amount: e.target.value } }))}
+                                  className="w-32 bg-white border border-slate-200 rounded-xl px-2 py-1 text-slate-900 font-mono font-bold text-right text-[12px] outline-none focus:border-[#0d47c9] disabled:opacity-50" />
+                              ) : (
+                                <span className="font-mono font-bold text-[12px] text-slate-800">{a.amount.toLocaleString('vi-VN')} đ</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <div className="flex items-center gap-2 border border-slate-200 rounded-xl px-2.5 py-1.5 bg-white">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold text-[12px] text-slate-700">Phần không gắn đơn nào</div>
+                            <div className="text-[11px] text-slate-500">Trả công nợ đầu kỳ / tạm ứng</div>
+                          </div>
+                          {editable ? (
+                            <input type="number" min={0} value={approveGeneral} onChange={(e) => setApproveGeneral(e.target.value)}
+                              className="w-32 bg-white border border-slate-200 rounded-xl px-2 py-1 text-slate-900 font-mono font-bold text-right text-[12px] outline-none focus:border-[#0d47c9]" />
+                          ) : (
+                            <span className="font-mono font-bold text-[12px] text-slate-800">{generalRO.toLocaleString('vi-VN')} đ</span>
+                          )}
+                        </div>
+                      </div>
+                      {editable && (
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="text-[11px] text-slate-500">Số tiền đề xuất: <b className="font-mono">{(vp.amount || 0).toLocaleString('vi-VN')} đ</b></span>
+                          <span className="text-[12px] font-bold text-slate-700">Tổng duyệt chi: <b className="font-mono text-base text-[#0d47c9]">{calc.total.toLocaleString('vi-VN')} đ</b></span>
+                        </div>
+                      )}
+                      {editable && calc.error && <div className="text-[11px] text-rose-600 font-bold bg-rose-50 border border-rose-200 rounded-xl px-2.5 py-1.5">⚠ {calc.error}</div>}
+                    </div>
+                  );
+                })() : (
+                <>
                 {/* Số tiền duyệt chi — người xét duyệt nhập; Người lập phiếu lập phiếu dựa vào đây.
                     Giữ "Số tiền đề xuất" bên trên làm tham chiếu lịch sử. */}
                 <div className="pt-3 border-t border-slate-200">
@@ -10774,6 +10993,9 @@ export default function FinanceManagement({
                     </strong>
                   )}
                 </div>
+
+                </>
+                )}
 
                 <div className="pt-1">
                   <span className="text-slate-500 block text-[11px] font-bold mb-0.5">Dự án / Công trình</span>
@@ -10906,6 +11128,28 @@ export default function FinanceManagement({
                         <button
                           type="button"
                           onClick={async () => {
+                            // Chi Nhà Cung Cấp: duyệt theo từng đơn (tổng = các đơn được tick + phần chi chung)
+                            if (viewingProposalDetail.type === 'supplier_payment_proposal') {
+                              const allocs0 = viewingProposalDetail.purchaseOrderAllocations || [];
+                              const calc = buildApprovedAllocations(
+                                allocs0.map(a => ({
+                                  purchaseOrderId: a.purchaseOrderId,
+                                  amount: Number(approveLines[a.purchaseOrderId]?.amount ?? a.amount),
+                                  checked: approveLines[a.purchaseOrderId]?.checked ?? true,
+                                })),
+                                Number(approveGeneral) || 0, purchaseOrders);
+                              if (calc.error) { addToast({ title: '⚠️ Không thể duyệt', message: calc.error, type: 'error' }); return; }
+                              if (calc.total <= 0) { addToast({ title: '⚠️ Chưa có khoản nào được duyệt', message: 'Hãy tick ít nhất một đơn / nhập số tiền, hoặc bấm "Từ Chối" nếu không duyệt.', type: 'warning' }); return; }
+                              const dropped = allocs0.length - calc.allocations.length;
+                              if (!window.confirm(`✅ Xác nhận duyệt Đề xuất ${viewingProposalDetail.id}?\n` +
+                                calc.allocations.map(a => `  • ${a.purchaseOrderId}: ${a.amount.toLocaleString('vi-VN')}đ`).join('\n') +
+                                (calc.general > 0 ? `\n  • Không gắn đơn: ${calc.general.toLocaleString('vi-VN')}đ` : '') +
+                                (dropped > 0 ? `\n(${dropped} đơn không được duyệt)` : '') +
+                                `\nTổng duyệt chi: ${calc.total.toLocaleString('vi-VN')}đ`)) return;
+                              await handleApprove(viewingProposalDetail, calc.total, calc.allocations);
+                              setViewingProposalDetail(null);
+                              return;
+                            }
                             const amt = (approveAmountInput !== '' && !isNaN(Number(approveAmountInput))) ? Number(approveAmountInput) : viewingProposalDetail.amount;
                             if (!window.confirm(`✅ Xác nhận duyệt Đề xuất ${viewingProposalDetail.id}?\nSố tiền duyệt chi: ${amt.toLocaleString('vi-VN')}đ`)) return;
                             await handleApprove(viewingProposalDetail, amt);
@@ -11545,6 +11789,68 @@ export default function FinanceManagement({
       })()}
 
       {/* MODAL: XÁC NHẬN GHI NHẬN CÔNG NỢ (cảnh báo nếu đơn chưa hoạt động) */}
+      {/* Hộp thoại ĐỐI CHIẾU CÔNG NỢ NCC — xem trước, kế toán tick NCC nào cho áp dụng */}
+      {reconcileOpen && (
+        <div className="fixed inset-0 z-[9500] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => !reconcileBusy && setReconcileOpen(false)} data-testid="liab-reconcile-modal">
+          <div className="w-full max-w-3xl max-h-[88vh] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200">
+              <div>
+                <h3 className="font-extrabold text-[15px] text-slate-800">Đối chiếu công nợ nhà cung cấp</h3>
+                <p className="text-[12px] text-slate-500 mt-0.5">Các khoản đã chi cho nhà cung cấp nhưng chưa gắn vào đơn hàng nào (sau khi trừ công nợ đầu kỳ) sẽ được áp vào các đơn cũ nhất còn nợ.</p>
+              </div>
+              <button type="button" onClick={() => setReconcileOpen(false)} disabled={reconcileBusy} aria-label="Đóng" className="w-8 h-8 grid place-items-center rounded-xl text-slate-500 hover:bg-slate-100 cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="px-5 py-3 overflow-y-auto flex-1 space-y-3">
+              <div className="bg-[#e8efff] border border-[#bcd0ff] rounded-xl px-3 py-2 text-[12px] text-slate-700">
+                Hệ thống chỉ đoán theo thứ tự <b>đơn cũ nhất trước</b>. Với khoản lớn, hãy hỏi kế toán xem thực tế chi cho đơn nào — bỏ tick nhà cung cấp nào bạn chưa chắc để áp dụng sau. Mức lệch dưới 1.000đ được bỏ qua.
+              </div>
+              {reconcilePlans.length === 0 ? (
+                <div className="text-center text-slate-500 italic py-8 text-[13px]">Không có nhà cung cấp nào lệch — mọi khoản đã chi đều đã gắn vào đơn.</div>
+              ) : reconcilePlans.map(plan => {
+                const skipped = !!reconcileSkip[plan.supplierId];
+                return (
+                  <div key={plan.supplierId} className={`border rounded-xl overflow-hidden ${skipped ? 'border-slate-200 opacity-60' : 'border-[#bcd0ff]'}`}>
+                    <label className="flex items-center gap-2.5 px-3 py-2 bg-slate-50 cursor-pointer">
+                      <input type="checkbox" checked={!skipped} className="accent-[#0d47c9] cursor-pointer"
+                        onChange={(e) => setReconcileSkip(prev => ({ ...prev, [plan.supplierId]: !e.target.checked }))} />
+                      <span className="flex-1 min-w-0 font-extrabold text-[13px] text-slate-800 truncate">{plan.name}</span>
+                      <span className="font-mono font-bold text-[13px] text-[#0d47c9]">{plan.total.toLocaleString('vi-VN')} đ</span>
+                    </label>
+                    <table className="w-full text-[12px]">
+                      <thead className="text-slate-500 border-b border-slate-100">
+                        <tr><th className="px-3 py-1.5 text-left font-bold">Đơn hàng</th><th className="px-3 py-1.5 text-right font-bold">Còn nợ trước</th><th className="px-3 py-1.5 text-right font-bold">Áp</th><th className="px-3 py-1.5 text-right font-bold">Còn nợ sau</th></tr>
+                      </thead>
+                      <tbody>
+                        {plan.lines.map(l => (
+                          <tr key={l.purchaseOrderId} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-1.5 font-mono text-slate-700">{l.purchaseOrderId}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-slate-600">{Math.round(l.before).toLocaleString('vi-VN')}</td>
+                            <td className="px-3 py-1.5 text-right font-mono font-bold text-emerald-700">-{Math.round(l.amount).toLocaleString('vi-VN')}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-slate-800">{Math.round(l.before - l.amount).toLocaleString('vi-VN')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200">
+              <span className="text-[12px] text-slate-500">
+                Sẽ áp: <b className="font-mono text-slate-800">{reconcilePlans.filter(p => !reconcileSkip[p.supplierId]).reduce((sum, p) => sum + p.total, 0).toLocaleString('vi-VN')} đ</b>
+              </span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setReconcileOpen(false)} disabled={reconcileBusy} className="h-9 px-4 text-[13px] font-bold rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">Đóng</button>
+                <button type="button" onClick={applyReconcile} disabled={reconcileBusy || reconcilePlans.every(p => reconcileSkip[p.supplierId])}
+                  style={{ color: '#ffffff' }} className="h-9 px-4 text-[13px] font-bold rounded-xl bg-[#0d47c9] hover:bg-[#0a3aa8] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed" data-testid="liab-reconcile-apply">
+                  {reconcileBusy ? 'Đang áp dụng…' : 'Áp dụng'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {poRecordConfirm && (() => {
         const ro = poRecordConfirm;
         const active = isOrderActive(ro);
