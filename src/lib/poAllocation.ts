@@ -110,3 +110,91 @@ export function planPoRevert(allocations: PoAllocation[], orders: PurchaseOrder[
   }
   return updatedOrders;
 }
+
+// ── BÙ PHẦN ĐÃ CHI TRƯỚC KHI GHI NHẬN CÔNG NỢ ──
+// Sự cố 2026-11 (PO-1792141670846-0): phiếu chi 107.000.000đ được lập TRƯỚC khi đơn được ghi nhận
+// công nợ → lúc lập phiếu, đơn chưa nằm trong "pool" nên không được trừ; khi ghi nhận sau đó, hệ thống
+// không áp lại → dòng chi tiết đơn báo còn nợ 107 triệu trong khi dòng tổng NCC báo đã trả đủ.
+// Hàm này tính phần tiền NCC đã được chi nhưng CHƯA gắn vào đơn nào:
+//   chưa gắn = tổng phiếu chi đã duyệt của NCC − công nợ đầu kỳ (nợ cũ trả trước) − tổng đã gắn vào các đơn
+// rồi phân bổ vào các đơn CŨ NHẤT còn nợ (cùng nguyên tắc với planPoAllocations bước 2).
+// Phần đã cấn trừ bằng trả hàng nằm trong thanhToanThucTe của đơn (tính vào "đã gắn") nên chỉ làm
+// con số "chưa gắn" nhỏ đi — thiên về an toàn, không bao giờ gắn thừa.
+export function planCatchUpAllocation(
+  pool: PurchaseOrder[],
+  openingDebt: number,
+  totalPaid: number
+): { applied: PoAllocation[]; updatedOrders: PurchaseOrder[] } {
+  const attributed = pool.reduce((s, o) => s + (o.thanhToanThucTe || 0), 0);
+  let budget = Math.max(0, totalPaid - (openingDebt || 0) - attributed);
+  const applied: PoAllocation[] = [];
+  const updatedOrders: PurchaseOrder[] = [];
+  const oldestFirst = pool.slice().sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '') || a.id.localeCompare(b.id));
+  for (const po of oldestFirst) {
+    if (budget <= 0) break;
+    const use = Math.min(getPoPayableRemaining(po), budget);
+    if (use <= 0) continue;
+    const newPaid = (po.thanhToanThucTe || 0) + use;
+    // Không đổi status (xem giải thích ở planPoAllocations)
+    updatedOrders.push({ ...po, thanhToanThucTe: newPaid, congNo: Math.max(0, (po.tongTien || 0) - newPaid) } as PurchaseOrder);
+    applied.push({ purchaseOrderId: po.id, amount: use });
+    budget -= use;
+  }
+  return { applied, updatedOrders };
+}
+
+// ── GIÁM ĐỐC DUYỆT THEO TỪNG ĐƠN (đề xuất "Chi Nhà Cung Cấp") ──
+// Thay vì chỉ nhập 1 con số "Số tiền duyệt chi" (rồi hệ thống tự cắt theo thứ tự đơn → có đơn bị bỏ ngoài ý muốn),
+// người duyệt tick/bỏ tick và chỉnh số tiền TỪNG ĐƠN; tổng duyệt chi = tổng các đơn được duyệt + phần chi chung.
+//   lines   : các đơn kế toán đề xuất, kèm cờ duyệt + số tiền người duyệt chấp thuận
+//   general : phần chi KHÔNG gắn đơn (trả công nợ đầu kỳ / tạm ứng) mà người duyệt chấp thuận
+export interface ApprovalLine { purchaseOrderId: string; amount: number; checked: boolean }
+export interface ApprovalResult { allocations: PoAllocation[]; general: number; total: number; error?: string }
+
+export function buildApprovedAllocations(
+  lines: ApprovalLine[],
+  general: number,
+  orders: PurchaseOrder[]
+): ApprovalResult {
+  const allocations: PoAllocation[] = [];
+  for (const l of lines) {
+    if (!l.checked) continue;                           // đơn bị bỏ tick → không được chi
+    const amount = Math.round(Number(l.amount) || 0);
+    if (amount <= 0) continue;
+    const po = orders.find(o => o.id === l.purchaseOrderId);
+    if (!po) return { allocations: [], general: 0, total: 0, error: `Đơn ${l.purchaseOrderId} không còn tồn tại.` };
+    // Không duyệt vượt số còn phải trả của đơn (dung sai 1đ như lúc lập đề xuất)
+    if (amount > getPoPayableRemaining(po) + 1) {
+      return { allocations: [], general: 0, total: 0, error: `Số tiền duyệt cho đơn ${po.id} vượt số còn phải trả (${getPoPayableRemaining(po).toLocaleString('vi-VN')}đ).` };
+    }
+    allocations.push({ purchaseOrderId: l.purchaseOrderId, amount });
+  }
+  const g = Math.max(0, Math.round(Number(general) || 0));
+  const total = allocations.reduce((s, a) => s + a.amount, 0) + g;
+  return { allocations, general: g, total };
+}
+
+// ── ĐỐI CHIẾU CÔNG NỢ NCC (sửa dữ liệu cũ) ──
+// Với mỗi NCC: phần tiền đã chi nhưng chưa gắn vào đơn nào (xem planCatchUpAllocation) được phân bổ
+// vào các đơn cũ nhất còn nợ. Trả về bản XEM TRƯỚC để kế toán duyệt từng NCC rồi mới áp dụng.
+// Bỏ qua NCC có tổng áp dụng nhỏ hơn `minAmount` (nhiễu làm tròn vài đồng).
+export interface ReconcileSupplierInput { supplierId: string; name: string; pool: PurchaseOrder[]; openingDebt: number; totalPaid: number }
+export interface ReconcileSupplierPlan {
+  supplierId: string; name: string; total: number;
+  lines: { purchaseOrderId: string; before: number; amount: number }[];   // before = còn phải trả của đơn TRƯỚC khi áp
+  updatedOrders: PurchaseOrder[];
+}
+export function planReconcileSuppliers(inputs: ReconcileSupplierInput[], minAmount = 1000): ReconcileSupplierPlan[] {
+  const out: ReconcileSupplierPlan[] = [];
+  for (const s of inputs) {
+    const { applied, updatedOrders } = planCatchUpAllocation(s.pool, s.openingDebt, s.totalPaid);
+    const total = applied.reduce((sum, a) => sum + a.amount, 0);
+    if (total < minAmount) continue;
+    const lines = applied.map(a => {
+      const po = s.pool.find(o => o.id === a.purchaseOrderId)!;
+      return { purchaseOrderId: a.purchaseOrderId, before: getPoPayableRemaining(po), amount: a.amount };
+    });
+    out.push({ supplierId: s.supplierId, name: s.name, total, lines, updatedOrders });
+  }
+  return out.sort((a, b) => b.total - a.total);
+}

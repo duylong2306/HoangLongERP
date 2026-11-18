@@ -135,3 +135,85 @@ describe('trạng thái đơn không bị đổi bởi trừ/hoàn công nợ', 
     expect(back).toMatchObject({ status: 'completed', thanhToanThucTe: 0, congNo: 100 });
   });
 });
+
+// Sự cố 2026-11 (PO-1792141670846-0): 107.000.000đ chi trước khi đơn được ghi nhận công nợ
+// không được gắn vào đơn → dòng chi tiết báo còn nợ 107 triệu dù NCC đã trả đủ.
+import { planCatchUpAllocation } from '../poAllocation';
+describe('planCatchUpAllocation', () => {
+  it('đúng ca thực tế: đã chi 550.667.454 (nợ đầu kỳ) + 107.000.000 + 3.346.000, đơn mới chỉ gắn 3.346.000 → bù nốt 107.000.000', () => {
+    const { applied, updatedOrders } = planCatchUpAllocation(
+      [po('PO1', 110346000, 3346000)], 550667454, 550667454 + 107000000 + 3346000);
+    expect(applied).toEqual([{ purchaseOrderId: 'PO1', amount: 107000000 }]);
+    expect(updatedOrders[0].thanhToanThucTe).toBe(110346000);
+    expect(updatedOrders[0].congNo).toBe(0);
+  });
+  it('đã gắn đủ → không làm gì (chạy lại nhiều lần vẫn an toàn)', () => {
+    const r = planCatchUpAllocation([po('PO1', 110346000, 110346000)], 550667454, 550667454 + 110346000);
+    expect(r.applied).toEqual([]);
+    expect(r.updatedOrders).toEqual([]);
+  });
+  it('tiền chi chỉ đủ trả công nợ đầu kỳ → không gắn gì vào đơn', () => {
+    const r = planCatchUpAllocation([po('PO1', 1000, 0)], 5000, 5000);
+    expect(r.applied).toEqual([]);
+  });
+  it('không gắn vượt số còn phải trả; dư chuyển sang đơn cũ nhất tiếp theo', () => {
+    const r = planCatchUpAllocation(
+      [po('B', 300, 0, { createdAt: '2026-02-01' }), po('A', 100, 0, { createdAt: '2026-01-01' })], 0, 250);
+    expect(r.applied).toEqual([{ purchaseOrderId: 'A', amount: 100 }, { purchaseOrderId: 'B', amount: 150 }]);
+  });
+  it('tiền đã chi nhiều hơn tổng nợ các đơn → chỉ gắn tối đa số còn nợ, không âm', () => {
+    const r = planCatchUpAllocation([po('A', 100, 40)], 0, 1000);
+    expect(r.updatedOrders[0].thanhToanThucTe).toBe(100);
+    expect(r.updatedOrders[0].congNo).toBe(0);
+  });
+});
+
+import { buildApprovedAllocations, planReconcileSuppliers } from '../poAllocation';
+describe('buildApprovedAllocations (giám đốc duyệt theo từng đơn)', () => {
+  const orders = [po('A', 100, 0), po('B', 200, 50)];
+  it('chỉ tính các đơn được tick; tổng duyệt = các đơn + phần chi chung', () => {
+    const r = buildApprovedAllocations(
+      [{ purchaseOrderId: 'A', amount: 100, checked: true }, { purchaseOrderId: 'B', amount: 150, checked: false }], 30, orders);
+    expect(r.allocations).toEqual([{ purchaseOrderId: 'A', amount: 100 }]);
+    expect(r.general).toBe(30);
+    expect(r.total).toBe(130);
+    expect(r.error).toBeUndefined();
+  });
+  it('cho phép giảm số tiền từng đơn (duyệt một phần)', () => {
+    const r = buildApprovedAllocations([{ purchaseOrderId: 'B', amount: 60, checked: true }], 0, orders);
+    expect(r.allocations).toEqual([{ purchaseOrderId: 'B', amount: 60 }]);
+    expect(r.total).toBe(60);
+  });
+  it('báo lỗi khi duyệt vượt số còn phải trả của đơn (B còn 150)', () => {
+    const r = buildApprovedAllocations([{ purchaseOrderId: 'B', amount: 151 + 1, checked: true }], 0, orders);
+    expect(r.error).toMatch(/vượt/);
+    expect(r.total).toBe(0);
+  });
+  it('báo lỗi khi đơn không còn tồn tại; bỏ tick hết + không chi chung → tổng 0', () => {
+    expect(buildApprovedAllocations([{ purchaseOrderId: 'X', amount: 10, checked: true }], 0, orders).error).toMatch(/không còn/);
+    expect(buildApprovedAllocations([{ purchaseOrderId: 'A', amount: 100, checked: false }], 0, orders).total).toBe(0);
+  });
+  it('số tiền âm / NaN bị bỏ qua, phần chi chung không âm', () => {
+    const r = buildApprovedAllocations([{ purchaseOrderId: 'A', amount: NaN, checked: true }], -5, orders);
+    expect(r.allocations).toEqual([]);
+    expect(r.general).toBe(0);
+  });
+});
+
+describe('planReconcileSuppliers (nút Đối chiếu công nợ NCC)', () => {
+  it('lập kế hoạch cho NCC lệch, sắp xếp theo số tiền lớn → nhỏ', () => {
+    const plans = planReconcileSuppliers([
+      { supplierId: 'S1', name: 'Nhỏ', pool: [po('P1', 5000, 0)], openingDebt: 0, totalPaid: 5000 },
+      { supplierId: 'S2', name: 'Lớn', pool: [po('P2', 90000, 0)], openingDebt: 10000, totalPaid: 100000 },
+    ]);
+    expect(plans.map(p => p.name)).toEqual(['Lớn', 'Nhỏ']);
+    expect(plans[0].lines).toEqual([{ purchaseOrderId: 'P2', before: 90000, amount: 90000 }]);
+  });
+  it('bỏ qua NCC chỉ lệch nhiễu làm tròn (< 1.000đ) hoặc đã khớp', () => {
+    const plans = planReconcileSuppliers([
+      { supplierId: 'S1', name: 'Nhiễu', pool: [po('P1', 5000, 0)], openingDebt: 0, totalPaid: 49 },
+      { supplierId: 'S2', name: 'Khớp', pool: [po('P2', 5000, 5000)], openingDebt: 0, totalPaid: 5000 },
+    ]);
+    expect(plans).toEqual([]);
+  });
+});
