@@ -246,7 +246,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
       <Card title="Việc cần bạn xử lý hôm nay" icon={<AlertTriangle className="w-4 h-4 text-amber-500" />}>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
           <Stat label="Phiếu chi chờ duyệt" value={String(pendingPays.length)} sub={pendingPays.length ? fmtFull(pendingPayAmount) : 'Không có'} tone={pendingPays.length ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
-          <Stat label="Đề xuất chi chờ duyệt" value={String(pendingAdvances.length)} sub={awaitingVoucher.length ? `${awaitingVoucher.length} đề xuất chờ lập phiếu` : 'Không có'} tone={pendingAdvances.length ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
+          <Stat label="Đề xuất chi chờ duyệt" value={String(pendingAdvances.length)} sub={`${awaitingVoucher.length} đề xuất chờ lập phiếu chi`} tone={pendingAdvances.length ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
           <Stat label="Công việc chờ duyệt" value={String(buckets.reviewing.length)} sub="Đang chờ duyệt kết quả" tone={buckets.reviewing.length ? 'amber' : 'slate'} onClick={() => onNavigateTab('tasks')} />
           <Stat label="Đơn nghỉ / tạm ứng lương" value={String(att.pendingLeaves)} sub="Chờ xét duyệt" tone={att.pendingLeaves ? 'amber' : 'slate'} onClick={() => onNavigateTab('employees')} />
           <Stat label="Đề xuất vật tư chờ duyệt" value={String(matStatus.find(s => s.key === 'waiting_approval')?.count || 0)} sub="Trên bảng điều phối" tone={(matStatus.find(s => s.key === 'waiting_approval')?.count || 0) ? 'amber' : 'slate'} onClick={() => onNavigateTab('material-coordination')} />
