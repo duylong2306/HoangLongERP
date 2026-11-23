@@ -11,6 +11,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import SubcontractorArchive from './SubcontractorArchive';
+import TablePagination, { usePagination } from './TablePagination';
 
 interface SubcontractorManagementProps {
   currentUser: Employee;
@@ -140,84 +141,82 @@ export default function SubcontractorManagement({
       .sort((a, b) => b.remaining - a.remaining);
   }, [subQuotes, payments]);
 
+  // Phân trang bảng Công nợ Trả theo thầu phụ (mặc định 10 dòng/trang, chọn 5/10/20/50/Tất cả)
+  const liabPg = usePagination(10);
   const totalLiabilityRemaining = subcontractorLiabilities.reduce((s, e) => s + e.remaining, 0);
   const totalLiabilityValue = subcontractorLiabilities.reduce((s, e) => s + e.value, 0);
   const totalLiabilityPaid = subcontractorLiabilities.reduce((s, e) => s + e.paid, 0);
 
+  // Thẻ chỉ số kiểu LoLo: nền trắng, viền nhạt, biểu tượng xanh LoLo (số âm/đỏ chỉ dùng cho công nợ còn lại)
+  const kpiCard = 'bg-white border border-slate-200 p-4 rounded-2xl flex items-center gap-4 text-left';
+  const kpiIcon = 'p-3 bg-[#e8efff] text-[#0d47c9] rounded-xl border border-[#bcd0ff]';
+  const kpiLabel = 'block text-[12px] text-slate-500 font-bold';
+
   return (
     <div className="space-y-6 animate-fade-in" id="subcontractor_management_panel">
-      {/* 4-bento grid KPI metric card layout */}
+      {/* Thẻ chỉ số */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="subcontractor_kpi_cards">
-        <div className="bg-slate-900 border border-slate-850 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl border border-blue-200">
-            <Layers className="w-5 h-5" />
-          </div>
+        <div className={kpiCard}>
+          <div className={kpiIcon}><Layers className="w-5 h-5" /></div>
           <div>
-            <span className="block text-[10px] text-slate-450 uppercase tracking-wider font-extrabold">Hợp đồng thầu phụ</span>
-            <span className="block text-xl font-black text-slate-100 mt-0.5 font-mono">
-              {stats.totalContracts} <span className="text-[10px] text-slate-500 font-sans font-normal">hợp đồng</span>
+            <span className={kpiLabel}>Hợp đồng thầu phụ</span>
+            <span className="block text-xl font-extrabold text-slate-800 mt-0.5 font-mono">
+              {stats.totalContracts} <span className="text-[12px] text-slate-500 font-sans font-normal">hợp đồng</span>
             </span>
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-850 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-200">
-            <DollarSign className="w-5 h-5" />
-          </div>
+        <div className={kpiCard}>
+          <div className={kpiIcon}><DollarSign className="w-5 h-5" /></div>
           <div>
-            <span className="block text-[10px] text-slate-450 uppercase tracking-wider font-extrabold">Tổng giá trị khoán</span>
-            <span className="block text-xl font-black text-emerald-400 mt-0.5 font-mono">
-              {stats.totalValue.toLocaleString('vi-VN')} <span className="text-[10px] text-slate-500 font-sans font-normal">đ</span>
+            <span className={kpiLabel}>Tổng giá trị khoán</span>
+            <span className="block text-xl font-extrabold text-[#0d47c9] mt-0.5 font-mono">
+              {stats.totalValue.toLocaleString('vi-VN')} <span className="text-[12px] text-slate-500 font-sans font-normal">đ</span>
             </span>
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-850 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-sky-50 text-sky-600 rounded-xl border border-sky-200">
-            <CheckCircle2 className="w-5 h-5" />
-          </div>
+        <div className={kpiCard}>
+          <div className={kpiIcon}><CheckCircle2 className="w-5 h-5" /></div>
           <div>
-            <span className="block text-[10px] text-slate-450 uppercase tracking-wider font-extrabold">Đang thực thi</span>
-            <span className="block text-xl font-black text-slate-100 mt-0.5 font-mono">
-              {stats.doingCount} <span className="text-[10px] text-slate-500 font-sans font-normal">hạng mục</span>
+            <span className={kpiLabel}>Đang thực thi</span>
+            <span className="block text-xl font-extrabold text-slate-800 mt-0.5 font-mono">
+              {stats.doingCount} <span className="text-[12px] text-slate-500 font-sans font-normal">hạng mục</span>
             </span>
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-850 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-200">
-            <FileText className="w-5 h-5" />
-          </div>
+        <div className={kpiCard}>
+          <div className={kpiIcon}><FileText className="w-5 h-5" /></div>
           <div>
-            <span className="block text-[10px] text-slate-450 uppercase tracking-wider font-extrabold">Nghiệm thu hoàn tất</span>
-            <span className="block text-xl font-black text-slate-100 mt-0.5 font-mono">
-              {stats.completedCount} <span className="text-[10px] text-slate-500 font-sans font-normal">hợp đồng</span>
+            <span className={kpiLabel}>Nghiệm thu hoàn tất</span>
+            <span className="block text-xl font-extrabold text-slate-800 mt-0.5 font-mono">
+              {stats.completedCount} <span className="text-[12px] text-slate-500 font-sans font-normal">hợp đồng</span>
             </span>
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-rose-200 p-4.5 rounded-2xl flex items-center gap-4 shadow-xl text-left">
-          <div className="p-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-200">
-            <Wallet className="w-5 h-5" />
-          </div>
+        {/* Công nợ còn lại: giữ tông đỏ nhạt để dễ nhận biết khoản phải trả */}
+        <div className="bg-white border border-rose-200 p-4 rounded-2xl flex items-center gap-4 text-left">
+          <div className="p-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-200"><Wallet className="w-5 h-5" /></div>
           <div>
-            <span className="block text-[10px] text-slate-450 uppercase tracking-wider font-extrabold">Công nợ Trả còn lại</span>
-            <span className="block text-xl font-black text-rose-400 mt-0.5 font-mono">
-              {totalLiabilityRemaining.toLocaleString('vi-VN')} <span className="text-[10px] text-slate-500 font-sans font-normal">đ</span>
+            <span className={kpiLabel}>Công nợ trả còn lại</span>
+            <span className="block text-xl font-extrabold text-rose-600 mt-0.5 font-mono">
+              {totalLiabilityRemaining.toLocaleString('vi-VN')} <span className="text-[12px] text-slate-500 font-sans font-normal">đ</span>
             </span>
           </div>
         </div>
       </div>
 
-      {/* Tab bar header — chỉ còn tab HỢP ĐỒNG THẦU PHỤ LIÊN KẾT ĐÃ LẬP */}
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-1.5 shadow-2xl" id="subcontractor_tab_workspace">
-        <div className="flex border-b border-slate-800/80 px-4.5 pt-3 pb-0 gap-6 overflow-x-auto scrollbar-none" id="subcontractor_management_nav">
+      {/* Khung chứa danh sách hợp đồng — chỉ còn tab "Hợp đồng thầu phụ liên kết đã lập" */}
+      <div className="bg-white rounded-2xl border border-slate-200" id="subcontractor_tab_workspace">
+        <div className="flex border-b border-slate-200 px-5 pt-3 pb-0 gap-6 overflow-x-auto scrollbar-none" id="subcontractor_management_nav">
           <button
             type="button"
-            className="text-xs font-black uppercase tracking-wider relative pb-3 transition-all cursor-pointer text-emerald-400"
+            className="text-[13px] font-extrabold relative pb-3 transition-all cursor-pointer text-[#0d47c9] whitespace-nowrap"
           >
-            🤝 HỢP ĐỒNG THẦU PHỤ LIÊN KẾT ĐÃ LẬP
-            <div className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-emerald-500 rounded-full" />
+            Hợp đồng thầu phụ liên kết đã lập
+            <div className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-[#0d47c9] rounded-full" />
           </button>
         </div>
 
@@ -233,68 +232,69 @@ export default function SubcontractorManagement({
         </div>
       </div>
 
-      {/* PHẦN CÔNG NỢ TRẢ THEO THẦU PHỤ — link trực tiếp với Hồ sơ thầu phụ qua subcontractorId */}
-      <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 shadow-2xl">
-        <div className="flex items-center justify-between mb-4">
+      {/* Công nợ trả theo thầu phụ — liên kết trực tiếp với hồ sơ thầu phụ qua subcontractorId */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-5">
+        <div className="flex items-center justify-between mb-4 gap-2">
           <div className="flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-rose-400" />
-            <h3 className="font-extrabold text-white text-sm uppercase tracking-wider">
-              Công nợ Trả theo Thầu phụ
-            </h3>
+            <Wallet className="w-5 h-5 text-[#0d47c9]" />
+            <h3 className="font-extrabold text-slate-800 text-[15px]">Công nợ trả theo thầu phụ</h3>
           </div>
-          <span className="bg-rose-50 border border-rose-200 text-rose-700 text-[10px] px-2.5 py-0.5 rounded-full font-mono font-bold">
+          <span className="bg-[#e8efff] border border-[#bcd0ff] text-[#0d47c9] text-[12px] px-2.5 py-0.5 rounded-full font-bold">
             {subcontractorLiabilities.length} thầu phụ
           </span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-          <div className="bg-slate-950/60 border border-slate-850 rounded-xl p-3">
-            <span className="block text-[9px] text-slate-450 uppercase tracking-wider font-bold">Tổng giá trị HĐ</span>
-            <span className="block text-base font-black text-slate-100 mt-1 font-mono">{totalLiabilityValue.toLocaleString('vi-VN')} đ</span>
+          <div className="bg-white border border-slate-200 rounded-xl p-3">
+            <span className="block text-[12px] text-slate-500 font-bold">Tổng giá trị HĐ</span>
+            <span className="block text-base font-extrabold text-slate-800 mt-1 font-mono">{totalLiabilityValue.toLocaleString('vi-VN')} đ</span>
           </div>
-          <div className="bg-slate-950/60 border border-slate-850 rounded-xl p-3">
-            <span className="block text-[9px] text-slate-450 uppercase tracking-wider font-bold">Đã thanh toán</span>
-            <span className="block text-base font-black text-emerald-400 mt-1 font-mono">-{totalLiabilityPaid.toLocaleString('vi-VN')} đ</span>
+          <div className="bg-white border border-slate-200 rounded-xl p-3">
+            <span className="block text-[12px] text-slate-500 font-bold">Đã thanh toán</span>
+            <span className="block text-base font-extrabold text-emerald-600 mt-1 font-mono">-{totalLiabilityPaid.toLocaleString('vi-VN')} đ</span>
           </div>
-          <div className="bg-slate-950/60 border border-rose-200 rounded-xl p-3">
-            <span className="block text-[9px] text-slate-450 uppercase tracking-wider font-bold">Còn lại</span>
-            <span className="block text-base font-black text-rose-400 mt-1 font-mono">{totalLiabilityRemaining.toLocaleString('vi-VN')} đ</span>
+          <div className="bg-white border border-rose-200 rounded-xl p-3">
+            <span className="block text-[12px] text-slate-500 font-bold">Còn lại</span>
+            <span className="block text-base font-extrabold text-rose-600 mt-1 font-mono">{totalLiabilityRemaining.toLocaleString('vi-VN')} đ</span>
           </div>
         </div>
 
         {subcontractorLiabilities.length === 0 ? (
-          <div className="p-6 bg-slate-950/30 rounded-xl text-center text-slate-500 italic">
+          <div className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-center text-slate-500 italic text-[13px]">
             Chưa có công nợ thầu phụ nào (chưa có HĐ thầu phụ được duyệt).
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 font-extrabold uppercase text-[10px] tracking-wider">
-                  <th className="p-3">Thầu phụ</th>
-                  <th className="p-3 text-right">Giá trị HĐ</th>
-                  <th className="p-3 text-right">Đã chi</th>
-                  <th className="p-3 text-right">Còn lại</th>
-                  <th className="p-3 text-center">Số HĐ</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {subcontractorLiabilities.map(li => (
-                  <tr key={li.subcontractorId || li.subcontractorName} className="hover:bg-slate-850/20 transition-colors">
-                    <td className="p-3">
-                      <div className="font-extrabold text-slate-100">{li.subcontractorName}</div>
-                      {li.subcontractorId && (
-                        <div className="text-[9px] font-mono text-slate-500 mt-0.5">{li.subcontractorId.toUpperCase()}</div>
-                      )}
-                    </td>
-                    <td className="p-3 text-right font-mono font-bold text-slate-100">{li.value.toLocaleString('vi-VN')} đ</td>
-                    <td className="p-3 text-right font-mono text-emerald-400">-{li.paid.toLocaleString('vi-VN')} đ</td>
-                    <td className="p-3 text-right font-mono font-extrabold text-rose-450">{li.remaining > 0 ? `${li.remaining.toLocaleString('vi-VN')} đ` : '0 đ'}</td>
-                    <td className="p-3 text-center font-mono text-slate-400">{li.contracts}</td>
+          <div className="border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-[13px] border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-[12px]">
+                    <th className="px-3 py-2.5">Thầu phụ</th>
+                    <th className="px-3 py-2.5 text-right">Giá trị HĐ</th>
+                    <th className="px-3 py-2.5 text-right">Đã chi</th>
+                    <th className="px-3 py-2.5 text-right">Còn lại</th>
+                    <th className="px-3 py-2.5 text-center">Số HĐ</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {liabPg.slice(subcontractorLiabilities).map(li => (
+                    <tr key={li.subcontractorId || li.subcontractorName} className="hover:bg-[#e8efff]/40 transition-colors">
+                      <td className="px-3 py-2.5">
+                        <div className="font-extrabold text-slate-800">{li.subcontractorName}</div>
+                        {li.subcontractorId && (
+                          <div className="text-[11px] font-mono text-slate-500 mt-0.5">{li.subcontractorId.toUpperCase()}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-800">{li.value.toLocaleString('vi-VN')} đ</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-emerald-600">-{li.paid.toLocaleString('vi-VN')} đ</td>
+                      <td className="px-3 py-2.5 text-right font-mono font-extrabold text-rose-600">{li.remaining > 0 ? `${li.remaining.toLocaleString('vi-VN')} đ` : '0 đ'}</td>
+                      <td className="px-3 py-2.5 text-center font-mono text-slate-500">{li.contracts}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <TablePagination {...liabPg.props(subcontractorLiabilities.length)} unit="thầu phụ" testId="sub-liab-pager" />
           </div>
         )}
       </div>

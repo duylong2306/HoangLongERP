@@ -9,6 +9,7 @@ import { exportHtmlToWord } from '../lib/wordExport';
 import { docSoTiengViet } from './QuotationTableSheet';
 import { replaceContractValueInHtml } from '../lib/subcontractorContractValue';
 import { ListSkeleton } from './Skeleton';
+import TablePagination, { usePagination } from './TablePagination';
 
 // Bản in Hợp Đồng Thầu Phụ — trước đây là các ô <input> cố định bind trực tiếp
 // vào tempQuote.<field>, nay chuyển sang 1 vùng văn bản tự do (contentEditable)
@@ -495,24 +496,30 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
     exportHtmlToWord(docHtml, `HopDongThauPhu_${tempQuote.code || tempQuote.id}`);
   };
 
+  // Phân trang bảng hợp đồng (mặc định 10 dòng/trang, chọn 5/10/20/50/Tất cả); đổi từ khóa tìm → về trang 1
+  const pg = usePagination(10);
+  useEffect(() => { pg.setPage(1); }, [searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pgProps = pg.props(filteredList.length);
+  const sttOffset = pg.pageSize === -1 ? 0 : (pgProps.page - 1) * pg.pageSize;   // STT nối tiếp qua các trang
+
   return (
-    <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-6 space-y-6 text-left" id="subcontractor_archive_workspace">
+    <div className="bg-white text-slate-800 rounded-2xl border border-slate-200 p-5 space-y-5 text-left" id="subcontractor_archive_workspace">
       <div>
-        <h3 className="font-black text-lg text-slate-100 uppercase tracking-wider flex items-center gap-2">
-          <span className="p-1 px-2.5 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-200 text-xs">📝 CONTRACT ARCHIVE</span>
-          Hồ Sơ Lưu Trữ Hợp Đồng Thầu Phụ
+        <h3 className="font-extrabold text-[15px] text-slate-800 flex items-center gap-2">
+          <FileText className="w-5 h-5 text-[#0d47c9]" />
+          Hồ sơ lưu trữ hợp đồng thầu phụ
         </h3>
       </div>
 
-      <div className="flex gap-3 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
+      <div className="flex gap-3">
         <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input 
             type="text"
             placeholder="Tìm theo Mã hợp đồng, Thầu phụ, Công việc, Dự án..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 pl-10 pr-4 py-2.5 rounded-lg text-xs outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 font-medium"
+            className="w-full h-10 bg-white border border-slate-300 pl-10 pr-4 rounded-xl text-[13px] outline-none focus:border-[#0d47c9] text-slate-800 placeholder-slate-400 font-medium"
           />
         </div>
       </div>
@@ -520,18 +527,19 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
       {loading ? (
         <div className="py-6"><ListSkeleton rows={6} /></div>
       ) : filteredList.length === 0 ? (
-        <div className="py-12 text-center border border-dashed border-slate-800 rounded-xl bg-slate-900/10 space-y-2">
-          <FileText className="w-8 h-8 text-slate-600 mx-auto" />
-          <h5 className="font-extrabold text-xs text-slate-400 uppercase tracking-wider">Không tìm thấy hợp đồng nào</h5>
-          <p className="text-[10px] text-slate-500 max-w-sm mx-auto">
+        <div className="py-12 text-center border border-dashed border-slate-200 rounded-xl bg-slate-50 space-y-2">
+          <FileText className="w-8 h-8 text-slate-400 mx-auto" />
+          <h5 className="font-extrabold text-[13px] text-slate-600">Không tìm thấy hợp đồng nào</h5>
+          <p className="text-[12px] text-slate-500 max-w-sm mx-auto">
             Vui lòng chọn tab "Lập HĐ Thầu Phụ" để khởi tạo hợp đồng mới.
           </p>
         </div>
       ) : (
-        <div className="border border-slate-800 rounded-xl overflow-x-auto bg-slate-950 shadow-lg">
-          <table className="w-full text-slate-300 text-xs text-left">
+        <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white">
+          <div className="overflow-x-auto">
+          <table className="w-full text-slate-700 text-[13px] text-left">
             <thead>
-              <tr className="bg-slate-900 text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-800">
+              <tr className="bg-slate-50 text-[12px] font-bold text-slate-500 border-b border-slate-200">
                 <th className="px-4 py-3 text-center w-[50px]">STT</th>
                 <th className="px-4 py-3">Mã Hợp Đồng</th>
                 <th className="px-4 py-3">Dự Án Liên Kết</th>
@@ -543,8 +551,8 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                 <th className="px-4 py-3 text-center">Hành Động</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-900">
-              {filteredList.map((item, idx) => {
+            <tbody className="divide-y divide-slate-100">
+              {pg.slice(filteredList).map((item, idx) => {
                 return (
                   <tr 
                     key={item.id}
@@ -553,33 +561,33 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                       setTempQuote({ ...item });
                       setShowPrintPreview(true);
                     }}
-                    className="hover:bg-slate-900/60 transition-colors cursor-pointer"
+                    className="hover:bg-[#e8efff]/40 transition-colors cursor-pointer"
                   >
-                    <td className="px-4 py-3.5 text-center font-mono text-slate-500 font-bold border-r border-slate-900">
-                      {idx + 1}
+                    <td className="px-4 py-3.5 text-center font-mono text-slate-500 font-bold">
+                      {sttOffset + idx + 1}
                     </td>
-                    <td className="px-4 py-3.5 font-bold font-mono text-emerald-400 uppercase">
+                    <td className="px-4 py-3.5 font-bold font-mono text-[#0d47c9] uppercase">
                       {item.code || 'BÁO GIÁ LẺ'}
                     </td>
                     <td className="px-4 py-3.5">
                       <div>
-                        <span className="font-semibold block text-slate-200 line-clamp-1">{item.projectName}</span>
-                        <span className="text-[10px] text-slate-500">Chủ đầu tư: {item.customerName}</span>
+                        <span className="font-semibold block text-slate-800 line-clamp-1">{item.projectName}</span>
+                        <span className="text-[11px] text-slate-500">Chủ đầu tư: {item.customerName}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
                       <div>
-                        <span className="font-semibold block text-slate-200">{item.subcontractorName}</span>
-                        <span className="text-[10px] text-emerald-500 font-mono font-bold">Mã: {item.subcontractorId}</span>
+                        <span className="font-semibold block text-slate-800">{item.subcontractorName}</span>
+                        <span className="text-[11px] text-[#0d47c9] font-mono font-bold">Mã: {item.subcontractorId}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 max-w-[200px] truncate text-[11px] text-slate-350" title={item.workName}>
+                    <td className="px-4 py-3.5 max-w-[200px] truncate text-[12px] text-slate-600" title={item.workName}>
                       {item.workName}
                     </td>
                     <td className="px-4 py-3.5 text-slate-400 font-medium font-mono">
                       {item.createdAt || 'Chưa cập nhật'}
                     </td>
-                    <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-100">
+                    <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-800">
                       {(item.contractValue || 0).toLocaleString('vi-VN')} đ
                     </td>
                     <td className="px-4 py-3.5 text-center">
@@ -589,7 +597,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                         const displayStatus = isApproved ? 'Đã Duyệt' : 'Chưa Duyệt';
                         const badgeStyle = getStatusBadge(item.status || 'Đã Lập', item.isApproved);
                         return (
-                          <span className={`px-2 py-0.5 rounded font-black text-[9px] uppercase tracking-wider ${badgeStyle}`}>
+                          <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${badgeStyle}`}>
                             {displayStatus}
                           </span>
                         );
@@ -604,7 +612,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                             setTempQuote({ ...item });
                             setShowPrintPreview(true);
                           }}
-                          className="p-1.5 bg-slate-900 text-slate-300 hover:text-white rounded-lg border border-slate-800 hover:bg-slate-800 transition shadow cursor-pointer"
+                          className="p-1.5 bg-white text-slate-600 hover:text-[#0d47c9] rounded-xl border border-slate-200 hover:bg-[#e8efff] hover:border-[#bcd0ff] transition cursor-pointer"
                           title="Xem & In Hợp Đồng"
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -612,7 +620,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                         <button
                           type="button"
                           onClick={(e) => handleDeleteClick(item, e)}
-                          className="p-1.5 bg-rose-50 text-rose-600 hover:text-rose-700 rounded-lg border border-rose-200 hover:bg-rose-100 transition shadow cursor-pointer"
+                          className="p-1.5 bg-white text-rose-600 hover:text-rose-700 rounded-xl border border-rose-300 hover:bg-rose-50 transition cursor-pointer"
                           title="Xóa Hợp Đồng"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -624,29 +632,31 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
               })}
             </tbody>
           </table>
+          </div>
+          <TablePagination {...pgProps} unit="hợp đồng" testId="sub-archive-pager" />
         </div>
       )}
 
       {/* Delete confirmation dialog */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-[120] p-4 text-left">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <h4 className="text-sm font-extrabold uppercase text-rose-500">Xác Nhận Xóa Hợp Đồng</h4>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Bạn có chắc chắn muốn xóa hợp đồng thầu phụ <strong className="text-white">{deleteTarget.code}</strong> khỏi hệ thống lưu trữ? Thao tác này không thể hoàn tác.
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <h4 className="text-[15px] font-extrabold text-rose-600">Xác nhận xóa hợp đồng</h4>
+            <p className="text-[13px] text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn xóa hợp đồng thầu phụ <strong className="text-slate-900">{deleteTarget.code}</strong> khỏi hệ thống lưu trữ? Thao tác này không thể hoàn tác.
             </p>
             <div className="flex gap-2 justify-center">
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
+                className="h-9 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 text-[13px] font-bold rounded-xl cursor-pointer"
               >
                 Hủy bỏ
               </button>
               <button
                 type="button"
                 onClick={confirmDelete}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl cursor-pointer"
+                style={{ color: '#ffffff' }} className="h-9 px-4 bg-rose-600 hover:bg-rose-500 text-[13px] font-bold rounded-xl cursor-pointer"
               >
                 Đồng ý xóa
               </button>
@@ -663,7 +673,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
             {/* Header */}
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0 print-hide">
               <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-600" />
+                <FileText className="w-5 h-5 text-[#0d47c9]" />
                 <div>
                   <h4 className="font-extrabold text-sm text-slate-900 uppercase tracking-wider">
                     Xem &amp; Chỉnh Sửa Hợp Đồng Thầu Phụ
@@ -779,7 +789,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                         addToast({ title: '❌ Lỗi', message: 'Có lỗi xảy ra khi phê duyệt hợp đồng.', type: 'error' });
                       }
                     }}
-                    className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm animate-pulse"
+                    style={{ color: '#ffffff' }} className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm animate-pulse"
                   >
                     <FileCheck className="w-3.5 h-3.5" />
                     Duyệt Hợp Đồng
@@ -795,7 +805,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                       if (!canEdit) { addToast({ title: '⛔ Không đủ quyền', message: 'Bạn không có quyền sửa hợp đồng này.', type: 'warning' }); return; }
                       setIsEditing(true);
                     }}
-                    className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    style={{ color: '#ffffff' }} className="px-3.5 py-1.5 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
                   >
                     <Save className="w-3.5 h-3.5" />
                     Chỉnh sửa bản in
@@ -806,7 +816,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                     <button
                       onClick={handleSaveSubcontractorDoc}
                       disabled={savingDoc}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all rounded-lg text-[10px] font-bold font-sans flex items-center gap-1 cursor-pointer"
+                      style={{ color: '#ffffff' }} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all rounded-lg text-[10px] font-bold font-sans flex items-center gap-1 cursor-pointer"
                     >
                       {savingDoc ? 'Đang lưu...' : 'Lưu'}
                     </button>
@@ -825,7 +835,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                   title="Xuất file Word"
                   className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors rounded-xl text-[10px] font-bold font-sans flex items-center gap-1.5 cursor-pointer shadow-sm"
                 >
-                  <FileDown className="w-3.5 h-3.5 text-blue-600" />
+                  <FileDown className="w-3.5 h-3.5 text-[#0d47c9]" />
                   Xuất Word
                 </button>
               </div>
@@ -843,7 +853,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                     disabled={tempQuote.isApproved}
                     value={tempQuote.contractValue || 0}
                     onChange={(e) => setTempQuote({ ...tempQuote, contractValue: Number(e.target.value) })}
-                    className="bg-white border border-slate-300 rounded px-2 py-1 outline-none focus:border-blue-500 font-bold text-emerald-600 disabled:opacity-60 disabled:bg-slate-100 w-40"
+                    className="bg-white border border-slate-300 rounded px-2 py-1 outline-none focus:border-[#0d47c9] font-bold text-emerald-600 disabled:opacity-60 disabled:bg-slate-100 w-40"
                   />
                   {!tempQuote.isApproved && Number(tempQuote.contractValue || 0) !== Number(selectedQuote?.contractValue || 0) ? (
                     <>
@@ -851,7 +861,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                         type="button"
                         onClick={handleSaveContractValue}
                         disabled={savingValue}
-                        className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                        style={{ color: '#ffffff' }} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-bold cursor-pointer"
                       >
                         {savingValue ? 'Đang lưu...' : 'Lưu giá trị'}
                       </button>
@@ -914,7 +924,7 @@ export default function SubcontractorArchive({ currentUser, canEdit = true, canD
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all active:scale-95 shadow-md"
+                  style={{ color: '#ffffff' }} className="px-5 py-2.5 bg-[#0d47c9] hover:bg-[#0a3aa8] text-white font-extrabold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 transition-all active:scale-95 shadow-md"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   In Hợp Đồng
