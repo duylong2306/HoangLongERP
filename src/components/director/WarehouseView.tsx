@@ -73,6 +73,12 @@ export default function WarehouseView({ projects, onNavigateTab }: Props) {
     && matchesQuery(oq, o.id, o.supplierName, o.projectName, o.proposalCode, o.notes)).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))),
     [orders, range, oStatus, oProject, oDebt, oq]);
   const orderPager = usePager(orderList, [oq, oStatus, oProject, oDebt, preset, from, to].join('|'));
+  // Dòng TỔNG chỉ cộng đơn HIỆU LỰC (bỏ nháp và đã hủy): đơn đã hủy không còn là tiền phải trả/đã trả, cộng vào sẽ làm tổng tiền và "còn nợ" cao hơn thực tế
+  // (cùng quy tắc với thẻ "Đơn mua" và "Nợ nhà cung cấp" phía trên). Danh sách vẫn hiện đủ để tra cứu.
+  const orderTotals = useMemo(() => {
+    const live = orderList.filter(o => o.status !== 'draft' && o.status !== 'cancelled');
+    return { n: live.length, total: live.reduce((s, o) => s + (o.tongTien || 0), 0), paid: live.reduce((s, o) => s + (o.thanhToanThucTe || 0), 0), debt: live.reduce((s, o) => s + (o.congNo || 0), 0) };
+  }, [orderList]);
 
   // ─── Đề xuất vật tư ───
   const [pq, setPq] = useState(''); const [pStatus, setPStatus] = useState('all'); const [pProject, setPProject] = useState('all');
@@ -178,10 +184,10 @@ export default function WarehouseView({ projects, onNavigateTab }: Props) {
                   <td className={`px-3 py-2.5 text-right font-mono whitespace-nowrap font-bold ${(o.congNo || 0) > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{fmtFull(o.congNo || 0)}</td>
                   <td className="px-3 py-2.5"><Badge tone={ORDER_STATUS[o.status]?.tone || 'slate'}>{ORDER_STATUS[o.status]?.label || o.status}</Badge></td>
                 </tr>))}</tbody>
-              <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={4}>TỔNG ({orderList.length} đơn)</td>
-                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(orderList.reduce((s, o) => s + (o.tongTien || 0), 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(orderList.reduce((s, o) => s + (o.thanhToanThucTe || 0), 0))}</td>
-                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-600">{fmtFull(orderList.reduce((s, o) => s + (o.congNo || 0), 0))}</td><td /></tr></tfoot>
+              <tfoot><tr className="bg-slate-50 font-black text-slate-800 border-t border-slate-200"><td className="px-3 py-2.5" colSpan={4}>TỔNG ({orderTotals.n} đơn hiệu lực{orderList.length !== orderTotals.n ? `, không tính ${orderList.length - orderTotals.n} đơn nháp/đã hủy` : ''})</td>
+                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(orderTotals.total)}</td>
+                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-emerald-600">{fmtFull(orderTotals.paid)}</td>
+                <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-600">{fmtFull(orderTotals.debt)}</td><td /></tr></tfoot>
             </table></div>
           )}
           {orderPager.bar}

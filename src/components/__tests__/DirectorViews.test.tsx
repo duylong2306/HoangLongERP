@@ -246,6 +246,26 @@ describe('Kho & Vật tư', () => {
   });
 });
 
+describe('Kho & Vật tư — tổng danh sách đơn mua', () => {
+  it('dòng TỔNG chỉ cộng đơn hiệu lực, không cộng đơn đã hủy / nháp', async () => {
+    const now = new Date().toISOString();
+    D.orders = [
+      { id: 'PO1', supplierName: 'NCC A', status: 'confirmed', createdAt: now, tongTien: 1_000_000, thanhToanThucTe: 400_000, congNo: 600_000 },
+      { id: 'PO2', supplierName: 'NCC B', status: 'cancelled', createdAt: now, tongTien: 7_660_000, thanhToanThucTe: 0, congNo: 7_660_000 },
+    ];
+    D.inventory = []; D.proposals = [];
+    render(<WarehouseView projects={[]} onNavigateTab={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('tab', { name: /Đơn mua hàng/ }));
+    const tong = await screen.findByText(/TỔNG \(1 đơn hiệu lực, không tính 1 đơn nháp\/đã hủy\)/);
+    const row = tong.closest('tr')!;
+    expect(row).toHaveTextContent('1.000.000 đ');
+    expect(row).toHaveTextContent('400.000 đ');
+    expect(row).toHaveTextContent('600.000 đ');
+    expect(row).not.toHaveTextContent('7.660.000');
+    D.orders = [];
+  });
+});
+
 describe('Nhà thầu phụ', () => {
   it('tổng hợp từng thầu phụ và lọc theo tình trạng', async () => {
     D.subs = [{ id: 'S1', name: 'Tổ thợ A', field: 'Xây dựng', debt: 0 }, { id: 'S2', name: 'Tổ thợ B', field: 'Điện nước', debt: 2_000_000 }];
