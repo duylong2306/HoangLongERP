@@ -268,7 +268,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
           <Stat label="Tổng giá trị hợp đồng" value={fmtFull(totals.contractValue)} tone="indigo" />
           <Stat label="Đã thu" value={fmtFull(totals.collected)} sub={`${totals.collectedPct}% giá trị hợp đồng`} tone="emerald" />
           <Stat label="Đã chi (đã duyệt)" value={fmtFull(totals.spent)} sub={`${totals.spentPct}% giá trị hợp đồng`} tone="rose" />
-          <Stat label="Còn phải thu" value={fmtFull(totals.receivable)} sub="Hợp đồng − đã thu" tone="amber" />
+          <Stat label="Còn phải thu" value={fmtFull(totals.receivable)} sub="Cộng số còn nợ của từng công trình (công trình thu vượt không bù trừ)" tone="amber" />
           <Stat label="Thu − Chi (dòng tiền)" value={fmtFull(totals.cashMargin)} sub={totals.cashMargin >= 0 ? 'Đang dương' : 'Đang âm'} tone={totals.cashMargin >= 0 ? 'sky' : 'rose'} />
           <Stat label="Nợ nhà cung cấp" value={fmtFull(payable)} sub="Đơn mua chưa thanh toán hết" tone={payable > 0 ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
         </div>
