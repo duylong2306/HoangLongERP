@@ -230,7 +230,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
           <p className="text-[11px] font-bold uppercase tracking-wide text-amber-600">{weekday[now.getDay()]}, {now.getDate()}/{now.getMonth() + 1}/{now.getFullYear()}</p>
           <h2 className="text-lg sm:text-xl font-black text-slate-800">{hello}, đây là tình hình doanh nghiệp hôm nay</h2>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            {projects.filter(p => p.status !== 'completed' && p.status !== 'cancelled').length} công trình đang chạy · {att.present}/{att.expected} nhân sự có mặt · {buckets.overdue.length} việc quá hạn · {pendingPays.length} phiếu chi chờ duyệt
+            {projects.filter(p => p.status === 'processing' || p.status === 'new').length} công trình đang chạy · {att.present}/{att.expected} nhân sự có mặt · {buckets.overdue.length} việc quá hạn · {pendingPays.length} phiếu chi chờ duyệt
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">

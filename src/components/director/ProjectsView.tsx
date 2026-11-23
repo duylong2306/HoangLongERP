@@ -91,7 +91,8 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
     const f = fin.get(p.id), ts = taskStats.get(p.id);
     if (!matchesQuery(q, p.name, p.code, empName(p.pmId), custName(p.customerId), p.address)) return false;
     if (type !== 'all' && (p.type || 'general') !== type) return false;
-    if (status !== 'all' && p.status !== status) return false;
+    // 'active' = ĐANG CHẠY (đang thi công + mới) — cùng định nghĩa với thẻ "Đang chạy"; trước đây bấm thẻ chỉ lọc 'processing' nên ra ít dòng hơn số trên thẻ
+    if (status === 'active' ? !(p.status === 'processing' || p.status === 'new') : (status !== 'all' && p.status !== status)) return false;
     if (pm !== 'all' && p.pmId !== pm) return false;
     if (stage !== 'all' && stageIdOf(p as any, columnsForProject(p, colsBySector)) !== stage) return false;
     if (health === 'late' && !f?.flags.includes('late')) return false;
@@ -190,7 +191,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
       <Card title="Tổng quan Phòng Dự Án" icon={<HardHat className="w-4 h-4 text-sky-500" />}>
         <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2.5">
           <Stat label="Tổng công trình" value={String(projects.filter(p => p.status !== 'cancelled').length)} sub={`${projects.filter(p => p.status === 'completed').length} đã hoàn thành`} tone="indigo" onClick={resetProjects} />
-          <Stat label="Đang chạy" value={String(active.length)} sub={`Tiến độ TB ${avgProgress}%`} tone="emerald" onClick={() => { resetProjects(); setStatus('processing'); }} active={status === 'processing'} />
+          <Stat label="Đang chạy" value={String(active.length)} sub={`Tiến độ TB ${avgProgress}%`} tone="emerald" onClick={() => { resetProjects(); setStatus('active'); }} active={status === 'active'} />
           <Stat label="Trễ tiến độ" value={String(lateProjects)} sub="Quá ngày kết thúc" tone={lateProjects ? 'rose' : 'slate'} onClick={() => { resetProjects(); setHealth('late'); }} active={health === 'late'} />
           <Stat label="Chi vượt / chi > thu" value={String(budgetRisk)} sub="Gồm công trình đã chi nhưng chưa nhập hợp đồng" tone={budgetRisk ? 'rose' : 'slate'} onClick={() => { resetProjects(); setHealth('budget'); }} active={health === 'budget'} />
           <Stat label="Việc đang làm" value={String(buckets.doing.length)} tone="sky" onClick={() => { resetTasks(); setTView('doing'); }} active={tView === 'doing'} />
@@ -251,7 +252,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
         <FilterBar onReset={resetProjects} active={projectFilterActive}>
           <SearchBox value={q} onChange={setQ} placeholder="Tên, mã, trưởng dự án, khách hàng, địa chỉ…" />
           <SelectBox label="Loại" value={type} onChange={v => { setType(v); setStage('all'); }} options={[{ value: 'all', label: 'Tất cả' }, ...Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))]} />
-          <SelectBox label="Trạng thái" value={status} onChange={setStatus} options={[{ value: 'all', label: 'Tất cả' }, ...Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))]} />
+          <SelectBox label="Trạng thái" value={status} onChange={setStatus} options={[{ value: 'all', label: 'Tất cả' }, { value: 'active', label: 'Đang chạy (đang thi công + mới)' }, ...Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))]} />
           {stageOptions.length > 0 && <SelectBox label="Giai đoạn" value={stage} onChange={setStage} options={stageOptions} />}
           <SelectBox label="Trưởng dự án" value={pm} onChange={setPm} options={pmOptions} />
           <SelectBox label="Tình trạng" value={health} onChange={setHealth} options={[{ value: 'all', label: 'Tất cả' }, { value: 'late', label: 'Trễ tiến độ' }, { value: 'stuck', label: 'Kẹt giai đoạn' }, { value: 'mismatch', label: 'Lệch giai đoạn' }, { value: 'behind', label: 'Chậm kế hoạch' }, { value: 'overdueTasks', label: 'Có việc quá hạn' }, { value: 'budget', label: 'Chi vượt / sắp hết ngân sách / chi chưa có hợp đồng' }]} />

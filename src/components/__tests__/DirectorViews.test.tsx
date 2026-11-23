@@ -171,6 +171,18 @@ describe('Phòng Dự Án — lọc & phân trang', () => {
   });
 });
 
+describe('Phòng Dự Án — thẻ Đang chạy', () => {
+  it('bấm thẻ "Đang chạy" lọc ra đúng số công trình trên thẻ (đang thi công + mới), không lẫn hoàn thành/hủy/đấu thầu', () => {
+    const mk = (id: string, status: string) => ({ id, code: id, name: `CT ${id}`, type: 'construction', status, contractValue: 1_000, progress: 10, endDate: '2027-01-01', pmId: 'E1' }) as any;
+    const projects = [mk('A', 'processing'), mk('B', 'processing'), mk('C', 'new'), mk('D', 'completed'), mk('E', 'cancelled'), mk('F', 'col_bid')];
+    render(<ProjectsView projects={projects} tasks={[]} receipts={[]} payments={[]} employees={employees} customers={[]} onNavigateTab={vi.fn()} />);
+    const the = screen.getByText('Đang chạy').closest('button')!;
+    expect(the).toHaveTextContent('3');                         // 2 đang thi công + 1 mới
+    fireEvent.click(the);
+    expect(rangeText()).toContain('3');                          // danh sách cũng đúng 3 dòng
+  });
+});
+
 describe('Phòng Nhân Sự — chấm công hôm nay & lọc', () => {
   it('đếm đúng và lọc "chưa chấm công"', async () => {
     render(<HrView employees={employees} onNavigateTab={vi.fn()} />);
