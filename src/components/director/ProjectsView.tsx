@@ -22,7 +22,8 @@ interface Props {
 }
 
 const TYPE_LABEL: Record<string, string> = { construction: 'Xây dựng', furniture: 'Nội thất', mechanical: 'Cơ khí', general: 'Khác' };
-const STATUS_LABEL: Record<string, string> = { new: 'Mới', processing: 'Đang thi công', paused: 'Tạm dừng', maintenance: 'Bảo hành', completed: 'Hoàn thành', cancelled: 'Đã hủy' };
+const STATUS_LABEL: Record<string, string> = { new: 'Mới', processing: 'Đang thi công', paused: 'Tạm dừng', maintenance: 'Bảo hành', completed: 'Hoàn thành', cancelled: 'Đã hủy',
+  col_bid: 'Đấu thầu' /* trạng thái của dự án đang ở cột Đấu thầu; trước đây không có nhãn nên hiện nguyên mã col_bid */ };
 const STATUS_TONE: Record<string, Tone> = { new: 'sky', processing: 'emerald', paused: 'amber', maintenance: 'indigo', completed: 'slate', cancelled: 'rose' };
 /** Màu thanh tiến độ theo mức (đỏ < 30%, vàng < 60%, xanh dương < 100%, xanh lá = 100%) */
 const TONE_OF_LEVEL = { bad: 'rose', warn: 'amber', blue: 'sky', ok: 'emerald' } as const;
