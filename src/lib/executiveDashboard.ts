@@ -162,7 +162,10 @@ export function cashflowByDay(receipts: Receipt[], payments: Payment[], today: s
 
 export const CATEGORY_LABELS: Record<string, string> = {
   material: 'Vật tư', labor: 'Nhân công', shipping: 'Vận chuyển', machinery: 'Máy móc / thiết bị', general: 'Quản lý chung',
-  subcontractor_advance: 'Tạm ứng thầu phụ', site_expense: 'Chi phí công trường', other: 'Khác',
+  subcontractor_advance: 'Tạm ứng thầu phụ', site_expense: 'Chi phí công trường',
+  // Hai hạng mục phiếu chi thực tế đang có nhưng trước đây không có nhãn nên bị gộp hiển thị chung là "Khác" (biểu đồ hiện 3 dòng "Khác")
+  supplier_payment: 'Thanh toán nhà cung cấp', salary_advance: 'Tạm ứng lương',
+  other: 'Khác',
 };
 /** Cơ cấu chi (phiếu đã duyệt) theo hạng mục, lớn → nhỏ. */
 export function spendByCategory(payments: Payment[]): { key: string; label: string; amount: number; pct: number }[] {

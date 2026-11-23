@@ -51,6 +51,13 @@ describe('Phòng dự án — việc hôm nay / quá hạn / chưa làm', () => 
   });
 });
 
+describe('Cơ cấu chi theo hạng mục', () => {
+  it('thanh toán NCC và tạm ứng lương có nhãn riêng, không gộp chung "Khác"', () => {
+    const r = spendByCategory([pay({ category: 'supplier_payment', amount: 600 }), pay({ category: 'salary_advance', amount: 300 }), pay({ category: 'other', amount: 100 })]);
+    expect(r.map(x => x.label)).toEqual(['Thanh toán nhà cung cấp', 'Tạm ứng lương', 'Khác']);
+  });
+});
+
 describe('Tài chính từng công trình', () => {
   it('đã chi chỉ tính phiếu ĐÃ DUYỆT, loại nạp quỹ; chi chờ duyệt tách riêng', () => {
     const rows = buildProjectFinance([proj({})], [rec({ amount: 600 })], [
