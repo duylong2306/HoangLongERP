@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { dbService } from '../lib/dbService';
 import { createMaterialProposalsFromItems } from '../lib/materialProposals';
+import { ordersToVoidOnProposalDelete } from '../lib/proposalVoid';   // hủy đơn treo trước khi xóa đề xuất đã hủy
 import { ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
 import {
   Boxes,
@@ -603,6 +604,31 @@ export default function MaterialCoordination({
     return Math.max(0, Math.min(DAYS_TO_AUTO_DELETE, remain));
   };
 
+  // Hủy hẳn các đơn mua hàng "treo" của 1 đề xuất SẮP BỊ XÓA vĩnh viễn. Hủy đề xuất không tự hủy đơn;
+  // chi phí công trình chỉ bỏ các đơn đó nhờ thấy đề xuất ở trạng thái 'cancelled'. Xóa đề xuất đi
+  // thì mất dấu hiệu → đơn quay lại bị tính vào chi phí. Chỉ hủy đơn chắc chắn thừa (xem proposalVoid.ts).
+  // Trả về true nếu có thể xóa đề xuất; lỗi đọc dữ liệu → trả false để KHÔNG xóa (an toàn hơn xóa nhầm).
+  const voidDanglingOrdersBeforeDelete = async (p: any): Promise<boolean> => {
+    try {
+      // Đọc MỚI từ server (không dùng state có thể cũ) để chắc đơn chưa kịp bị thanh toán/nhận hàng
+      const [orders, liabilities] = await Promise.all([
+        dbService.purchaseOrders.list(),
+        dbService.accountingLiabilities.list(),
+      ]);
+      const recorded = new Set<string>();
+      (liabilities || []).forEach((l: any) => {
+        if (Array.isArray(l?.recordedPurchaseOrderIds)) l.recordedPurchaseOrderIds.forEach((id: string) => recorded.add(id));
+      });
+      for (const o of ordersToVoidOnProposalDelete(p, orders, recorded)) {
+        await dbService.purchaseOrders.save({ ...o, status: 'cancelled' });
+      }
+      return true;
+    } catch (e) {
+      console.error('Lỗi hủy đơn treo trước khi xóa đề xuất:', e);
+      return false;
+    }
+  };
+
   // Tự động xóa các đề xuất HỦY quá 30 ngày (chạy mỗi khi proposals thay đổi)
   const cleanupCancelledProposals = React.useCallback(async () => {
     try {
@@ -611,6 +637,7 @@ export default function MaterialCoordination({
       for (const p of cancelled) {
         const base = cancelledAtMs(p);
         if (base && Date.now() - base > DAYS_TO_AUTO_DELETE * DAY_MS) {
+          if (!(await voidDanglingOrdersBeforeDelete(p))) continue; // chưa dọn được đơn → để lần sau, không xóa
           await dbService.materialProposals.delete(p.id).catch(() => {});
           deleted++;
         }
@@ -857,6 +884,11 @@ export default function MaterialCoordination({
       `⚠️ Xóa VĨNH VIỄN đề xuất ${p.code} (dự án ${p.projectName}) khỏi hệ thống?\nThao tác này không thể hoàn tác.`,
       "Xác nhận xóa vĩnh viễn",
       async () => {
+        // Hủy đơn treo của đề xuất trước, nếu không đọc được dữ liệu thì không xóa
+        if (!(await voidDanglingOrdersBeforeDelete(p))) {
+          showNotification('Không thể kiểm tra các đơn mua hàng của đề xuất này, vui lòng thử lại.', 'Chưa xóa', 'warning');
+          return;
+        }
         await dbService.materialProposals.delete(p.id).catch(() => {});
         window.dispatchEvent(new CustomEvent('hl-material-proposals-updated'));
         showNotification(`Đã xóa vĩnh viễn đề xuất ${p.code}.`, 'Đã xóa', 'info');
