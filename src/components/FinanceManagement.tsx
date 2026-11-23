@@ -1832,13 +1832,32 @@ export default function FinanceManagement({
       isAuto: false,
       isOpeningDebt: true,
     }));
+    // XÁC NHẬN trước khi ghi: nút này GHI ĐÈ bản ghi opbal_cust_<mã KH> (đặt lại "đã thu" = 0). Chỉ ghi các bản ghi
+    // MỚI hoặc có số tiền/tên KHÁC hiện tại; bản ghi đã khớp danh mục khách hàng thì bỏ qua (không đụng).
+    const existingRec = (id: string) => (customReceivables || []).find((r: any) => r.id === id);
+    const recChanges = entries.map((e: any) => {
+      const ex: any = existingRec(e.id);
+      const exOpening = ex ? ((ex.openingDebt ?? (ex.isOpeningDebt ? ex.contractValue : 0)) || 0) : 0;
+      return { e, isNew: !ex, changed: !!ex && (exOpening !== e.openingDebt || ex.investor !== e.investor), exOpening };
+    });
+    const recToWrite = recChanges.filter(x => x.isNew || x.changed);
+    if (recToWrite.length === 0) {
+      addToast({ title: 'ℹ️ Đã khớp', message: `Công nợ đầu kỳ của ${entries.length} khách hàng đã khớp danh mục — không có gì để cập nhật.`, type: 'info' });
+      return;
+    }
+    const recLines = recToWrite.slice(0, 8).map(x => x.isNew
+      ? `  • ${x.e.investor}: THÊM MỚI ${x.e.openingDebt.toLocaleString('vi-VN')}đ`
+      : `  • ${x.e.investor}: ${x.exOpening.toLocaleString('vi-VN')}đ → ${x.e.openingDebt.toLocaleString('vi-VN')}đ`).join('\n');
+    if (!window.confirm(`⚠️ CẬP NHẬT CÔNG NỢ ĐẦU KỲ (Công nợ Thu)\n\n` +
+      `Sẽ ghi ${recToWrite.length}/${entries.length} khách hàng (${recChanges.filter(x => x.isNew).length} mới, ${recChanges.filter(x => x.changed).length} đổi số tiền):\n${recLines}${recToWrite.length > 8 ? `\n  … và ${recToWrite.length - 8} khách hàng khác` : ''}\n\n` +
+      `Số "Đã thu" ghi trên các dòng này sẽ đặt lại về 0. Tiếp tục?`)) return;
     setCustomReceivables(prev => {
       const map = new Map(prev.map(r => [r.id, r]));
-      entries.forEach(e => map.set(e.id, e));
+      recToWrite.forEach(({ e }) => map.set(e.id, { ...(map.get(e.id) || {}), ...e }));   // gộp lên bản ghi cũ để không mất field khác trong state
       return Array.from(map.values());
     });
     let saved = 0;
-    await Promise.all(entries.map(async (e: any) => {
+    await Promise.all(recToWrite.map(async ({ e }: any) => {
       try {
         await dbService.accountingReceivables.save(e);
         saved++;
@@ -1854,9 +1873,9 @@ export default function FinanceManagement({
       }
     }));
     addToast({
-      title: saved === opening.length ? '✅ Cập nhật Công Nợ Đầu Kỳ' : '⚠️ Cập nhật Công Nợ Đầu Kỳ',
-      message: `Đã đưa ${opening.length} khách hàng (có công nợ đầu kỳ) vào Công nợ Thu${saved < opening.length ? ` — ${opening.length - saved} bản ghi lưu thất bại` : ''}.`,
-      type: saved === opening.length ? 'success' : 'warning',
+      title: saved === recToWrite.length ? '✅ Cập nhật Công Nợ Đầu Kỳ' : '⚠️ Cập nhật Công Nợ Đầu Kỳ',
+      message: `Đã đưa ${recToWrite.length} khách hàng (có công nợ đầu kỳ) vào Công nợ Thu${saved < recToWrite.length ? ` — ${recToWrite.length - saved} bản ghi lưu thất bại` : ''}.`,
+      type: saved === recToWrite.length ? 'success' : 'warning',
     });
   };
 
@@ -1929,13 +1948,33 @@ export default function FinanceManagement({
       notes: 'Cập nhật từ Công Nợ đầu kỳ (NCC Vật tư)',
       isOpeningDebt: true,
     }));
+    // XÁC NHẬN trước khi ghi: nút này GHI ĐÈ bản ghi opbal_sub_/opbal_sup_<mã> (đặt lại "đã trả" = 0, ghi đè ghi chú).
+    // Chỉ ghi các bản ghi MỚI hoặc có công nợ đầu kỳ/tên KHÁC hiện tại; bản ghi đã khớp danh mục thì bỏ qua (không đụng).
+    const existingLiab = (id: string) => customLiabilities.find(l => l.id === id);
+    const liabChanges = entries.map((e: any) => {
+      const ex: any = existingLiab(e.id);
+      const exOpening = ex ? ((ex.openingDebt ?? (ex.isOpeningDebt ? ex.value : 0)) || 0) : 0;
+      return { e, isNew: !ex, changed: !!ex && (exOpening !== e.openingDebt || ex.name !== e.name || ex.category !== e.category), exOpening };
+    });
+    const liabToWrite = liabChanges.filter(x => x.isNew || x.changed);
+    if (liabToWrite.length === 0) {
+      addToast({ title: 'ℹ️ Đã khớp', message: `Công nợ đầu kỳ của ${entries.length} đối tượng (Thầu phụ/NCC) đã khớp danh mục — không có gì để cập nhật.`, type: 'info' });
+      return;
+    }
+    const liabLines = liabToWrite.slice(0, 8).map(x => x.isNew
+      ? `  • ${x.e.name}: THÊM MỚI ${x.e.openingDebt.toLocaleString('vi-VN')}đ`
+      : `  • ${x.e.name}: ${x.exOpening.toLocaleString('vi-VN')}đ → ${x.e.openingDebt.toLocaleString('vi-VN')}đ`).join('\n');
+    if (!window.confirm(`⚠️ CẬP NHẬT CÔNG NỢ ĐẦU KỲ (Công nợ Trả)\n\n` +
+      `Sẽ ghi ${liabToWrite.length}/${entries.length} đối tượng (${liabChanges.filter(x => x.isNew).length} mới, ${liabChanges.filter(x => x.changed).length} đổi số tiền/tên):\n${liabLines}${liabToWrite.length > 8 ? `\n  … và ${liabToWrite.length - 8} đối tượng khác` : ''}\n\n` +
+      `Số "Đã trả" và ghi chú ghi trên các dòng này sẽ bị ghi đè (số đã trả thực tế vẫn tính lại từ phiếu chi). Tiếp tục?`)) return;
     setCustomLiabilities(prev => {
       const map = new Map(prev.map(l => [l.id, l]));
-      entries.forEach(e => map.set(e.id, e));
+      // Gộp lên bản ghi cũ: không làm mất recordedPurchaseOrderIds (các đơn đã ghi nhận) trong state
+      liabToWrite.forEach(({ e }) => map.set(e.id, { ...(map.get(e.id) || {}), ...e }));
       return Array.from(map.values());
     });
     let saved = 0;
-    await Promise.all(entries.map(async (e: any) => {
+    await Promise.all(liabToWrite.map(async ({ e }: any) => {
       try {
         // Lưu đầy đủ (giữ is_opening_debt) khi bảng đã có cột (đã chạy migration).
         await dbService.accountingLiabilities.save(e);
@@ -1953,7 +1992,7 @@ export default function FinanceManagement({
         }
       }
     }));
-    const total = subOpening.length + supOpening.length;
+    const total = liabToWrite.length;
     addToast({
       title: saved === total ? '✅ Cập nhật Công Nợ Đầu Kỳ' : '⚠️ Cập nhật Công Nợ Đầu Kỳ',
       message: `Đã đưa ${total} đối tượng (Thầu Phụ/NCC) vào Công nợ Trả${saved < total ? ` — ${total - saved} bản ghi lưu thất bại` : ''}.`,
