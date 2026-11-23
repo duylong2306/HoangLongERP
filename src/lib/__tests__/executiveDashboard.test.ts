@@ -18,6 +18,11 @@ describe('Ngày tháng', () => {
     expect(toDay('xyz')).toBe('');
     expect(toDay(undefined)).toBe('');
   });
+  it('toDay hiểu số serial ngày của Excel (dữ liệu nhân sự nhập từ Excel), không biến thành năm 46110', () => {
+    expect(toDay('46110')).toBe('2026-03-29');
+    expect(toDay('45658')).toBe('2025-01-01');
+    expect(toDay('46110.5')).toBe('2026-03-29');
+  });
   it('addDays / diffDays qua ranh giới tháng', () => {
     expect(addDays('2026-10-01', -1)).toBe('2026-09-30');
     expect(addDays('2026-12-31', 1)).toBe('2027-01-01');

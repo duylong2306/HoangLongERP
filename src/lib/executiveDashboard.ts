@@ -8,6 +8,12 @@ export function toDay(value?: string | null): string {
   if (!value) return '';
   const s = String(value).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // Ngày dạng SỐ SERIAL của Excel (vd "46110" = 29/03/2026) — gặp ở dữ liệu nhân sự nhập từ file Excel. Nếu để rơi xuống new Date("46110")
+  // thì JS hiểu là NĂM 46110 và màn hình hiện rác "-0/-0/4611". Gốc ngày Excel = 30/12/1899; chỉ nhận dải hợp lý (2009–2119).
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    const n = Math.floor(Number(s));
+    if (n >= 40000 && n <= 80000) return new Date(Date.UTC(1899, 11, 30) + n * 86400000).toISOString().slice(0, 10);
+  }
   const vn = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); // 7/9/2026 hoặc 07/09/2026 …
   if (vn) return `${vn[3]}-${vn[2].padStart(2, '0')}-${vn[1].padStart(2, '0')}`;
   const d = new Date(s);
