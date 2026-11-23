@@ -189,6 +189,8 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
   const matDays = useMemo(() => materialByDay(orders, matProposals, today, 14), [orders, matProposals, today]);
   const matStatus = useMemo(() => proposalStatusCounts(matProposals), [matProposals]);
   const payable = useMemo(() => supplierPayable(orders), [orders]);
+  // Tổng chi thực tế: mọi phiếu chi ĐÃ DUYỆT, trừ nạp quỹ tiền mặt (không phải chi phí)
+  const totalCashOut = useMemo(() => payments.filter(p => p.status === 'approved' && (p.category as string) !== 'cash_fund').reduce((s, p) => s + (p.amount || 0), 0), [payments]);
 
   const pendingPays = payments.filter(p => p.status === 'pending' && (p.category as string) !== 'cash_fund');
   const pendingPayAmount = pendingPays.reduce((s, p) => s + (p.amount || 0), 0);
@@ -269,9 +271,15 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
           <Stat label="Đã thu" value={fmtFull(totals.collected)} sub={`${totals.collectedPct}% giá trị hợp đồng`} tone="emerald" />
           <Stat label="Đã chi (đã duyệt)" value={fmtFull(totals.spent)} sub={`${totals.spentPct}% giá trị hợp đồng`} tone="rose" />
           <Stat label="Còn phải thu" value={fmtFull(totals.receivable)} sub="Cộng số còn nợ của từng công trình (công trình thu vượt không bù trừ)" tone="amber" />
-          <Stat label="Thu − Chi (dòng tiền)" value={fmtFull(totals.cashMargin)} sub={totals.cashMargin >= 0 ? 'Đang dương' : 'Đang âm'} tone={totals.cashMargin >= 0 ? 'sky' : 'rose'} />
+          <Stat label="Thu − Chi theo công trình" value={fmtFull(totals.cashMargin)} sub={totals.cashMargin >= 0 ? 'Đang dương · chưa trừ chi ngoài công trình' : 'Đang âm · chưa trừ chi ngoài công trình'} tone={totals.cashMargin >= 0 ? 'sky' : 'rose'} />
           <Stat label="Nợ nhà cung cấp" value={fmtFull(payable)} sub="Đơn mua chưa thanh toán hết" tone={payable > 0 ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
         </div>
+        {/* Tổng chi THỰC TẾ toàn doanh nghiệp: cộng mọi phiếu chi đã duyệt (trừ nạp quỹ), kể cả chi chưa gắn vào công trình nào
+            (trả nợ nhà cung cấp đầu kỳ, chi chung…) — để Giám đốc không nhầm "Thu − Chi theo công trình" với tiền thật còn lại của công ty. */}
+        <p className="text-[11px] text-slate-600 mt-3" data-testid="tong-chi-thuc-te">
+          Tổng chi thực tế toàn doanh nghiệp (mọi phiếu chi đã duyệt): <b className="font-mono text-rose-600">{fmtFull(totalCashOut)}</b>
+          {' · '}chênh so với “Đã chi” theo công trình: <b className="font-mono">{fmtFull(totalCashOut - totals.spent)}</b>
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div><div className="flex justify-between text-[10.5px] text-slate-600 mb-1"><span>Đã thu / hợp đồng</span><b>{totals.collectedPct}%</b></div><Bar pct={totals.collectedPct} tone="emerald" h="h-2" /></div>
           <div><div className="flex justify-between text-[10.5px] text-slate-600 mb-1"><span>Đã chi / hợp đồng</span><b>{totals.spentPct}%</b></div><Bar pct={totals.spentPct} tone={totals.spentPct > 100 ? 'rose' : totals.spentPct >= 80 ? 'amber' : 'sky'} h="h-2" /></div>
@@ -344,7 +352,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
             )}
           </div>
         )}
-        <p className="text-[10px] text-slate-400 mt-2">“Đã chi” chỉ tính phiếu chi đã duyệt gắn với công trình (không tính nạp quỹ tiền mặt). Bấm vào một dòng để mở bảng công trình.</p>
+        <p className="text-[10px] text-slate-400 mt-2">“Đã chi” là số đã chi cho từng công trình, cùng cách tính với bảng Tổng chi phí của Phòng Dự án (tiền trả nhà cung cấp theo đơn mua hàng, thầu phụ, chi phí công trường…). Không gồm nạp quỹ tiền mặt và các khoản chi chưa gắn vào công trình nào. Bấm vào một dòng để mở bảng công trình.</p>
       </Card>
 
       {/* ── 5. Bốn phòng ban hôm nay ── */}

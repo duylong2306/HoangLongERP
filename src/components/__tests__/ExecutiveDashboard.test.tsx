@@ -51,6 +51,11 @@ describe('ExecutiveDashboard — Bảng điều hành Giám đốc', () => {
     expect(within(khoi).getByText('Đã thu').nextSibling).toHaveTextContent('500.000.000 đ');
     expect(within(khoi).getByText('Đã chi (đã duyệt)').nextSibling).toHaveTextContent('250.000.000 đ'); // 120 + 130, bỏ phiếu chờ duyệt
   });
+  it('tổng chi thực tế toàn doanh nghiệp: mọi phiếu chi đã duyệt (bỏ chờ duyệt), có nhãn Thu − Chi theo công trình', async () => {
+    await open();
+    expect(screen.getByText('Thu − Chi theo công trình')).toBeInTheDocument();
+    expect(screen.getByTestId('tong-chi-thuc-te')).toHaveTextContent('250.000.000 đ'); // 120 + 130; phiếu chờ duyệt 30tr không tính
+  });
   it('chi phí từng công trình: từng dòng + tổng cộng + cảnh báo vượt ngân sách', async () => {
     await open();
     const bang = screen.getByText('Chi phí từng công trình').closest('section')!;
