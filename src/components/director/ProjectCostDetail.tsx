@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
-import { X, ChevronDown } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { X, ChevronDown, FileSpreadsheet } from 'lucide-react';
 import type { Project } from '../../types';
 import { COST_GROUPS, type ProjectCost, type CostItem } from '../../lib/projectCost';
 import { fmtFull, dmy } from './kit';
+import { downloadProjectCostXlsx } from '../../lib/projectCostExport';
 
 // MÀN HÌNH "CHI TIẾT TỔNG CHI PHÍ" của 1 công trình (Bảng điều hành Giám đốc → Phòng Dự Án).
 // Máy tính: ngăn kéo bên phải (560px). Điện thoại: toàn màn hình, tiêu đề dưới tai thỏ (safe-area).
@@ -15,6 +16,16 @@ export default function ProjectCostDetail({ project, cost, items, onClose }: Pro
     const list = items.filter(i => i.group === g.key).sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.amount - a.amount);
     return { ...g, list, sum: list.reduce((s, i) => s + i.amount, 0) };
   }).filter(g => g.list.length > 0), [items]);
+  // Xuất Excel: thư viện exceljs chỉ được nạp khi bấm nút (nặng), nên có trạng thái đang tạo + báo lỗi tại chỗ
+  const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState('');
+  const exportXlsx = async () => {
+    if (exporting) return;
+    setExporting(true); setExportErr('');
+    try { await downloadProjectCostXlsx(project, cost, items); }
+    catch (e) { console.error('Lỗi xuất Excel chi phí công trình:', e); setExportErr('Không xuất được file Excel, vui lòng thử lại.'); }
+    finally { setExporting(false); }
+  };
   const biggest = groups.reduce((m, g) => (g.sum > (m?.sum ?? -1) ? g : m), null as (typeof groups)[number] | null);
 
   return (
@@ -28,9 +39,16 @@ export default function ProjectCostDetail({ project, cost, items, onClose }: Pro
             <h2 className="text-[16px] font-extrabold leading-snug break-words">{project.name}</h2>
             <div className="text-[11px] opacity-80 font-mono">{project.code}</div>
           </div>
+          {/* Nút Xuất Excel: nền trắng trong suốt trên thanh xanh, chữ trắng ghi inline (index.css ép .text-white về tối nên không dùng class) */}
+          <button type="button" onClick={exportXlsx} disabled={exporting || items.length === 0} aria-label="Xuất Excel" title="Xuất chi tiết chi phí ra file Excel"
+            className="shrink-0 h-9 px-3 rounded-xl inline-flex items-center gap-1.5 text-[12px] font-bold cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{ background: 'rgba(255,255,255,.18)', color: '#ffffff' }} data-testid="cost-detail-export">
+            <FileSpreadsheet className="w-4 h-4" /><span>{exporting ? 'Đang tạo…' : 'Xuất Excel'}</span>
+          </button>
           <button type="button" onClick={onClose} aria-label="Đóng" className="shrink-0 w-9 h-9 rounded-xl grid place-items-center cursor-pointer" style={{ background: 'rgba(255,255,255,.18)', color: '#ffffff' }} data-testid="cost-detail-close"><X className="w-5 h-5" /></button>
         </header>
 
+        {exportErr && <p className="px-4 py-2 text-[12px] font-semibold bg-rose-50 border-b border-rose-200" style={{ color: '#be123c' }} role="alert" data-testid="cost-detail-export-err">{exportErr}</p>}
         <div className="flex-1 overflow-y-auto" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}>
           {/* Tổng + đã chi / còn phải chi */}
           <section className="px-4 py-4 border-b border-slate-100">

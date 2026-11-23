@@ -1,5 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+
+// Xuất Excel: chỉ kiểm tra nút gọi đúng hàm với đúng dữ liệu (việc dựng file đã có test riêng ở lib/__tests__/projectCostExport.test.ts)
+const exportFn = vi.hoisted(() => vi.fn());
+vi.mock('../../lib/projectCostExport', () => ({ downloadProjectCostXlsx: exportFn }));
 import ProjectCostDetail from '../director/ProjectCostDetail';
 import { buildProjectCosts, buildProjectCostItems } from '../../lib/projectCost';
 
@@ -11,6 +15,29 @@ const inp: any = {
   advances: [], contracts: [],
 };
 const cost = buildProjectCosts(['P1'], inp).get('P1')!; const items = buildProjectCostItems('P1', inp);
+
+describe('ProjectCostDetail — Xuất Excel', () => {
+  beforeEach(() => { exportFn.mockReset(); });
+  it('bấm Xuất Excel gọi hàm xuất với công trình, tổng chi phí và danh sách khoản', async () => {
+    exportFn.mockResolvedValue(undefined);
+    render(<ProjectCostDetail project={proj} cost={cost} items={items} onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId('cost-detail-export'));
+    await waitFor(() => expect(exportFn).toHaveBeenCalledWith(proj, cost, items));
+    expect(screen.queryByTestId('cost-detail-export-err')).toBeNull();
+  });
+  it('xuất lỗi → báo ngay tại ngăn kéo, nút dùng lại được', async () => {
+    exportFn.mockRejectedValue(new Error('x'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<ProjectCostDetail project={proj} cost={cost} items={items} onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId('cost-detail-export'));
+    expect(await screen.findByTestId('cost-detail-export-err')).toHaveTextContent('Không xuất được file Excel');
+    expect(screen.getByTestId('cost-detail-export')).not.toBeDisabled();
+  });
+  it('công trình chưa có khoản chi → nút xuất bị khóa', () => {
+    render(<ProjectCostDetail project={proj} cost={buildProjectCosts(['P1'], { payments: [], orders: [], advances: [], contracts: [] }).get('P1')!} items={[]} onClose={() => {}} />);
+    expect(screen.getByTestId('cost-detail-export')).toBeDisabled();
+  });
+});
 
 describe('ProjectCostDetail', () => {
   it('hiện tổng, đã chi, còn phải chi và từng nhóm có khoản; nhóm rỗng bị ẩn', () => {
