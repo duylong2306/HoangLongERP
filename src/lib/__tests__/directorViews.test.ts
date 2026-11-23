@@ -71,6 +71,25 @@ describe('Nhân sự hôm nay — từng người', () => {
   });
 });
 
+describe('Thầu phụ — phiếu chi chỉ ghi đề xuất gốc', () => {
+  it('lần theo relatedAdvanceId để lấy mã thầu phụ; phiếu có mã sẵn không bị tính đôi', () => {
+    const rows = buildSubcontractorRows(
+      [{ id: 'S1', name: 'Tổ A' }],
+      [{ subcontractorId: 'S1', isApproved: true, contractValue: 1000, projectId: 'P1' }],
+      [
+        // phiếu không ghi mã thầu phụ, nhưng đề xuất gốc của nó có
+        { status: 'approved', amount: 300, relatedAdvanceId: 'ADV1' },
+        // phiếu ghi sẵn mã thầu phụ, đề xuất gốc cũng trỏ về cùng thầu phụ: chỉ tính 1 lần
+        { subcontractorId: 'S1', status: 'approved', amount: 200, relatedAdvanceId: 'ADV1' },
+        // phiếu của đề xuất khác (thầu phụ khác): không tính
+        { status: 'approved', amount: 999, relatedAdvanceId: 'ADV2' },
+      ],
+      [{ id: 'ADV1', subcontractorId: 'S1' }, { id: 'ADV2', subcontractorId: 'S9' }]);
+    expect(rows[0].paid).toBe(500);
+    expect(rows[0].remaining).toBe(500);
+  });
+});
+
 describe('Thầu phụ — tổng hợp từng thầu phụ', () => {
   it('chỉ tính hợp đồng đã duyệt, phiếu chi đã duyệt; còn phải chi không âm', () => {
     const rows = buildSubcontractorRows(

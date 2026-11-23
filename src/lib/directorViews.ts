@@ -78,10 +78,16 @@ export interface SubcontractorRow {
 }
 const contractAmount = (q: any) => Number(q?.contractValue ?? q?.totalAmount ?? 0) || 0;
 export function buildSubcontractorRows(subs: any[], contracts: any[], payments: any[], advances: any[]): SubcontractorRow[] {
+  // Nhiều phiếu chi trả thầu phụ (nhất là đề xuất "chi phí công trình") KHÔNG ghi mã thầu phụ trên phiếu, chỉ ghi
+  // đề xuất gốc (relatedAdvanceId) — mã thầu phụ nằm ở đề xuất đó. Phải lần theo đề xuất, cùng cách màn "Tổng chi phí"
+  // công trình đang làm (projectCost.resolveSubId), nếu không "Đã chi" bị thiếu và "Còn phải chi" bị cao hơn thực tế.
+  const advById = new Map<string, any>((advances || []).map(a => [a.id, a] as const));
+  const subOfPayment = (p: any): string | undefined =>
+    p.subcontractorId || advById.get(p.relatedAdvanceId)?.subcontractorId || undefined;
   return (subs || []).map(sub => {
     const mine = (contracts || []).filter(c => c.subcontractorId === sub.id);
     const approved = mine.filter(c => c.isApproved === true);
-    const pays = (payments || []).filter(p => p.subcontractorId === sub.id);
+    const pays = (payments || []).filter(p => subOfPayment(p) === sub.id);
     const paid = pays.filter(p => p.status === 'approved').reduce((s, p) => s + (p.amount || 0), 0);
     const contractValue = approved.reduce((s, c) => s + contractAmount(c), 0);
     return {
