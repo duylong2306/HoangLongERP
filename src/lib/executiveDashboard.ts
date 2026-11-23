@@ -237,15 +237,26 @@ export interface AttendanceToday {
   onLeaveNames: string[];
   pendingLeaves: number;
 }
+// Quy tắc DÙNG CHUNG cho employeeTodayStates (danh sách từng người) và summarizeAttendance (các thẻ tổng) để hai nơi không bao giờ lệch nhau.
+/** Dòng chấm công cho thấy người đó CÓ MẶT: loại vắng (missing), không phép (unexcused), nghỉ (leave) và excused (nghỉ phép được duyệt — hệ thống ghi sẵn dòng này). */
+const isPresentLog = (l: any): boolean => l.status !== 'missing' && l.status !== 'unexcused' && l.status !== 'leave' && l.status !== 'excused';
+/** Đơn trong bảng nghỉ phép có phải NGHỈ THẬT không: loại "Báo cáo…" (giải trình chấm công, người đó vẫn đi làm) và "Tạm ứng…" (ứng lương). */
+const isRealLeaveType = (type: any): boolean => !/^(báo cáo|tạm ứng)/i.test(String(type || '').trim());
 export type TodayState = 'present' | 'leave' | 'missing';
 /** Trạng thái hôm nay của TỪNG nhân sự cần chấm công: đã chấm công / nghỉ có phép / chưa chấm công (cùng quy tắc với summarizeAttendance). */
 export function employeeTodayStates(employees: Employee[], logs: any[], leaves: any[], today: string): Map<string, TodayState> {
   const out = new Map<string, TodayState>();
-  const presentIds = new Set((logs || [])
-    .filter(l => toDay(l.date) === today && l.status !== 'missing' && l.status !== 'unexcused' && l.status !== 'leave').map(l => l.empId));
-  const leaveIds = new Set<string>();
+  const todayLogs = (logs || []).filter(l => toDay(l.date) === today);
+  // "Đã chấm công" = có dòng chấm công thật hôm nay. KHÔNG tính: vắng (missing), không phép (unexcused), nghỉ (leave) và
+  // "excused" = NGHỈ PHÉP ĐƯỢC DUYỆT (hệ thống ghi dòng chấm công trạng thái excused, notes "Nghỉ phép được duyệt…") — người đang nghỉ phép
+  // không phải người đi làm; trước đây excused bị lọt vào "đã chấm công" nên thẻ hiện 11/11 trong khi 1 người đang nghỉ phép.
+  const presentIds = new Set(todayLogs.filter(isPresentLog).map(l => l.empId));
+  const leaveIds = new Set<string>(todayLogs.filter(l => l.status === 'excused').map(l => l.empId));
   for (const l of leaves || []) {
     if (l.status !== 'approved') continue;
+    // Chỉ NGHỈ THẬT mới là "nghỉ có phép". Bảng đơn còn chứa "Báo cáo quên chấm công / lỗi chấm ra ca / nghỉ ca…" (giải trình chấm công,
+    // người đó vẫn đi làm) và "Tạm ứng lương…" — các loại này không được tính là nghỉ có phép.
+    if (!isRealLeaveType(l.type)) continue;
     const from = toDay(l.fromDate), to = toDay(l.toDate || l.fromDate);
     if (from && from <= today && today <= (to || from)) leaveIds.add(l.empId);
   }
@@ -268,14 +279,12 @@ export function summarizeAttendance(employees: Employee[], logs: any[], leaves: 
   const staff = employees.filter(e => (!e.status || e.status === 'working'));
   const staffIds = new Set(staff.map(e => e.id));
   // Có mặt = đã có bản ghi chấm công hôm nay và không phải trạng thái vắng/không phép (cùng quy tắc với màn Nhân sự)
-  const presentIds = new Set(
-    (logs || [])
-      .filter(l => toDay(l.date) === today && l.status !== 'missing' && l.status !== 'unexcused' && l.status !== 'leave')
-      .map(l => l.empId).filter(id => staffIds.has(id))
-  );
-  const leaveIds = new Set<string>();
+  const todayLogs = (logs || []).filter(l => toDay(l.date) === today);
+  const presentIds = new Set(todayLogs.filter(isPresentLog).map(l => l.empId).filter(id => staffIds.has(id)));
+  // Nghỉ có phép = dòng chấm công excused hôm nay, hoặc đơn nghỉ THẬT đã duyệt bao trùm hôm nay (không tính đơn "Báo cáo…" / "Tạm ứng…")
+  const leaveIds = new Set<string>(todayLogs.filter(l => l.status === 'excused').map(l => l.empId).filter(id => staffIds.has(id) && !presentIds.has(id)));
   for (const l of leaves || []) {
-    if (l.status !== 'approved') continue;
+    if (l.status !== 'approved' || !isRealLeaveType(l.type)) continue;
     const from = toDay(l.fromDate), to = toDay(l.toDate || l.fromDate);
     if (from && from <= today && today <= (to || from) && staffIds.has(l.empId) && !presentIds.has(l.empId)) leaveIds.add(l.empId);
   }

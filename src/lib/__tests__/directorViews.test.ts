@@ -61,6 +61,24 @@ describe('Nhân sự hôm nay — từng người', () => {
     expect(m.get('B')).toBe('leave');
     expect(m.get('C')).toBe('missing');
   });
+  it('dòng chấm công excused (nghỉ phép được duyệt) là NGHỈ CÓ PHÉP, không phải đã chấm công', () => {
+    const m = employeeTodayStates([{ id: 'A' }, { id: 'B' }] as any,
+      [{ empId: 'A', date: TODAY, status: 'excused' }, { empId: 'B', date: TODAY, status: 'late' }], [], TODAY);
+    expect(m.get('A')).toBe('leave');
+    expect(m.get('B')).toBe('present');   // đi muộn vẫn là có mặt
+  });
+  it('đơn "Báo cáo…" và "Tạm ứng…" đã duyệt KHÔNG làm thành nghỉ có phép; nghỉ phép thật thì có', () => {
+    const emps = [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }] as any;
+    const m = employeeTodayStates(emps, [], [
+      { empId: 'A', type: 'Báo cáo quên chấm công', status: 'approved', fromDate: TODAY, toDate: TODAY },
+      { empId: 'B', type: 'Tạm ứng lương nhanh', status: 'approved', fromDate: TODAY, toDate: TODAY },
+      { empId: 'C', type: 'Nghỉ phép năm', status: 'approved', fromDate: TODAY, toDate: TODAY },
+    ], TODAY);
+    expect(m.get('A')).toBe('missing');
+    expect(m.get('B')).toBe('missing');
+    expect(m.get('C')).toBe('leave');
+    expect(m.get('D')).toBe('missing');
+  });
   it('số ngày công trong tháng: mỗi ngày tính 1, bỏ ngày vắng', () => {
     const w = workedDaysByEmployee([
       { empId: 'A', date: '2026-10-01', status: 'working' }, { empId: 'A', date: '2026-10-01', status: 'working' }, { empId: 'A', date: '2026-10-02', status: 'present' },

@@ -161,6 +161,24 @@ describe('Nhân sự — chấm công hôm nay', () => {
   });
 });
 
+describe('Nhân sự hôm nay — nghỉ phép được duyệt và đơn giải trình chấm công', () => {
+  const emps = [
+    { id: 'A', name: 'An', status: 'working' }, { id: 'B', name: 'Bình', status: 'working' }, { id: 'C', name: 'Cường', status: 'working' }, { id: 'D', name: 'Dũng', status: 'working' },
+  ] as any;
+  it('dòng excused = nghỉ có phép (không tính có mặt); đơn Báo cáo/Tạm ứng không phải nghỉ; đi muộn vẫn có mặt', () => {
+    const s = summarizeAttendance(emps,
+      [{ empId: 'A', date: TODAY, status: 'valid' }, { empId: 'B', date: TODAY, status: 'excused' }, { empId: 'C', date: TODAY, status: 'late' }],
+      [{ empId: 'B', type: 'Nghỉ phép năm', status: 'approved', fromDate: TODAY, toDate: TODAY },
+       { empId: 'D', type: 'Báo cáo quên chấm công', status: 'approved', fromDate: TODAY, toDate: TODAY }], TODAY);
+    expect(s.expected).toBe(4);
+    expect(s.present).toBe(2);              // An + Cường (đi muộn)
+    expect(s.onLeave).toBe(1);              // Bình
+    expect(s.onLeaveNames).toEqual(['Bình']);
+    expect(s.notChecked).toBe(1);           // Dũng: chỉ có đơn giải trình, chưa chấm công
+    expect(s.notCheckedNames).toEqual(['Dũng']);
+  });
+});
+
 describe('Cảnh báo Giám đốc', () => {
   it('xếp nghiêm trọng trước; chỉ cảnh báo chưa chấm công sau 9h', () => {
     const rows = buildProjectFinance([proj({ id: 'A', contractValue: 1000 })], [], [pay({ projectId: 'A', amount: 1500 })], TODAY);
