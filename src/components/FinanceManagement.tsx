@@ -14,7 +14,7 @@ import VoucherPrintModal from './VoucherPrintModal';
 import * as XLSX from 'xlsx';
 import { exportToExcel, importFromExcel, formatDateForFile, EXCEL_HEADERS } from '../lib/excelUtils';
 import { numberToVietnameseWords } from '../lib/numberToWords';
-import { getPoPayableRemaining, planPoAllocations, planPoRevert, planCatchUpAllocation, buildApprovedAllocations, planReconcileSuppliers, type PoAllocation, type ReconcileSupplierPlan } from '../lib/poAllocation';
+import { getPoPayableRemaining, planPoAllocations, planPoRevert, planCatchUpAllocation, buildApprovedAllocations, planReconcileSuppliers, isReconcileEligible, reconcilePlanSignature, poCreatedDate, type PoAllocation, type ReconcileSupplierPlan } from '../lib/poAllocation';
 import { nextPaymentCode } from '../lib/paymentCode';
 
 import SearchableCustomerSelect from './SearchableCustomerSelect';
@@ -2651,58 +2651,134 @@ export default function FinanceManagement({
   // Phân trang riêng cho tab Công nợ Trả
   const [liabilityPage, setLiabilityPage] = useState(1);
   // ── Đối chiếu công nợ NCC: phần tiền đã chi nhưng chưa gắn vào đơn → xem trước rồi áp vào các đơn cũ nhất còn nợ ──
+  // Dữ liệu nguồn được TẢI MỚI từ server mỗi lần mở hộp thoại và ngay trước khi áp (không dùng state cũ) để tránh
+  // ghi đè thay đổi của người khác. Đơn nháp/đã hủy/thuộc đề xuất vật tư đã hủy bị loại (isReconcileEligible).
+  type ReconcileSrc = { orders: PurchaseOrder[]; payments: Payment[]; cancelledIds: Set<string> };
   const [reconcileOpen, setReconcileOpen] = useState(false);
+  const [reconcileSrc, setReconcileSrc] = useState<ReconcileSrc | null>(null);
+  const [reconcileLoading, setReconcileLoading] = useState(false);
   const [reconcileSkip, setReconcileSkip] = useState<Record<string, boolean>>({});   // NCC bị bỏ tick (không áp)
   const [reconcileBusy, setReconcileBusy] = useState(false);
-  const reconcilePlans = useMemo<ReconcileSupplierPlan[]>(() => {
-    if (!reconcileOpen) return [];
+  // Đơn đang xem chi tiết trong hộp đối chiếu (kế toán bấm mã đơn để rà soát trước khi áp)
+  const [reconcileDetail, setReconcileDetail] = useState<{ poId: string; supplierId: string } | null>(null);
+  const loadReconcileSrc = async (): Promise<ReconcileSrc> => {
+    const [orders, pays, props] = await Promise.all([
+      dbService.purchaseOrders.list(), dbService.payments.list(), dbService.materialProposals.list(),
+    ]);
+    return {
+      orders: orders as PurchaseOrder[],
+      payments: pays as Payment[],
+      cancelledIds: new Set<string>((props || []).filter((x: any) => x?.status === 'cancelled').map((x: any) => x.id as string)),
+    };
+  };
+  // Dựng đầu vào cho từng NCC từ dữ liệu nguồn (cùng cách tính với buildAutoAllocateContext / catchUpPaymentsOnRecord)
+  const buildReconcileInputs = (src: ReconcileSrc) => {
     const nccLiabs = customLiabilities.filter(l => l.category === 'Nhà Cung Cấp');
     const recordedIds = new Set<string>();
     nccLiabs.forEach(l => (l.recordedPurchaseOrderIds || []).forEach((id: string) => recordedIds.add(id)));
     const bySupplier = new Map<string, PurchaseOrder[]>();
-    purchaseOrders.forEach(po => {
-      if (!po.supplierId || !recordedIds.has(po.id)) return;   // chỉ đơn đã ghi nhận công nợ và có mã NCC (không đoán theo tên)
+    src.orders.forEach(po => {
+      if (!po.supplierId || !recordedIds.has(po.id)) return;                  // chỉ đơn đã ghi nhận công nợ và có mã NCC (không đoán theo tên)
+      if (!isReconcileEligible(po, src.cancelledIds)) return;                 // bỏ đơn nháp/đã hủy/đề xuất đã hủy
       (bySupplier.get(po.supplierId) || bySupplier.set(po.supplierId, []).get(po.supplierId)!).push(po);
     });
-    const inputs = Array.from(bySupplier, ([supplierId, pool]) => {
+    return Array.from(bySupplier, ([supplierId, pool]) => {
       const name = pool[0].supplierName || supplierId;
-      // Cùng cách tính với buildAutoAllocateContext / catchUpPaymentsOnRecord
       const openingDebt = nccLiabs.filter(l => l.name === name).reduce((sum, l) => sum + ((l.openingDebt ?? (l.isOpeningDebt ? l.value : 0)) || 0), 0);
-      const totalPaid = payments
+      const totalPaid = src.payments
         .filter(pay => pay.status === 'approved' && (pay.supplierId
           ? pay.supplierId === supplierId
           : pay.recipient === name && !pay.subcontractorId && pay.category !== 'subcontractor_advance'))
         .reduce((sum, pay) => sum + (pay.amount || 0), 0);
       return { supplierId, name, pool, openingDebt, totalPaid };
     });
-    return planReconcileSuppliers(inputs);
-  }, [reconcileOpen, customLiabilities, purchaseOrders, payments]);
+  };
+  const reconcilePlans = useMemo<ReconcileSupplierPlan[]>(
+    () => (reconcileOpen && reconcileSrc ? planReconcileSuppliers(buildReconcileInputs(reconcileSrc)) : []),
+    [reconcileOpen, reconcileSrc, customLiabilities]   // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  // Mở hộp thoại: tải dữ liệu MỚI rồi mới hiện bảng xem trước
+  const openReconcile = async () => {
+    setReconcileSkip({}); setReconcileSrc(null); setReconcileDetail(null); setReconcileOpen(true); setReconcileLoading(true);
+    try {
+      setReconcileSrc(await loadReconcileSrc());
+    } catch (err) {
+      console.error('[FinanceManagement] Lỗi tải dữ liệu đối chiếu công nợ:', err);
+      addToast({ title: '❌ Không tải được dữ liệu', message: 'Không đọc được đơn hàng / phiếu chi / đề xuất vật tư từ máy chủ. Vui lòng thử lại.', type: 'error' });
+      setReconcileOpen(false);
+    } finally { setReconcileLoading(false); }
+  };
+  // Xuất bản xem trước ra Excel để lưu hồ sơ / đối chiếu: sheet 1 = từng đơn sẽ áp, sheet 2 = phần chi dư không gắn được
+  const exportReconcileExcel = () => {
+    const rows: any[] = [];
+    reconcilePlans.forEach(plan => plan.lines.forEach(l => rows.push({
+      'Nhà cung cấp': plan.name, 'Đơn hàng': l.purchaseOrderId,
+      'Còn nợ trước': Math.round(l.before), 'Số tiền áp': Math.round(l.amount), 'Còn nợ sau': Math.round(l.before - l.amount),
+      'Áp dụng': reconcileSkip[plan.supplierId] ? 'Không (bỏ tick)' : 'Có',
+    })));
+    const leftovers = reconcilePlans.filter(pl => pl.leftover >= 1000).map(pl => ({ 'Nhà cung cấp': pl.name, 'Đã chi dư, không gắn được đơn nào': Math.round(pl.leftover) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Đối chiếu');
+    if (leftovers.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leftovers), 'Chi dư');
+    XLSX.writeFile(wb, `doi-chieu-cong-no-ncc-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
   const applyReconcile = async () => {
     if (!canEdit) { denyToast('Sửa'); return; }
+    const selected = reconcilePlans.filter(pl => !reconcileSkip[pl.supplierId] && pl.lines.length > 0);
+    if (selected.length === 0) return;
     setReconcileBusy(true);
-    let total = 0, suppliers = 0;
-    for (const plan of reconcilePlans) {
-      if (reconcileSkip[plan.supplierId]) continue;
-      let applied = false;
-      for (const upd of plan.updatedOrders) {
-        const amt = plan.lines.find(l => l.purchaseOrderId === upd.id)?.amount || 0;
-        const noteLine = `Đối chiếu công nợ: áp ${amt.toLocaleString('vi-VN')}đ đã chi cho NCC nhưng chưa gắn đơn, ngày ${new Date().toLocaleDateString('vi-VN')}.`;
-        const withNote = { ...upd, notes: upd.notes ? `${upd.notes}\n${noteLine}` : noteLine } as PurchaseOrder;
-        try {
-          await dbService.purchaseOrders.save(withNote);
-          setPurchaseOrders(prev => prev.map(o => o.id === withNote.id ? withNote : o));
-          total += amt; applied = true;
-        } catch (err) {
-          console.error('[FinanceManagement] Lỗi đối chiếu công nợ NCC:', upd.id, err);
-        }
+    try {
+      // 1) Tải lại dữ liệu mới nhất, dựng lại kế hoạch; nếu khác bản xem trước (có người vừa sửa/trả tiền) → KHÔNG ghi, cập nhật bảng để xem lại
+      const fresh = await loadReconcileSrc();
+      const freshPlans = planReconcileSuppliers(buildReconcileInputs(fresh));
+      const stale = selected.filter(pl => reconcilePlanSignature(pl) !== reconcilePlanSignature(freshPlans.find(f => f.supplierId === pl.supplierId)));
+      if (stale.length > 0) {
+        setReconcileSrc(fresh);
+        addToast({ title: '⚠️ Dữ liệu vừa thay đổi', message: `Số liệu của ${stale.length} nhà cung cấp (${stale.slice(0, 3).map(x => x.name).join('; ')}${stale.length > 3 ? '…' : ''}) đã đổi từ lúc mở bảng. Bảng xem trước đã được cập nhật — hãy kiểm tra lại rồi bấm Áp dụng lần nữa.`, type: 'warning' });
+        return;
       }
-      if (applied) suppliers++;
-    }
-    setReconcileBusy(false);
-    setReconcileOpen(false);
-    setReconcileSkip({});
-    if (total > 0) window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
-    addToast({ title: total > 0 ? '✅ Đã đối chiếu công nợ' : 'ℹ️ Không có gì để áp', message: total > 0 ? `Đã áp ${total.toLocaleString('vi-VN')}đ vào đơn hàng của ${suppliers} nhà cung cấp.` : 'Không có khoản nào được áp dụng.', type: total > 0 ? 'success' : 'info' });
+      // 2) Xác nhận cuối
+      const total = selected.reduce((sum, pl) => sum + pl.total, 0);
+      const nOrders = selected.reduce((sum, pl) => sum + pl.lines.length, 0);
+      if (!window.confirm(`⚠️ ÁP DỤNG ĐỐI CHIẾU CÔNG NỢ\n\n` +
+        `Sẽ ghi ${total.toLocaleString('vi-VN')}đ vào ${nOrders} đơn hàng của ${selected.length} nhà cung cấp.\n` +
+        `Mỗi đơn được ghi chú lại. Thao tác này KHÔNG có nút hoàn tác — nếu áp nhầm chỉ khôi phục được từ bản sao lưu.\n\n` +
+        `Bạn đã xem kỹ bảng và (nếu cần) xuất Excel lưu hồ sơ chưa?`)) return;
+      // 3) Lưu từng đơn theo kế hoạch vừa tải mới; ghi nhận đơn nào lỗi để báo rõ
+      let applied = 0, suppliers = 0;
+      const failed: string[] = [];
+      for (const pl of selected) {
+        const fp = freshPlans.find(f => f.supplierId === pl.supplierId)!;
+        let ok = false;
+        for (const upd of fp.updatedOrders) {
+          const amt = fp.lines.find(l => l.purchaseOrderId === upd.id)?.amount || 0;
+          const noteLine = `Đối chiếu công nợ: áp ${amt.toLocaleString('vi-VN')}đ đã chi cho NCC nhưng chưa gắn đơn, ngày ${new Date().toLocaleDateString('vi-VN')}.`;
+          const withNote = { ...upd, notes: upd.notes ? `${upd.notes}\n${noteLine}` : noteLine } as PurchaseOrder;
+          try {
+            await dbService.purchaseOrders.save(withNote);
+            setPurchaseOrders(prev => prev.map(o => o.id === withNote.id ? withNote : o));
+            applied += amt; ok = true;
+          } catch (err) {
+            console.error('[FinanceManagement] Lỗi đối chiếu công nợ NCC:', upd.id, err);
+            failed.push(upd.id);
+          }
+        }
+        if (ok) suppliers++;
+      }
+      if (applied > 0) window.dispatchEvent(new CustomEvent('hl-purchase-orders-updated'));
+      if (failed.length > 0) {
+        // Giữ hộp thoại mở, tải lại bảng để thấy phần còn lại chưa áp
+        try { setReconcileSrc(await loadReconcileSrc()); } catch { /* giữ bảng cũ */ }
+        addToast({ title: '❌ Một số đơn lưu lỗi', message: `Đã áp ${applied.toLocaleString('vi-VN')}đ vào ${suppliers} nhà cung cấp, nhưng ${failed.length} đơn LƯU LỖI: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? '…' : ''}. Bảng đã cập nhật phần còn lại — bấm Áp dụng để thử lại.`, type: 'error' });
+        return;
+      }
+      setReconcileOpen(false);
+      setReconcileSkip({});
+      addToast({ title: '✅ Đã đối chiếu công nợ', message: `Đã áp ${applied.toLocaleString('vi-VN')}đ vào ${nOrders} đơn hàng của ${suppliers} nhà cung cấp.`, type: 'success' });
+    } catch (err) {
+      console.error('[FinanceManagement] Lỗi khi đối chiếu công nợ NCC:', err);
+      addToast({ title: '❌ Lỗi', message: 'Không thể hoàn tất đối chiếu. Chưa có thay đổi nào được ghi nếu lỗi xảy ra trước bước lưu.', type: 'error' });
+    } finally { setReconcileBusy(false); }
   };
   const [liabilityPageSize, setLiabilityPageSize] = useState(10);
   useEffect(() => { setLiabilityPage(1); }, [liabilityFilters.category, liabilityFilters.status, liabilityFilters.fromDate, liabilityFilters.toDate, searchTerm]);
@@ -10208,7 +10284,7 @@ export default function FinanceManagement({
                     </select>
                   </div>
                   <button type="button" onClick={() => { const y = new Date().getFullYear(); updateLiabilityFilter({ category: '', status: '', fromDate: `${y}-01-01`, toDate: `${y}-12-31` }); setSearchTerm(''); }} className="h-9 px-3.5 rounded-xl text-[13px] font-bold inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer">Đặt lại</button>
-                  <button type="button" onClick={() => { setReconcileSkip({}); setReconcileOpen(true); }}
+                  <button type="button" onClick={openReconcile}
                     className="h-9 px-3.5 text-[13px] font-bold rounded-xl inline-flex items-center gap-1.5 cursor-pointer bg-white border border-[#bcd0ff] text-[#0d47c9] hover:bg-[#e8efff]"
                     title="Tìm các khoản đã chi cho nhà cung cấp nhưng chưa gắn vào đơn hàng nào, rồi áp vào đơn cũ nhất còn nợ" data-testid="liab-reconcile-btn">
                     <RefreshCcw className="w-4 h-4" /> Đối chiếu công nợ NCC
@@ -11790,7 +11866,11 @@ export default function FinanceManagement({
 
       {/* MODAL: XÁC NHẬN GHI NHẬN CÔNG NỢ (cảnh báo nếu đơn chưa hoạt động) */}
       {/* Hộp thoại ĐỐI CHIẾU CÔNG NỢ NCC — xem trước, kế toán tick NCC nào cho áp dụng */}
-      {reconcileOpen && (
+      {reconcileOpen && (() => {
+        const applicable = reconcilePlans.filter(pl => pl.lines.length > 0);
+        const leftoverPlans = reconcilePlans.filter(pl => pl.leftover >= 1000);
+        const willApply = applicable.filter(pl => !reconcileSkip[pl.supplierId]).reduce((sum, pl) => sum + pl.total, 0);
+        return (
         <div className="fixed inset-0 z-[9500] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={() => !reconcileBusy && setReconcileOpen(false)} data-testid="liab-reconcile-modal">
           <div className="w-full max-w-3xl max-h-[88vh] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200">
@@ -11802,46 +11882,71 @@ export default function FinanceManagement({
             </div>
             <div className="px-5 py-3 overflow-y-auto flex-1 space-y-3">
               <div className="bg-[#e8efff] border border-[#bcd0ff] rounded-xl px-3 py-2 text-[12px] text-slate-700">
-                Hệ thống chỉ đoán theo thứ tự <b>đơn cũ nhất trước</b>. Với khoản lớn, hãy hỏi kế toán xem thực tế chi cho đơn nào — bỏ tick nhà cung cấp nào bạn chưa chắc để áp dụng sau. Mức lệch dưới 1.000đ được bỏ qua.
+                Hệ thống chỉ đoán theo thứ tự <b>đơn cũ nhất trước</b>. Nếu số áp bằng đúng số còn nợ của các đơn thì kết quả không phụ thuộc thứ tự. Với nhà cung cấp chỉ áp một phần, hãy hỏi kế toán chi cho đơn nào — bỏ tick để áp sau.
+                Đơn nháp, đã hủy và đơn của đề xuất vật tư đã hủy được loại ra. Mức lệch dưới 1.000đ được bỏ qua.
               </div>
-              {reconcilePlans.length === 0 ? (
+              {reconcileLoading || !reconcileSrc ? (
+                <div className="text-center text-slate-500 py-10 text-[13px]">Đang tải dữ liệu mới nhất…</div>
+              ) : reconcilePlans.length === 0 ? (
                 <div className="text-center text-slate-500 italic py-8 text-[13px]">Không có nhà cung cấp nào lệch — mọi khoản đã chi đều đã gắn vào đơn.</div>
               ) : reconcilePlans.map(plan => {
-                const skipped = !!reconcileSkip[plan.supplierId];
+                const hasLines = plan.lines.length > 0;
+                const skipped = hasLines && !!reconcileSkip[plan.supplierId];
                 return (
-                  <div key={plan.supplierId} className={`border rounded-xl overflow-hidden ${skipped ? 'border-slate-200 opacity-60' : 'border-[#bcd0ff]'}`}>
-                    <label className="flex items-center gap-2.5 px-3 py-2 bg-slate-50 cursor-pointer">
-                      <input type="checkbox" checked={!skipped} className="accent-[#0d47c9] cursor-pointer"
-                        onChange={(e) => setReconcileSkip(prev => ({ ...prev, [plan.supplierId]: !e.target.checked }))} />
+                  <div key={plan.supplierId} className={`border rounded-xl overflow-hidden ${skipped ? 'border-slate-200 opacity-60' : hasLines ? 'border-[#bcd0ff]' : 'border-amber-200'}`}>
+                    <label className={`flex items-center gap-2.5 px-3 py-2 ${hasLines ? 'bg-slate-50 cursor-pointer' : 'bg-amber-50'}`}>
+                      {hasLines && (
+                        <input type="checkbox" checked={!skipped} className="accent-[#0d47c9] cursor-pointer"
+                          onChange={(e) => setReconcileSkip(prev => ({ ...prev, [plan.supplierId]: !e.target.checked }))} />
+                      )}
                       <span className="flex-1 min-w-0 font-extrabold text-[13px] text-slate-800 truncate">{plan.name}</span>
-                      <span className="font-mono font-bold text-[13px] text-[#0d47c9]">{plan.total.toLocaleString('vi-VN')} đ</span>
+                      {hasLines && <span className="font-mono font-bold text-[13px] text-[#0d47c9]">{plan.total.toLocaleString('vi-VN')} đ</span>}
                     </label>
-                    <table className="w-full text-[12px]">
-                      <thead className="text-slate-500 border-b border-slate-100">
-                        <tr><th className="px-3 py-1.5 text-left font-bold">Đơn hàng</th><th className="px-3 py-1.5 text-right font-bold">Còn nợ trước</th><th className="px-3 py-1.5 text-right font-bold">Áp</th><th className="px-3 py-1.5 text-right font-bold">Còn nợ sau</th></tr>
-                      </thead>
-                      <tbody>
-                        {plan.lines.map(l => (
-                          <tr key={l.purchaseOrderId} className="border-b border-slate-50 last:border-0">
-                            <td className="px-3 py-1.5 font-mono text-slate-700">{l.purchaseOrderId}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-slate-600">{Math.round(l.before).toLocaleString('vi-VN')}</td>
-                            <td className="px-3 py-1.5 text-right font-mono font-bold text-emerald-700">-{Math.round(l.amount).toLocaleString('vi-VN')}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-slate-800">{Math.round(l.before - l.amount).toLocaleString('vi-VN')}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    {hasLines && (
+                      <table className="w-full text-[12px]">
+                        <thead className="text-slate-500 border-b border-slate-100">
+                          <tr><th className="px-3 py-1.5 text-left font-bold">Đơn hàng</th><th className="px-3 py-1.5 text-right font-bold">Còn nợ trước</th><th className="px-3 py-1.5 text-right font-bold">Áp</th><th className="px-3 py-1.5 text-right font-bold">Còn nợ sau</th></tr>
+                        </thead>
+                        <tbody>
+                          {plan.lines.map(l => (
+                            <tr key={l.purchaseOrderId} className="border-b border-slate-50 last:border-0">
+                              <td className="px-3 py-1.5 font-mono">
+                                <button type="button" onClick={() => setReconcileDetail({ poId: l.purchaseOrderId, supplierId: plan.supplierId })}
+                                  className="text-[#0d47c9] hover:underline cursor-pointer font-mono text-left" title="Xem chi tiết đơn hàng" data-testid="reconcile-po-link">
+                                  {l.purchaseOrderId}
+                                </button>
+                              </td>
+                              <td className="px-3 py-1.5 text-right font-mono text-slate-600">{Math.round(l.before).toLocaleString('vi-VN')}</td>
+                              <td className="px-3 py-1.5 text-right font-mono font-bold text-emerald-700">-{Math.round(l.amount).toLocaleString('vi-VN')}</td>
+                              <td className="px-3 py-1.5 text-right font-mono text-slate-800">{Math.round(l.before - l.amount).toLocaleString('vi-VN')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {plan.leftover >= 1000 && (
+                      <div className="px-3 py-1.5 text-[12px] text-amber-800 bg-amber-50 border-t border-amber-100">
+                        ⚠ Đã chi dư <b className="font-mono">{Math.round(plan.leftover).toLocaleString('vi-VN')} đ</b> không gắn được vào đơn nào (nhà cung cấp đã được chi nhiều hơn tổng nợ các đơn đủ điều kiện — có thể là tạm ứng hoặc đơn chưa ghi nhận công nợ). Phần này <b>không bị áp</b>.
+                      </div>
+                    )}
                   </div>
                 );
               })}
+              {leftoverPlans.length > 0 && (
+                <div className="text-[12px] text-slate-500">Tổng phần chi dư không gắn được: <b className="font-mono text-slate-700">{Math.round(leftoverPlans.reduce((sum, pl) => sum + pl.leftover, 0)).toLocaleString('vi-VN')} đ</b> ({leftoverPlans.length} nhà cung cấp).</div>
+              )}
             </div>
-            <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-slate-200">
               <span className="text-[12px] text-slate-500">
-                Sẽ áp: <b className="font-mono text-slate-800">{reconcilePlans.filter(p => !reconcileSkip[p.supplierId]).reduce((sum, p) => sum + p.total, 0).toLocaleString('vi-VN')} đ</b>
+                Sẽ áp: <b className="font-mono text-slate-800">{willApply.toLocaleString('vi-VN')} đ</b>
               </span>
               <div className="flex gap-2">
+                <button type="button" onClick={exportReconcileExcel} disabled={reconcileBusy || reconcilePlans.length === 0}
+                  className="h-9 px-4 text-[13px] font-bold rounded-xl bg-white border border-[#bcd0ff] text-[#0d47c9] hover:bg-[#e8efff] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5" data-testid="liab-reconcile-export">
+                  <Download className="w-4 h-4" /> Xuất Excel
+                </button>
                 <button type="button" onClick={() => setReconcileOpen(false)} disabled={reconcileBusy} className="h-9 px-4 text-[13px] font-bold rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">Đóng</button>
-                <button type="button" onClick={applyReconcile} disabled={reconcileBusy || reconcilePlans.every(p => reconcileSkip[p.supplierId])}
+                <button type="button" onClick={applyReconcile} disabled={reconcileBusy || reconcileLoading || applicable.every(pl => reconcileSkip[pl.supplierId])}
                   style={{ color: '#ffffff' }} className="h-9 px-4 text-[13px] font-bold rounded-xl bg-[#0d47c9] hover:bg-[#0a3aa8] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed" data-testid="liab-reconcile-apply">
                   {reconcileBusy ? 'Đang áp dụng…' : 'Áp dụng'}
                 </button>
@@ -11849,7 +11954,155 @@ export default function FinanceManagement({
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
+
+      {/* Hộp CHI TIẾT ĐƠN HÀNG trong đối chiếu — để kế toán rà soát: thông tin đơn, các dòng vật tư, và các phiếu chi của NCC
+          (kèm cảnh báo phiếu chi sớm hơn ngày tạo đơn) trước khi bấm Áp dụng. */}
+      {reconcileOpen && reconcileDetail && reconcileSrc && (() => {
+        const po = reconcileSrc.orders.find(o => o.id === reconcileDetail.poId);
+        const plan = reconcilePlans.find(pl => pl.supplierId === reconcileDetail.supplierId);
+        const line = plan?.lines.find(l => l.purchaseOrderId === reconcileDetail.poId);
+        const close = () => setReconcileDetail(null);
+        if (!po) return null;
+        const created = poCreatedDate(po as any);
+        const items: any[] = (po as any).items || [];
+        const supplierName = po.supplierName || plan?.name || '';
+        // Phiếu chi đã duyệt của NCC — cùng cách khớp với totalPaid của đối chiếu
+        const pays = reconcileSrc.payments
+          .filter(pay => pay.status === 'approved' && (pay.supplierId
+            ? pay.supplierId === po.supplierId
+            : pay.recipient === supplierName && !pay.subcontractorId && pay.category !== 'subcontractor_advance'))
+          .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+        const poRemain = getPoPayableRemaining(po);
+        const stLabel: Record<string, string> = { draft: 'Nháp', confirmed: 'Đã xác nhận', completed: 'Hoàn tất', cancelled: 'Đã hủy' };
+        return (
+          <div className="fixed inset-0 z-[9600] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs animate-fade-in" onClick={close} data-testid="reconcile-po-detail">
+            <div className="w-full max-w-3xl max-h-[88vh] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-slate-200">
+                <div className="min-w-0">
+                  <h3 className="font-extrabold text-[15px] text-slate-800 flex items-center gap-2 flex-wrap">
+                    Chi tiết đơn hàng <span className="font-mono text-[#0d47c9]">{po.id}</span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-[#e8efff] border border-[#bcd0ff] text-[#0d47c9] text-[11px] font-bold">{stLabel[(po as any).status] || (po as any).status || '—'}</span>
+                  </h3>
+                  <p className="text-[12px] text-slate-500 mt-0.5 truncate">{supplierName}</p>
+                </div>
+                <button type="button" onClick={close} aria-label="Đóng" className="w-8 h-8 grid place-items-center rounded-xl text-slate-500 hover:bg-slate-100 cursor-pointer"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="px-5 py-3 overflow-y-auto flex-1 space-y-4 text-[13px]">
+                {/* Thông tin đơn */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {[
+                    ['Dự án', po.projectName || 'Không gắn dự án'],
+                    ['Ngày tạo đơn', created ? created.split('-').reverse().join('/') : '—'],
+                    ['Đề xuất vật tư', (po as any).proposalId || '—'],
+                    ['Tổng tiền đơn', `${Math.round(po.tongTien || 0).toLocaleString('vi-VN')} đ`],
+                    ['Đã thanh toán', `${Math.round(po.thanhToanThucTe || 0).toLocaleString('vi-VN')} đ`],
+                    ['Còn phải trả', `${Math.round(poRemain).toLocaleString('vi-VN')} đ`],
+                  ].map(([k, v]) => (
+                    <div key={k} className="border border-slate-200 rounded-xl px-3 py-2">
+                      <div className="text-[11px] text-slate-500 font-bold">{k}</div>
+                      <div className="font-bold text-slate-800 break-words">{v}</div>
+                    </div>
+                  ))}
+                </div>
+                {line && (
+                  <div className="bg-[#e8efff] border border-[#bcd0ff] rounded-xl px-3 py-2 text-slate-700">
+                    Đối chiếu sẽ áp <b className="font-mono text-emerald-700">{Math.round(line.amount).toLocaleString('vi-VN')} đ</b> vào đơn này:
+                    còn phải trả <b className="font-mono">{Math.round(line.before).toLocaleString('vi-VN')}</b> → <b className="font-mono">{Math.round(line.before - line.amount).toLocaleString('vi-VN')}</b>.
+                  </div>
+                )}
+
+                {/* Các dòng vật tư */}
+                <div>
+                  <div className="font-extrabold text-slate-800 mb-1.5">Vật tư trong đơn ({items.length} dòng)</div>
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                    <table className="w-full text-[12px]">
+                      <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                        <tr><th className="px-3 py-1.5 text-left font-bold">Tên vật tư</th><th className="px-3 py-1.5 text-right font-bold">SL</th><th className="px-3 py-1.5 text-right font-bold">Đã nhận</th><th className="px-3 py-1.5 text-right font-bold">Đơn giá</th><th className="px-3 py-1.5 text-right font-bold">Thành tiền</th></tr>
+                      </thead>
+                      <tbody>
+                        {items.length === 0 ? (
+                          <tr><td colSpan={5} className="px-3 py-3 text-center text-slate-400 italic">Đơn không có dòng vật tư.</td></tr>
+                        ) : items.map((it, i) => (
+                          <tr key={it.id || i} className="border-b border-slate-50 last:border-0">
+                            <td className="px-3 py-1.5 text-slate-800">{it.name}{it.unit ? <span className="text-slate-400"> ({it.unit})</span> : null}</td>
+                            <td className="px-3 py-1.5 text-right font-mono">{Number(it.qty || 0).toLocaleString('vi-VN')}</td>
+                            <td className="px-3 py-1.5 text-right font-mono">{it.receivedQty === undefined || it.receivedQty === null ? '—' : Number(it.receivedQty).toLocaleString('vi-VN')}</td>
+                            <td className="px-3 py-1.5 text-right font-mono">{Math.round(it.price || 0).toLocaleString('vi-VN')}</td>
+                            <td className="px-3 py-1.5 text-right font-mono font-bold">{Math.round((it.qty || 0) * (it.price || 0)).toLocaleString('vi-VN')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Phép tính chưa gắn của NCC */}
+                {plan && (
+                  <div>
+                    <div className="font-extrabold text-slate-800 mb-1.5">Phép tính của nhà cung cấp</div>
+                    <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 text-[12px]">
+                      {[
+                        ['Tổng đã chi cho NCC (phiếu chi đã duyệt)', plan.totalPaid, false],
+                        ['− Công nợ đầu kỳ (nợ cũ trả trước)', plan.openingDebt, false],
+                        ['− Đã gắn vào các đơn trước đó', plan.attributed, false],
+                        ['= Phần chưa gắn vào đơn nào', plan.totalPaid - plan.openingDebt - plan.attributed, true],
+                      ].map(([k, v, strong]) => (
+                        <div key={String(k)} className={`flex items-center justify-between px-3 py-1.5 ${strong ? 'bg-slate-50 font-extrabold' : ''}`}>
+                          <span className="text-slate-600">{k as string}</span>
+                          <span className="font-mono text-slate-800">{Math.round(v as number).toLocaleString('vi-VN')} đ</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Phiếu chi của NCC */}
+                <div>
+                  <div className="font-extrabold text-slate-800 mb-1.5">Phiếu chi đã duyệt của nhà cung cấp ({pays.length})</div>
+                  <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                    <table className="w-full text-[12px]">
+                      <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                        <tr><th className="px-3 py-1.5 text-left font-bold">Mã phiếu</th><th className="px-3 py-1.5 text-left font-bold">Ngày chi</th><th className="px-3 py-1.5 text-right font-bold">Số tiền</th><th className="px-3 py-1.5 text-left font-bold">Đề xuất / ghi chú</th></tr>
+                      </thead>
+                      <tbody>
+                        {pays.length === 0 ? (
+                          <tr><td colSpan={4} className="px-3 py-3 text-center text-slate-400 italic">Chưa có phiếu chi đã duyệt cho nhà cung cấp này.</td></tr>
+                        ) : pays.map(pay => {
+                          const before = !!created && !!pay.date && String(pay.date).slice(0, 10) < created;   // phiếu chi SỚM hơn ngày tạo đơn
+                          return (
+                            <tr key={pay.id} className="border-b border-slate-50 last:border-0 align-top">
+                              <td className="px-3 py-1.5 font-mono text-slate-700">{pay.code || pay.id}</td>
+                              <td className="px-3 py-1.5 whitespace-nowrap">
+                                {pay.date ? String(pay.date).slice(0, 10).split('-').reverse().join('/') : '—'}
+                                {before && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[10px] font-bold" title="Phiếu chi có ngày trước ngày tạo đơn — có thể không phải trả cho đơn này (nợ cũ / tạm ứng)">trước ngày tạo đơn</span>}
+                              </td>
+                              <td className="px-3 py-1.5 text-right font-mono font-bold text-slate-800">{Math.round(pay.amount || 0).toLocaleString('vi-VN')}</td>
+                              <td className="px-3 py-1.5 text-slate-500 max-w-[260px]"><div className="line-clamp-2" title={pay.notes || ''}>{(pay as any).relatedAdvanceId ? <span className="font-mono text-slate-600">{(pay as any).relatedAdvanceId} · </span> : null}{pay.notes || ''}</div></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1.5">Cờ vàng "trước ngày tạo đơn": phiếu chi có ngày sớm hơn ngày tạo đơn nên khó là tiền trả cho đơn này — cân nhắc bỏ tick nhà cung cấp rồi hỏi kế toán.</p>
+                </div>
+
+                {(po as any).notes ? (
+                  <div>
+                    <div className="font-extrabold text-slate-800 mb-1.5">Ghi chú đơn</div>
+                    <div className="border border-slate-200 rounded-xl px-3 py-2 text-[12px] text-slate-600 whitespace-pre-wrap">{(po as any).notes}</div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="flex justify-end px-5 py-3 border-t border-slate-200">
+                <button type="button" onClick={close} className="h-9 px-4 text-[13px] font-bold rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer">Đóng</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {poRecordConfirm && (() => {
         const ro = poRecordConfirm;

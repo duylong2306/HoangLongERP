@@ -177,24 +177,67 @@ export function buildApprovedAllocations(
 // ── ĐỐI CHIẾU CÔNG NỢ NCC (sửa dữ liệu cũ) ──
 // Với mỗi NCC: phần tiền đã chi nhưng chưa gắn vào đơn nào (xem planCatchUpAllocation) được phân bổ
 // vào các đơn cũ nhất còn nợ. Trả về bản XEM TRƯỚC để kế toán duyệt từng NCC rồi mới áp dụng.
-// Bỏ qua NCC có tổng áp dụng nhỏ hơn `minAmount` (nhiễu làm tròn vài đồng).
+// Bỏ qua NCC có tổng áp dụng và phần dư đều nhỏ hơn `minAmount` (nhiễu làm tròn vài đồng).
+
+/**
+ * Đơn có đủ điều kiện NHẬN khoản đã chi không? Loại: nháp, đã hủy, và đơn sinh từ đề xuất vật tư ĐÃ HỦY mà chưa
+ * nhập hàng (đơn "treo" — cùng quy tắc loại khỏi chi phí công trình ở lib/projectCost.ts). Gắn tiền vào các đơn
+ * này là sai: đơn không còn là khoản phải trả thật.
+ */
+export function isReconcileEligible(po: PurchaseOrder, cancelledProposalIds: Set<string>): boolean {
+  const status = (po as any).status;
+  if (status === 'draft' || status === 'cancelled') return false;
+  const proposalId = (po as any).proposalId;
+  if (proposalId && cancelledProposalIds.has(proposalId) && status !== 'completed') return false;
+  return true;
+}
+
 export interface ReconcileSupplierInput { supplierId: string; name: string; pool: PurchaseOrder[]; openingDebt: number; totalPaid: number }
 export interface ReconcileSupplierPlan {
   supplierId: string; name: string; total: number;
   lines: { purchaseOrderId: string; before: number; amount: number }[];   // before = còn phải trả của đơn TRƯỚC khi áp
   updatedOrders: PurchaseOrder[];
+  /** Phần đã chi mà KHÔNG gắn được vào đơn nào (đã chi nhiều hơn tổng nợ các đơn đủ điều kiện) — chỉ để báo, không áp. */
+  leftover: number;
+  // Các thành phần của phép tính (hiện trong hộp "Chi tiết đơn hàng" để kế toán rà soát):
+  //   chưa gắn = totalPaid − openingDebt − attributed
+  openingDebt: number; totalPaid: number; attributed: number;
 }
 export function planReconcileSuppliers(inputs: ReconcileSupplierInput[], minAmount = 1000): ReconcileSupplierPlan[] {
   const out: ReconcileSupplierPlan[] = [];
   for (const s of inputs) {
     const { applied, updatedOrders } = planCatchUpAllocation(s.pool, s.openingDebt, s.totalPaid);
     const total = applied.reduce((sum, a) => sum + a.amount, 0);
-    if (total < minAmount) continue;
+    const attributed = s.pool.reduce((sum, o) => sum + (o.thanhToanThucTe || 0), 0);
+    // Dư = tiền chi − nợ đầu kỳ − đã gắn − vừa áp. Phần đã cấn trừ trả hàng nằm trong "đã gắn" nên chỉ làm dư nhỏ đi (an toàn).
+    const leftover = Math.max(0, s.totalPaid - (s.openingDebt || 0) - attributed - total);
+    if (total < minAmount && leftover < minAmount) continue;
     const lines = applied.map(a => {
       const po = s.pool.find(o => o.id === a.purchaseOrderId)!;
       return { purchaseOrderId: a.purchaseOrderId, before: getPoPayableRemaining(po), amount: a.amount };
     });
-    out.push({ supplierId: s.supplierId, name: s.name, total, lines, updatedOrders });
+    out.push({ supplierId: s.supplierId, name: s.name, total, lines, updatedOrders, leftover, openingDebt: s.openingDebt || 0, totalPaid: s.totalPaid, attributed });
   }
-  return out.sort((a, b) => b.total - a.total);
+  return out.sort((a, b) => b.total - a.total || b.leftover - a.leftover);
+}
+
+/** Chữ ký của 1 kế hoạch (NCC + từng đơn + số áp) — so sánh bản xem trước với dữ liệu mới tải lại để phát hiện thay đổi. */
+export function reconcilePlanSignature(plan: ReconcileSupplierPlan | undefined): string {
+  if (!plan) return '';
+  return plan.lines.map(l => `${l.purchaseOrderId}:${Math.round(l.amount)}`).sort().join('|');
+}
+
+/**
+ * Ngày tạo đơn (YYYY-MM-DD) để kế toán so với ngày phiếu chi: ưu tiên createdAt; đơn cũ không có thì suy ra từ mã
+ * "PO-<mili giây>-n" (mã sinh từ thời điểm tạo). Không suy ra được → ''.
+ */
+export function poCreatedDate(po: { id: string; createdAt?: string }): string {
+  const c = po.createdAt;
+  if (typeof c === 'string' && /^\d{4}-\d{2}-\d{2}/.test(c)) return c.slice(0, 10);
+  const m = /^PO-(\d{12,14})-/.exec(po.id || '');
+  if (m) {
+    const d = new Date(Number(m[1]));
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+  return '';
 }

@@ -217,3 +217,62 @@ describe('planReconcileSuppliers (nút Đối chiếu công nợ NCC)', () => {
     expect(plans).toEqual([]);
   });
 });
+
+import { isReconcileEligible, reconcilePlanSignature } from '../poAllocation';
+describe('isReconcileEligible (đơn nào được nhận khoản đã chi)', () => {
+  const none = new Set<string>();
+  it('loại đơn nháp / đã hủy', () => {
+    expect(isReconcileEligible(po('A', 100, 0, { status: 'draft' }), none)).toBe(false);
+    expect(isReconcileEligible(po('A', 100, 0, { status: 'cancelled' }), none)).toBe(false);
+    expect(isReconcileEligible(po('A', 100, 0, { status: 'confirmed' }), none)).toBe(true);
+  });
+  it('loại đơn "treo" của đề xuất đã hủy (chưa nhập hàng), giữ đơn đã hoàn tất nhập hàng', () => {
+    const cancelled = new Set(['P1']);
+    expect(isReconcileEligible(po('A', 100, 0, { status: 'confirmed', proposalId: 'P1' }), cancelled)).toBe(false);
+    expect(isReconcileEligible(po('A', 100, 0, { status: 'completed', proposalId: 'P1' }), cancelled)).toBe(true);
+    expect(isReconcileEligible(po('A', 100, 0, { status: 'confirmed', proposalId: 'P2' }), cancelled)).toBe(true);
+  });
+});
+
+describe('planReconcileSuppliers — phần dư & chữ ký', () => {
+  it('đã chi nhiều hơn tổng nợ các đơn → báo phần dư, không gắn thừa', () => {
+    const [p] = planReconcileSuppliers([{ supplierId: 'S', name: 'X', pool: [po('A', 100000, 0)], openingDebt: 0, totalPaid: 250000 }]);
+    expect(p.total).toBe(100000);
+    expect(p.leftover).toBe(150000);
+  });
+  it('NCC chỉ có phần dư (không đơn nào còn nợ) vẫn được liệt kê với lines rỗng', () => {
+    const [p] = planReconcileSuppliers([{ supplierId: 'S', name: 'X', pool: [po('A', 5000, 5000)], openingDebt: 0, totalPaid: 8000 }]);
+    expect(p.lines).toEqual([]);
+    expect(p.leftover).toBe(3000);
+  });
+  it('chữ ký không phụ thuộc thứ tự dòng và đổi khi số áp đổi', () => {
+    const base = planReconcileSuppliers([{ supplierId: 'S', name: 'X', pool: [po('A', 1000, 0), po('B', 2000, 0)], openingDebt: 0, totalPaid: 3000 }])[0];
+    const changed = planReconcileSuppliers([{ supplierId: 'S', name: 'X', pool: [po('A', 1000, 0), po('B', 2000, 500)], openingDebt: 0, totalPaid: 3000 }])[0];
+    expect(reconcilePlanSignature(base)).not.toBe(reconcilePlanSignature(changed));
+    expect(reconcilePlanSignature(undefined)).toBe('');
+  });
+});
+
+import { poCreatedDate } from '../poAllocation';
+describe('poCreatedDate (ngày tạo đơn để rà soát)', () => {
+  it('ưu tiên createdAt, cắt về YYYY-MM-DD', () => {
+    expect(poCreatedDate({ id: 'PO-1-0', createdAt: '2026-10-16T08:00:00.000Z' })).toBe('2026-10-16');
+  });
+  it('đơn không có createdAt → suy ra từ mã PO-<ms>-n', () => {
+    expect(poCreatedDate({ id: 'PO-1792141670846-0' })).toBe('2026-10-16');   // đơn thực tế của Thành Lợi Phương
+    expect(poCreatedDate({ id: 'PO-1787822363902-0' })).toBe('2026-08-27');   // đơn Thái Long
+  });
+  it('không suy ra được → rỗng', () => {
+    expect(poCreatedDate({ id: 'abc' })).toBe('');
+  });
+});
+describe('planReconcileSuppliers — các thành phần phép tính', () => {
+  it('trả về openingDebt / totalPaid / attributed để hiển thị', () => {
+    const [p] = planReconcileSuppliers([{ supplierId: 'S', name: 'X', pool: [po('A', 100000, 30000)], openingDebt: 10000, totalPaid: 140000 }]);
+    expect(p.openingDebt).toBe(10000);
+    expect(p.totalPaid).toBe(140000);
+    expect(p.attributed).toBe(30000);
+    expect(p.total).toBe(70000);   // 140000 − 10000 − 30000 = 100000 chưa gắn, đơn chỉ còn nợ 70000
+    expect(p.leftover).toBe(30000);
+  });
+});
