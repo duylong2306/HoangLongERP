@@ -212,6 +212,24 @@ describe('Phòng Kế Toán — thời gian, trạng thái, phân trang', () => 
   });
 });
 
+describe('Phòng Kế Toán — Còn phải thu', () => {
+  it('cộng còn nợ từng công trình; phiếu thu không gắn công trình không bị trừ vào hợp đồng nhưng được nêu riêng', () => {
+    const projects = [
+      { id: 'P1', name: 'CT1', status: 'processing', contractValue: 1_000 },
+      { id: 'P2', name: 'CT2', status: 'processing', contractValue: 500 },
+    ] as any;
+    const receipts = [
+      { id: 'R1', code: 'PT1', date: '2026-10-09', amount: 400, projectId: 'P1' },
+      { id: 'R2', code: 'PT2', date: '2026-10-09', amount: 700, projectId: 'P2' },   // thu vượt hợp đồng CT2: không bù cho CT1
+      { id: 'R3', code: 'PT3', date: '2026-10-09', amount: 300 },                    // không gắn công trình
+    ] as any;
+    render(<AccountingView projects={projects} receipts={receipts} payments={[]} customers={[]} onNavigateTab={vi.fn()} />);
+    const o = screen.getByText('Còn phải thu (toàn DN)').closest('button, div')!;
+    expect(o).toHaveTextContent('600 đ');                          // CT1 còn 600; CT2 vượt nên 0
+    expect(o).toHaveTextContent('chưa tính phiếu thu không gắn công trình: 300 đ');
+  });
+});
+
 describe('Kho & Vật tư', () => {
   it('tồn kho: lọc hàng sắp hết / hết', async () => {
     D.inventory = [

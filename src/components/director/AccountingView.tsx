@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Wallet, FileDown } from 'lucide-react';
 import { dbService } from '../../lib/dbService';
 import type { Project, Receipt, Payment, Customer } from '../../types';
-import { todayYmd, toDay, cashflowByDay, spendByCategory, supplierPayable, CATEGORY_LABELS } from '../../lib/executiveDashboard';
+import { todayYmd, toDay, cashflowByDay, spendByCategory, supplierPayable, buildProjectFinance, sumFinance, CATEGORY_LABELS } from '../../lib/executiveDashboard';
 import { matchesQuery, rangeOf, inRange, type DatePreset } from '../../lib/directorViews';
 import { Card, Stat, Badge, Bar, Empty, PairBars, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, dm, dmy, tableHead, Th, type Tone } from './kit';
 
@@ -59,8 +59,12 @@ export default function AccountingView({ projects, receipts, payments, customers
   const propPending = advances.filter(a => a.status === 'pending_approval');
   const propVoucher = advances.filter(a => a.status === 'pending_payment' || a.status === 'awaiting_voucher_update');
   const payable = useMemo(() => supplierPayable(orders), [orders]);
-  const contractTotal = projects.filter(p => p.status !== 'cancelled').reduce((s, p) => s + (p.contractValue || 0), 0);
-  const collectedAll = receipts.reduce((s, r) => s + (r.amount || 0), 0);
+  // "Còn phải thu" = cộng số còn nợ của TỪNG công trình (hợp đồng − đã thu của chính công trình đó, không âm) — cùng công thức với Bảng điều hành
+  // tổng hợp để Giám đốc thấy một con số. Trước đây lấy tổng hợp đồng trừ MỌI phiếu thu, kể cả phiếu thu không gắn công trình
+  // (vd lô phiếu thu khách hàng nhập cùng đợt chuyển dữ liệu) nên thấp hơn thực tế hàng tỷ đồng.
+  const receivableAll = useMemo(() => sumFinance(buildProjectFinance(projects, receipts, [], today)).receivable, [projects, receipts, today]);
+  // Phiếu thu KHÔNG gắn công trình nào: không trừ vào hợp đồng công trình, nhưng vẫn hiện để không bị mất dấu
+  const unassignedReceipts = useMemo(() => receipts.filter(r => !r.projectId || !projects.some(p => p.id === r.projectId)).reduce((s, r) => s + (r.amount || 0), 0), [receipts, projects]);
 
   const flow = useMemo(() => cashflowByDay(receipts.filter(r => projOk(r.projectId)), realPays.filter(p => projOk(p.projectId)), today, 30), [receipts, realPays, today, project]);
   const cats = useMemo(() => spendByCategory(periodPays), [periodPays]);
@@ -127,7 +131,7 @@ export default function AccountingView({ projects, receipts, payments, customers
           <Stat label="Phiếu chi chờ duyệt" value={String(allPending.length)} sub={fmtFull(allPending.reduce((s, p) => s + (p.amount || 0), 0))} tone={allPending.length ? 'amber' : 'slate'} onClick={() => { setTab('pay'); resetPay(); setPStatus('pending'); setPreset('all'); }} active={tab === 'pay' && pStatus === 'pending'} />
           <Stat label="Đề xuất chờ duyệt" value={String(propPending.length)} tone={propPending.length ? 'amber' : 'slate'} onClick={() => { setTab('prop'); resetProp(); setAStatus('pending_approval'); setPreset('all'); }} active={tab === 'prop' && aStatus === 'pending_approval'} />
           <Stat label="Đề xuất chờ lập phiếu chi" value={String(propVoucher.length)} tone={propVoucher.length ? 'sky' : 'slate'} onClick={() => { setTab('prop'); resetProp(); setAStatus('pending_payment'); setPreset('all'); }} active={tab === 'prop' && aStatus === 'pending_payment'} />
-          <Stat label="Còn phải thu (toàn DN)" value={fmtFull(Math.max(0, contractTotal - collectedAll))} sub="Hợp đồng − đã thu" tone="amber" />
+          <Stat label="Còn phải thu (toàn DN)" value={fmtFull(receivableAll)} sub={`Cộng số còn nợ từng công trình${unassignedReceipts > 0 ? ` · chưa tính phiếu thu không gắn công trình: ${fmtFull(unassignedReceipts)}` : ''}`} tone="amber" />
           <Stat label="Nợ nhà cung cấp" value={fmtFull(payable)} sub="Đơn mua chưa thanh toán hết" tone={payable ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
         </div>
       </Card>
