@@ -191,7 +191,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
           <Stat label="Tổng công trình" value={String(projects.filter(p => p.status !== 'cancelled').length)} sub={`${projects.filter(p => p.status === 'completed').length} đã hoàn thành`} tone="indigo" onClick={resetProjects} />
           <Stat label="Đang chạy" value={String(active.length)} sub={`Tiến độ TB ${avgProgress}%`} tone="emerald" onClick={() => { resetProjects(); setStatus('processing'); }} active={status === 'processing'} />
           <Stat label="Trễ tiến độ" value={String(lateProjects)} sub="Quá ngày kết thúc" tone={lateProjects ? 'rose' : 'slate'} onClick={() => { resetProjects(); setHealth('late'); }} active={health === 'late'} />
-          <Stat label="Chi vượt / chi > thu" value={String(budgetRisk)} sub="Cần xem lại ngân sách" tone={budgetRisk ? 'rose' : 'slate'} onClick={() => { resetProjects(); setHealth('budget'); }} active={health === 'budget'} />
+          <Stat label="Chi vượt / chi > thu" value={String(budgetRisk)} sub="Gồm công trình đã chi nhưng chưa nhập hợp đồng" tone={budgetRisk ? 'rose' : 'slate'} onClick={() => { resetProjects(); setHealth('budget'); }} active={health === 'budget'} />
           <Stat label="Việc đang làm" value={String(buckets.doing.length)} tone="sky" onClick={() => { resetTasks(); setTView('doing'); }} active={tView === 'doing'} />
           <Stat label="Việc quá hạn" value={String(buckets.overdue.length)} tone={buckets.overdue.length ? 'rose' : 'slate'} onClick={() => { resetTasks(); setTView('overdue'); }} active={tView === 'overdue'} />
           <Stat label="Việc chưa làm" value={String(buckets.todo.length)} tone="amber" onClick={() => { resetTasks(); setTView('todo'); }} active={tView === 'todo'} />
@@ -253,7 +253,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
           <SelectBox label="Trạng thái" value={status} onChange={setStatus} options={[{ value: 'all', label: 'Tất cả' }, ...Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))]} />
           {stageOptions.length > 0 && <SelectBox label="Giai đoạn" value={stage} onChange={setStage} options={stageOptions} />}
           <SelectBox label="Trưởng dự án" value={pm} onChange={setPm} options={pmOptions} />
-          <SelectBox label="Tình trạng" value={health} onChange={setHealth} options={[{ value: 'all', label: 'Tất cả' }, { value: 'late', label: 'Trễ tiến độ' }, { value: 'stuck', label: 'Kẹt giai đoạn' }, { value: 'mismatch', label: 'Lệch giai đoạn' }, { value: 'behind', label: 'Chậm kế hoạch' }, { value: 'overdueTasks', label: 'Có việc quá hạn' }, { value: 'budget', label: 'Chi vượt / sắp hết ngân sách' }]} />
+          <SelectBox label="Tình trạng" value={health} onChange={setHealth} options={[{ value: 'all', label: 'Tất cả' }, { value: 'late', label: 'Trễ tiến độ' }, { value: 'stuck', label: 'Kẹt giai đoạn' }, { value: 'mismatch', label: 'Lệch giai đoạn' }, { value: 'behind', label: 'Chậm kế hoạch' }, { value: 'overdueTasks', label: 'Có việc quá hạn' }, { value: 'budget', label: 'Chi vượt / sắp hết ngân sách / chi chưa có hợp đồng' }]} />
         </FilterBar>
         {filteredProjects.length === 0 ? <Empty>Không có công trình nào khớp bộ lọc.</Empty> : (
           <div className="overflow-x-auto">

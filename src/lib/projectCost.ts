@@ -145,12 +145,17 @@ export function buildProjectCosts(projectIds: string[], inp: CostInputs): Map<st
   return out;
 }
 
-/** Cảnh báo ngân sách theo MÔ HÌNH MỚI: tổng chi phí so với giá trị hợp đồng; chi thực > thu. */
+/**
+ * Cảnh báo ngân sách theo MÔ HÌNH MỚI: tổng chi phí so với giá trị hợp đồng; chi thực > thu.
+ * noContract: công trình ĐÃ PHÁT SINH chi phí nhưng CHƯA nhập giá trị hợp đồng — không có mốc để so nên 2 cờ trên không bao giờ bật,
+ * Giám đốc sẽ không thấy công trình đang chi tiền mà chưa có hợp đồng/chưa thu đồng nào. Tính là rủi ro để rà lại.
+ */
 export function costBudgetFlags(contractValue: number, collected: number, c: ProjectCost) {
   const over = contractValue > 0 && c.total > contractValue;
   const near = !over && contractValue > 0 && c.total / contractValue >= 0.8;
   const loss = collected > 0 && c.paid > collected;
-  return { over, near, loss, risk: over || loss };
+  const noContract = !(contractValue > 0) && c.total > 0;
+  return { over, near, loss, noContract, risk: over || loss || noContract };
 }
 
 /** Chuỗi "chi tiết từng khoản" cho tooltip. */

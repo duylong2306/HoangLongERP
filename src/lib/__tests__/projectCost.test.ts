@@ -105,6 +105,9 @@ describe('costBudgetFlags', () => {
     expect(costBudgetFlags(1000, 0, c(1100, 0))).toMatchObject({ over: true, risk: true });
     expect(costBudgetFlags(1000, 0, c(850, 0))).toMatchObject({ near: true, risk: false });
     expect(costBudgetFlags(1000, 100, c(500, 300))).toMatchObject({ loss: true, risk: true });
-    expect(costBudgetFlags(0, 0, c(500, 500))).toMatchObject({ over: false, near: false, risk: false });   // chưa có giá trị hợp đồng: không cảnh báo vượt
+    // chưa có giá trị hợp đồng: không so được "vượt", nhưng đã phát sinh chi phí → cờ riêng noContract, tính là rủi ro
+    expect(costBudgetFlags(0, 0, c(500, 500))).toMatchObject({ over: false, near: false, noContract: true, risk: true });
+    expect(costBudgetFlags(0, 0, c(0, 0))).toMatchObject({ noContract: false, risk: false });            // chưa có hợp đồng và chưa chi gì: bình thường
+    expect(costBudgetFlags(1000, 0, c(500, 100))).toMatchObject({ noContract: false, risk: false });     // có hợp đồng: không bật cờ này
   });
 });
