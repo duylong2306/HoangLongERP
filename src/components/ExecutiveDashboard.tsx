@@ -9,6 +9,7 @@ import {
   RefreshCw, TrendingDown, TrendingUp, Users, Wallet, Building2, FileDown,
 } from 'lucide-react';
 import { dbService } from '../lib/dbService';
+import { buildProjectCosts } from '../lib/projectCost';
 import type { Project, Task, Receipt, Payment, Employee } from '../types';
 import {
   todayYmd, toDay, bucketTasks, buildProjectFinance, sumFinance, cashflowByDay, spendByCategory, paymentsOfDay, receiptsOfDay,
@@ -68,7 +69,7 @@ const Stat: React.FC<{ label: string; value: string; sub?: string; tone?: Tone; 
   return (
     <Tag type={onClick ? 'button' : undefined} onClick={onClick} className={`text-left bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 ${onClick ? 'hover:bg-amber-50/40 cursor-pointer transition-colors' : ''}`}>
       <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
-      <span className={`block text-xl font-black leading-tight ${color}`}>{value}</span>
+      <span className={`block font-black leading-tight break-words ${value.length > 13 ? 'text-base' : 'text-xl'} ${color}`}>{value}</span>
       {sub && <span className="block text-[10.5px] text-slate-500 mt-0.5">{sub}</span>}
     </Tag>
   );
@@ -124,6 +125,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
   const [orders, setOrders] = useState<any[]>([]);
   const [matProposals, setMatProposals] = useState<any[]>([]);
   const [advances, setAdvances] = useState<any[]>([]);
+  const [contracts, setContracts] = useState<any[]>([]); // hợp đồng thầu phụ — cần để tính Tổng chi phí / Đã chi từng công trình
   const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [taskTab, setTaskTab] = useState<'today' | 'overdue' | 'todo'>('today');
@@ -133,18 +135,20 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
   const loadExtras = useCallback(async () => {
     setRefreshing(true);
     const d = todayYmd();
-    const [a, l, o, m, s] = await Promise.allSettled([
+    const [a, l, o, m, s, c] = await Promise.allSettled([
       dbService.attendance.listForRange(d, d),
       dbService.hrmLeaves.list(),
       dbService.purchaseOrders.list(),
       dbService.materialProposals.list(),
       dbService.subcontractorAdvances.list(),
+      dbService.archivedQuotes.list('subcontractor'),
     ]);
     if (a.status === 'fulfilled') setAttendanceLogs(a.value || []);
     if (l.status === 'fulfilled') setLeaves(l.value || []);
     if (o.status === 'fulfilled') setOrders(o.value || []);
     if (m.status === 'fulfilled') setMatProposals(m.value || []);
     if (s.status === 'fulfilled') setAdvances(s.value || []);
+    if (c.status === 'fulfilled') setContracts(c.value || []);
     setNow(new Date());
     setLoadedAt(new Date());
     setRefreshing(false);
@@ -171,7 +175,11 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
   // Tiến độ công trình: tự tính theo giai đoạn (cột kanban) + việc con xong, PM ghi đè thì theo PM — cùng số với Tổng quan và Phòng Dự Án
   const colsBySector = useKanbanColumnsBySector();
   const progressOf = (p: Project) => computeProjectProgress(p, tasks, columnsForProject(p, colsBySector)).value;
-  const rows = useMemo(() => buildProjectFinance(projects, receipts, payments, today), [projects, receipts, payments, today]);
+  // "Đã chi" từng công trình lấy từ buildProjectCosts (cùng số với Phòng Dự án → Tổng chi phí): gồm cả tiền đã trả nhà cung cấp theo đơn
+  // mua hàng và thầu phụ. Trước đây chỉ cộng phiếu chi gắn công trình nên thấp hơn thực tế (phiếu chi NCC thường không gắn công trình).
+  const costs = useMemo(() => buildProjectCosts(projects.map(p => p.id), { payments, orders, advances, contracts, proposals: matProposals }), [projects, payments, orders, advances, contracts, matProposals]);
+  const spend = useMemo(() => new Map([...costs].map(([id, c]) => [id, { paid: c.paid, pending: c.pending }] as const)), [costs]);
+  const rows = useMemo(() => buildProjectFinance(projects, receipts, payments, today, spend), [projects, receipts, payments, today, spend]);
   const totals = useMemo(() => sumFinance(rows), [rows]);
   const flow = useMemo(() => cashflowByDay(receipts, payments, today, 14), [receipts, payments, today]);
   const categories = useMemo(() => spendByCategory(payments), [payments]);
@@ -257,12 +265,12 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
       <Card title="Tổng hợp tài chính toàn doanh nghiệp" icon={<BadgeDollarSign className="w-4 h-4 text-emerald-500" />}
         right={<Badge tone="slate">{rows.length} công trình</Badge>}>
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5">
-          <Stat label="Tổng giá trị hợp đồng" value={fmtShort(totals.contractValue)} sub={fmtFull(totals.contractValue)} tone="indigo" />
-          <Stat label="Đã thu" value={fmtShort(totals.collected)} sub={`${totals.collectedPct}% giá trị hợp đồng`} tone="emerald" />
-          <Stat label="Đã chi (đã duyệt)" value={fmtShort(totals.spent)} sub={`${totals.spentPct}% giá trị hợp đồng`} tone="rose" />
-          <Stat label="Còn phải thu" value={fmtShort(totals.receivable)} sub="Hợp đồng − đã thu" tone="amber" />
-          <Stat label="Thu − Chi (dòng tiền)" value={fmtShort(totals.cashMargin)} sub={totals.cashMargin >= 0 ? 'Đang dương' : 'Đang âm'} tone={totals.cashMargin >= 0 ? 'sky' : 'rose'} />
-          <Stat label="Nợ nhà cung cấp" value={fmtShort(payable)} sub="Đơn mua chưa thanh toán hết" tone={payable > 0 ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
+          <Stat label="Tổng giá trị hợp đồng" value={fmtFull(totals.contractValue)} tone="indigo" />
+          <Stat label="Đã thu" value={fmtFull(totals.collected)} sub={`${totals.collectedPct}% giá trị hợp đồng`} tone="emerald" />
+          <Stat label="Đã chi (đã duyệt)" value={fmtFull(totals.spent)} sub={`${totals.spentPct}% giá trị hợp đồng`} tone="rose" />
+          <Stat label="Còn phải thu" value={fmtFull(totals.receivable)} sub="Hợp đồng − đã thu" tone="amber" />
+          <Stat label="Thu − Chi (dòng tiền)" value={fmtFull(totals.cashMargin)} sub={totals.cashMargin >= 0 ? 'Đang dương' : 'Đang âm'} tone={totals.cashMargin >= 0 ? 'sky' : 'rose'} />
+          <Stat label="Nợ nhà cung cấp" value={fmtFull(payable)} sub="Đơn mua chưa thanh toán hết" tone={payable > 0 ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <div><div className="flex justify-between text-[10.5px] text-slate-600 mb-1"><span>Đã thu / hợp đồng</span><b>{totals.collectedPct}%</b></div><Bar pct={totals.collectedPct} tone="emerald" h="h-2" /></div>
@@ -298,7 +306,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
                     <td className="px-3 py-2.5 text-right font-mono text-emerald-600">{fmtFull(r.collected)}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-rose-600">
                       {fmtFull(r.spent)}
-                      {r.pendingSpent > 0 && <span className="block text-[10px] text-amber-600">+ {fmtShort(r.pendingSpent)} chờ duyệt</span>}
+                      {r.pendingSpent > 0 && <span className="block text-[10px] text-amber-600">+ {fmtFull(r.pendingSpent)} chờ duyệt</span>}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2"><Bar pct={r.spentPct} tone={r.spentPct > 100 ? 'rose' : r.spentPct >= 80 ? 'amber' : 'sky'} /><b className="text-[10.5px] text-slate-700 w-9 text-right">{r.spentPct}%</b></div>
@@ -402,9 +410,9 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
         {/* 5c. Kế toán */}
         <Card title="Kế toán — thu chi hôm nay" icon={<Wallet className="w-4 h-4 text-emerald-500" />} right={<button type="button" onClick={() => onNavigateTab('finance')} className="text-[10.5px] font-bold text-emerald-600 hover:text-emerald-500 cursor-pointer flex items-center gap-1">Mở tài chính <ArrowRight className="w-3 h-3" /></button>}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <Stat label="Chi hôm nay" value={fmtShort(todayPayTotal)} sub={`${todayPays.length} phiếu`} tone="rose" />
-            <Stat label="Thu hôm nay" value={fmtShort(todayRecTotal)} sub={`${todayRecs.length} phiếu`} tone="emerald" />
-            <Stat label="Phiếu chi chờ duyệt" value={String(pendingPays.length)} sub={fmtShort(pendingPayAmount)} tone={pendingPays.length ? 'amber' : 'slate'} />
+            <Stat label="Chi hôm nay" value={fmtFull(todayPayTotal)} sub={`${todayPays.length} phiếu`} tone="rose" />
+            <Stat label="Thu hôm nay" value={fmtFull(todayRecTotal)} sub={`${todayRecs.length} phiếu`} tone="emerald" />
+            <Stat label="Phiếu chi chờ duyệt" value={String(pendingPays.length)} sub={fmtFull(pendingPayAmount)} tone={pendingPays.length ? 'amber' : 'slate'} />
             <Stat label="Chờ lập phiếu chi" value={String(awaitingVoucher.length)} sub="Đề xuất đã duyệt" tone={awaitingVoucher.length ? 'amber' : 'slate'} />
           </div>
           <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 mt-3 mb-1">Hôm nay chi những khoản nào</p>
@@ -445,7 +453,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
         <div className="xl:col-span-2">
           <Card title="Thu — chi 14 ngày gần nhất" icon={<TrendingUp className="w-4 h-4 text-sky-500" />}>
             <PairBars money data={flow.map(d => ({ label: dayLabel(d.day), a: d.income, b: d.expense }))} colorA="fill-emerald-500" colorB="fill-rose-400" titleA="Thu" titleB="Chi" />
-            <p className="text-[11px] text-slate-600 mt-2">14 ngày qua: thu <b className="text-emerald-600">{fmtShort(flow.reduce((s, d) => s + d.income, 0))}</b> · chi <b className="text-rose-600">{fmtShort(flow.reduce((s, d) => s + d.expense, 0))}</b></p>
+            <p className="text-[11px] text-slate-600 mt-2">14 ngày qua: thu <b className="text-emerald-600">{fmtFull(flow.reduce((s, d) => s + d.income, 0))}</b> · chi <b className="text-rose-600">{fmtFull(flow.reduce((s, d) => s + d.expense, 0))}</b></p>
           </Card>
         </div>
         <Card title="Cơ cấu chi theo hạng mục" icon={<TrendingDown className="w-4 h-4 text-rose-500" />}>
@@ -453,7 +461,7 @@ export default function ExecutiveDashboard({ projects, tasks, receipts, payments
             <ul className="space-y-2.5">
               {categories.slice(0, 7).map(c => (
                 <li key={c.key}>
-                  <div className="flex justify-between text-[11px] text-slate-700 mb-1"><span className="font-bold">{c.label}</span><span className="font-mono">{fmtShort(c.amount)} · {c.pct}%</span></div>
+                  <div className="flex justify-between text-[11px] text-slate-700 mb-1"><span className="font-bold">{c.label}</span><span className="font-mono">{fmtFull(c.amount)} · {c.pct}%</span></div>
                   <Bar pct={c.pct} tone="amber" h="h-2" />
                 </li>
               ))}

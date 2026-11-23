@@ -6,7 +6,7 @@ import { dbService } from '../../lib/dbService';
 import type { Project } from '../../types';
 import { todayYmd, toDay, materialByDay, proposalStatusCounts, supplierPayable, PROPOSAL_STATUS_LABELS } from '../../lib/executiveDashboard';
 import { matchesQuery, rangeOf, inRange, type DatePreset } from '../../lib/directorViews';
-import { Card, Stat, Badge, Empty, PairBars, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, fmtShort, dm, dmy, tableHead, Th, type Tone } from './kit';
+import { Card, Stat, Badge, Empty, PairBars, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, dm, dmy, tableHead, Th, type Tone } from './kit';
 import MiniLoader from '../MiniLoader';
 
 interface Props { projects: Project[]; onNavigateTab: (tabId: string) => void }
@@ -96,12 +96,12 @@ export default function WarehouseView({ projects, onNavigateTab }: Props) {
       <Card title="Tổng quan kho & vật tư" icon={<PackageOpen className="w-4 h-4 text-teal-500" />}
         right={<button type="button" onClick={load} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-700 cursor-pointer disabled:opacity-60">{loading ? <MiniLoader size={14} /> : <RefreshCw className="w-3.5 h-3.5" />}Làm mới</button>}>
         <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2.5">
-          <Stat label="Mặt hàng trong kho" value={String(inventory.length)} sub={`Giá trị tồn ${fmtShort(stockValue)}`} tone="indigo" onClick={() => { setTab('stock'); resetStock(); }} />
+          <Stat label="Mặt hàng trong kho" value={String(inventory.length)} sub={`Giá trị tồn ${fmtFull(stockValue)}`} tone="indigo" onClick={() => { setTab('stock'); resetStock(); }} />
           <Stat label="Sắp hết hàng" value={String(lowCount)} tone={lowCount ? 'amber' : 'slate'} onClick={() => { setTab('stock'); resetStock(); setSState('low'); }} active={tab === 'stock' && sState === 'low'} />
           <Stat label="Hết hàng" value={String(outCount)} tone={outCount ? 'rose' : 'slate'} onClick={() => { setTab('stock'); resetStock(); setSState('out'); }} active={tab === 'stock' && sState === 'out'} />
           <Stat label="Đơn mua hôm nay" value={String(todayRow?.orders || 0)} tone="teal" onClick={() => { setTab('order'); resetOrder(); setPreset('today'); }} />
           <Stat label="Đơn mua 14 ngày" value={String(days.reduce((s, d) => s + d.orders, 0))} sub={`${live.length} đơn hiệu lực`} tone="teal" />
-          <Stat label="Nợ nhà cung cấp" value={fmtShort(payable)} tone={payable ? 'amber' : 'slate'} onClick={() => { setTab('order'); resetOrder(); setPreset('all'); setODebt('debt'); }} active={tab === 'order' && oDebt === 'debt'} />
+          <Stat label="Nợ nhà cung cấp" value={fmtFull(payable)} tone={payable ? 'amber' : 'slate'} onClick={() => { setTab('order'); resetOrder(); setPreset('all'); setODebt('debt'); }} active={tab === 'order' && oDebt === 'debt'} />
           <Stat label="Đề xuất hôm nay" value={String(todayRow?.proposals || 0)} tone="indigo" onClick={() => { setTab('prop'); resetProp(); setPPreset('today'); }} />
           <Stat label="Đề xuất chờ duyệt" value={String(statusCounts.find(s => s.key === 'waiting_approval')?.count || 0)} tone={(statusCounts.find(s => s.key === 'waiting_approval')?.count || 0) ? 'amber' : 'slate'} onClick={() => { setTab('prop'); resetProp(); setPStatus('waiting_approval'); }} active={tab === 'prop' && pStatus === 'waiting_approval'} />
         </div>

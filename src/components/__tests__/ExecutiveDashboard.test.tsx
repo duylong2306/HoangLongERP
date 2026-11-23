@@ -11,6 +11,7 @@ vi.mock('../../lib/dbService', () => ({
     purchaseOrders: { list: vi.fn().mockResolvedValue([{ id: 'PO1', status: 'confirmed', createdAt: '2026-10-09T02:00:00', congNo: 500000 }]) },
     materialProposals: { list: vi.fn().mockResolvedValue([{ id: 'MP1', status: 'waiting_approval', createdAt: '2026-10-09T03:00:00' }]) },
     subcontractorAdvances: { list: vi.fn().mockResolvedValue([{ id: 'A1', status: 'pending_approval' }, { id: 'A2', status: 'pending_payment' }]) },
+    archivedQuotes: { list: vi.fn().mockResolvedValue([]) }, // hợp đồng thầu phụ (để tính Đã chi theo Tổng chi phí)
   },
 }));
 import ExecutiveDashboard from '../ExecutiveDashboard';
@@ -46,9 +47,9 @@ describe('ExecutiveDashboard — Bảng điều hành Giám đốc', () => {
     await open();
     const khoi = screen.getByText('Tổng hợp tài chính toàn doanh nghiệp').closest('section')!;
     expect(within(khoi).getByText('Tổng giá trị hợp đồng')).toBeInTheDocument();
-    expect(within(khoi).getByText('2,1 tỷ')).toBeInTheDocument();      // 2.000tr + 100tr
-    expect(within(khoi).getByText('Đã thu').nextSibling).toHaveTextContent('500 tr');
-    expect(within(khoi).getByText('Đã chi (đã duyệt)').nextSibling).toHaveTextContent('250 tr'); // 120 + 130, bỏ phiếu chờ duyệt
+    expect(within(khoi).getByText('2.100.000.000 đ')).toBeInTheDocument();      // 2.000tr + 100tr — hiện ĐỦ từng đồng, không rút gọn
+    expect(within(khoi).getByText('Đã thu').nextSibling).toHaveTextContent('500.000.000 đ');
+    expect(within(khoi).getByText('Đã chi (đã duyệt)').nextSibling).toHaveTextContent('250.000.000 đ'); // 120 + 130, bỏ phiếu chờ duyệt
   });
   it('chi phí từng công trình: từng dòng + tổng cộng + cảnh báo vượt ngân sách', async () => {
     await open();

@@ -7,7 +7,7 @@ import { dbService } from '../../lib/dbService';
 import type { Project, Receipt, Payment, Customer } from '../../types';
 import { todayYmd, toDay, cashflowByDay, spendByCategory, supplierPayable, CATEGORY_LABELS } from '../../lib/executiveDashboard';
 import { matchesQuery, rangeOf, inRange, type DatePreset } from '../../lib/directorViews';
-import { Card, Stat, Badge, Bar, Empty, PairBars, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, fmtShort, dm, dmy, tableHead, Th, type Tone } from './kit';
+import { Card, Stat, Badge, Bar, Empty, PairBars, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, dm, dmy, tableHead, Th, type Tone } from './kit';
 
 interface Props { projects: Project[]; receipts: Receipt[]; payments: Payment[]; customers: Customer[]; onNavigateTab: (tabId: string) => void }
 
@@ -117,18 +117,18 @@ export default function AccountingView({ projects, receipts, payments, customers
           <SelectBox label="Công trình" value={project} onChange={setProject} options={projectOptions} />
         </FilterBar>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-          <Stat label="Chi trong kỳ (đã duyệt)" value={fmtShort(approvedSum)} sub={`${periodPays.filter(p => p.status === 'approved').length} phiếu`} tone="rose" />
-          <Stat label="Thu trong kỳ" value={fmtShort(recSum)} sub={`${periodRecs.length} phiếu`} tone="emerald" />
-          <Stat label="Thu − Chi trong kỳ" value={fmtShort(recSum - approvedSum)} sub={recSum - approvedSum >= 0 ? 'Đang dương' : 'Đang âm'} tone={recSum - approvedSum >= 0 ? 'sky' : 'rose'} />
-          <Stat label="Chi chờ duyệt trong kỳ" value={fmtShort(pendingSum)} sub={`${periodPays.filter(p => p.status === 'pending').length} phiếu`} tone={pendingSum ? 'amber' : 'slate'} />
+          <Stat label="Chi trong kỳ (đã duyệt)" value={fmtFull(approvedSum)} sub={`${periodPays.filter(p => p.status === 'approved').length} phiếu`} tone="rose" />
+          <Stat label="Thu trong kỳ" value={fmtFull(recSum)} sub={`${periodRecs.length} phiếu`} tone="emerald" />
+          <Stat label="Thu − Chi trong kỳ" value={fmtFull(recSum - approvedSum)} sub={recSum - approvedSum >= 0 ? 'Đang dương' : 'Đang âm'} tone={recSum - approvedSum >= 0 ? 'sky' : 'rose'} />
+          <Stat label="Chi chờ duyệt trong kỳ" value={fmtFull(pendingSum)} sub={`${periodPays.filter(p => p.status === 'pending').length} phiếu`} tone={pendingSum ? 'amber' : 'slate'} />
         </div>
         <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 mt-4 mb-2">Cần xử lý & công nợ (không phụ thuộc bộ lọc)</p>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
-          <Stat label="Phiếu chi chờ duyệt" value={String(allPending.length)} sub={fmtShort(allPending.reduce((s, p) => s + (p.amount || 0), 0))} tone={allPending.length ? 'amber' : 'slate'} onClick={() => { setTab('pay'); resetPay(); setPStatus('pending'); setPreset('all'); }} active={tab === 'pay' && pStatus === 'pending'} />
+          <Stat label="Phiếu chi chờ duyệt" value={String(allPending.length)} sub={fmtFull(allPending.reduce((s, p) => s + (p.amount || 0), 0))} tone={allPending.length ? 'amber' : 'slate'} onClick={() => { setTab('pay'); resetPay(); setPStatus('pending'); setPreset('all'); }} active={tab === 'pay' && pStatus === 'pending'} />
           <Stat label="Đề xuất chờ duyệt" value={String(propPending.length)} tone={propPending.length ? 'amber' : 'slate'} onClick={() => { setTab('prop'); resetProp(); setAStatus('pending_approval'); setPreset('all'); }} active={tab === 'prop' && aStatus === 'pending_approval'} />
           <Stat label="Đề xuất chờ lập phiếu chi" value={String(propVoucher.length)} tone={propVoucher.length ? 'sky' : 'slate'} onClick={() => { setTab('prop'); resetProp(); setAStatus('pending_payment'); setPreset('all'); }} active={tab === 'prop' && aStatus === 'pending_payment'} />
-          <Stat label="Còn phải thu (toàn DN)" value={fmtShort(Math.max(0, contractTotal - collectedAll))} sub="Hợp đồng − đã thu" tone="amber" />
-          <Stat label="Nợ nhà cung cấp" value={fmtShort(payable)} sub="Đơn mua chưa thanh toán hết" tone={payable ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
+          <Stat label="Còn phải thu (toàn DN)" value={fmtFull(Math.max(0, contractTotal - collectedAll))} sub="Hợp đồng − đã thu" tone="amber" />
+          <Stat label="Nợ nhà cung cấp" value={fmtFull(payable)} sub="Đơn mua chưa thanh toán hết" tone={payable ? 'amber' : 'slate'} onClick={() => onNavigateTab('finance')} />
         </div>
       </Card>
 
@@ -141,7 +141,7 @@ export default function AccountingView({ projects, receipts, payments, customers
         <Card title="Chi theo hạng mục (trong kỳ)" icon={<Wallet className="w-4 h-4 text-rose-500" />}>
           {cats.length === 0 ? <Empty>Không có khoản chi nào được duyệt trong kỳ.</Empty> : (
             <ul className="space-y-2.5">{cats.slice(0, 7).map(c => (
-              <li key={c.key}><div className="flex justify-between text-[11px] text-slate-700 mb-1"><span className="font-bold">{c.label}</span><span className="font-mono">{fmtShort(c.amount)} · {c.pct}%</span></div><Bar pct={c.pct} tone="amber" h="h-2" /></li>
+              <li key={c.key}><div className="flex justify-between text-[11px] text-slate-700 mb-1"><span className="font-bold">{c.label}</span><span className="font-mono">{fmtFull(c.amount)} · {c.pct}%</span></div><Bar pct={c.pct} tone="amber" h="h-2" /></li>
             ))}</ul>
           )}
         </Card>

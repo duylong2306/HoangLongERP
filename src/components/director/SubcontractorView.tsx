@@ -7,7 +7,7 @@ import { dbService } from '../../lib/dbService';
 import type { Project, Payment } from '../../types';
 import { todayYmd, toDay } from '../../lib/executiveDashboard';
 import { matchesQuery, rangeOf, inRange, buildSubcontractorRows, contractAmount, type DatePreset } from '../../lib/directorViews';
-import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, fmtShort, dmy, tableHead, Th } from './kit';
+import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, DateRangeFilter, usePager, fmtFull, dmy, tableHead, Th } from './kit';
 import MiniLoader from '../MiniLoader';
 
 interface Props { projects: Project[]; payments: Payment[]; onNavigateTab: (tabId: string) => void }
@@ -79,10 +79,10 @@ export default function SubcontractorView({ projects, payments, onNavigateTab }:
         right={<button type="button" onClick={load} disabled={loading} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-700 cursor-pointer disabled:opacity-60">{loading ? <MiniLoader size={14} /> : <RefreshCw className="w-3.5 h-3.5" />}Làm mới</button>}>
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5">
           <Stat label="Thầu phụ hợp tác" value={String(subs.length)} sub={`${working} đang có hợp đồng`} tone="indigo" onClick={resetSub} />
-          <Stat label="Giá trị hợp đồng đã duyệt" value={fmtShort(totalContract)} sub={`${contracts.filter(c => c.isApproved === true).length} hợp đồng`} tone="indigo" />
-          <Stat label="Đã chi cho thầu phụ" value={fmtShort(totalPaid)} sub={totalContract ? `${Math.round((totalPaid / totalContract) * 100)}% giá trị hợp đồng` : undefined} tone="rose" />
-          <Stat label="Còn phải chi theo HĐ" value={fmtShort(totalRemaining)} tone="amber" />
-          <Stat label="Công nợ ghi nhận" value={fmtShort(totalDebt)} tone={totalDebt ? 'amber' : 'slate'} onClick={() => { resetSub(); setState('debt'); }} active={state === 'debt'} />
+          <Stat label="Giá trị hợp đồng đã duyệt" value={fmtFull(totalContract)} sub={`${contracts.filter(c => c.isApproved === true).length} hợp đồng`} tone="indigo" />
+          <Stat label="Đã chi cho thầu phụ" value={fmtFull(totalPaid)} sub={totalContract ? `${Math.round((totalPaid / totalContract) * 100)}% giá trị hợp đồng` : undefined} tone="rose" />
+          <Stat label="Còn phải chi theo HĐ" value={fmtFull(totalRemaining)} tone="amber" />
+          <Stat label="Công nợ ghi nhận" value={fmtFull(totalDebt)} tone={totalDebt ? 'amber' : 'slate'} onClick={() => { resetSub(); setState('debt'); }} active={state === 'debt'} />
           <Stat label="Đề xuất đang chờ" value={String(pendingProps)} sub="Chờ duyệt / lập phiếu chi" tone={pendingProps ? 'amber' : 'slate'} onClick={() => { resetSub(); setState('proposal'); }} active={state === 'proposal'} />
         </div>
       </Card>
@@ -107,7 +107,7 @@ export default function SubcontractorView({ projects, payments, onNavigateTab }:
                   <td className="px-3 py-2.5 text-right">{r.approvedContracts}/{r.contracts}</td>
                   <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap">{fmtFull(r.contractValue)}</td>
                   <td className="px-3 py-2.5"><div className="flex items-center gap-2"><Bar pct={pct} tone={pct > 100 ? 'rose' : pct >= 80 ? 'amber' : 'sky'} /><b className="text-[10.5px] w-9 text-right">{pct}%</b></div></td>
-                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-600">{fmtFull(r.paid)}{r.pendingPaid > 0 && <span className="block text-[10px] text-amber-600">+ {fmtShort(r.pendingPaid)} chờ duyệt</span>}</td>
+                  <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-rose-600">{fmtFull(r.paid)}{r.pendingPaid > 0 && <span className="block text-[10px] text-amber-600">+ {fmtFull(r.pendingPaid)} chờ duyệt</span>}</td>
                   <td className="px-3 py-2.5 text-right font-mono whitespace-nowrap text-amber-600">{fmtFull(r.remaining)}</td>
                   <td className={`px-3 py-2.5 text-right font-mono whitespace-nowrap ${r.debt > 0 ? 'text-amber-600 font-bold' : 'text-slate-400'}`}>{fmtFull(r.debt)}</td>
                   <td className="px-3 py-2.5 text-right">{r.projectIds.length}</td>

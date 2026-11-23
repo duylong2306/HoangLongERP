@@ -93,15 +93,24 @@ export interface ProjectFinanceRow {
 /** Phiếu chi NẠP quỹ (không phải chi phí công trình) — loại khỏi tổng chi. */
 const isCashFundDeposit = (p: Payment) => (p.category as string) === 'cash_fund';
 
-export function buildProjectFinance(projects: Project[], receipts: Receipt[], payments: Payment[], today: string): ProjectFinanceRow[] {
+/** Số "đã chi / chờ chi" của một công trình theo cách tính của lib/projectCost.ts (buildProjectCosts). */
+export interface ProjectSpendOverride { paid: number; pending: number }
+
+/**
+ * @param spendByProject  (tuỳ chọn) số đã chi / chờ duyệt của từng công trình lấy từ buildProjectCosts.
+ *   Có truyền → "Đã chi" khớp từng đồng với bảng Tổng chi phí của Phòng Dự án. Nếu KHÔNG truyền thì chỉ cộng phiếu chi gắn
+ *   công trình — bỏ sót tiền đã trả nhà cung cấp theo đơn mua hàng (phiếu chi NCC thường không gắn công trình) nên thấp hơn thực tế.
+ */
+export function buildProjectFinance(projects: Project[], receipts: Receipt[], payments: Payment[], today: string, spendByProject?: Map<string, ProjectSpendOverride>): ProjectFinanceRow[] {
   return projects
     .filter(p => p.status !== 'cancelled')
     .map(p => {
       const contractValue = p.contractValue || 0;
       const collected = receipts.filter(r => r.projectId === p.id).reduce((s, r) => s + (r.amount || 0), 0);
       const mine = payments.filter(x => x.projectId === p.id && !isCashFundDeposit(x));
-      const spent = mine.filter(x => x.status === 'approved').reduce((s, x) => s + (x.amount || 0), 0);
-      const pendingSpent = mine.filter(x => x.status === 'pending').reduce((s, x) => s + (x.amount || 0), 0);
+      const override = spendByProject?.get(p.id);
+      const spent = override ? override.paid : mine.filter(x => x.status === 'approved').reduce((s, x) => s + (x.amount || 0), 0);
+      const pendingSpent = override ? override.pending : mine.filter(x => x.status === 'pending').reduce((s, x) => s + (x.amount || 0), 0);
       const spentPct = contractValue > 0 ? Math.round((spent / contractValue) * 100) : 0;
       const collectedPct = contractValue > 0 ? Math.round((collected / contractValue) * 100) : 0;
       const flags: ProjectFinanceRow['flags'] = [];

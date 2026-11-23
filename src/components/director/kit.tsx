@@ -47,7 +47,7 @@ export const Stat: React.FC<{ label: string; value: string; sub?: string; tone?:
     <Tag type={onClick ? 'button' : undefined} onClick={onClick} aria-pressed={onClick ? !!active : undefined}
       className={`text-left border rounded-xl px-3 py-2.5 ${active ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'} ${onClick ? 'hover:bg-amber-50/40 cursor-pointer transition-colors' : ''}`}>
       <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
-      <span className={`block text-xl font-black leading-tight ${toneText[tone]}`}>{value}</span>
+      <span className={`block font-black leading-tight break-words ${value.length > 13 ? 'text-base' : 'text-xl'} ${toneText[tone]}`}>{value}</span>
       {sub && <span className="block text-[10.5px] text-slate-500 mt-0.5">{sub}</span>}
     </Tag>
   );

@@ -64,6 +64,14 @@ describe('Tài chính từng công trình', () => {
     expect(rows[0].receivable).toBe(400);
     expect(rows[0].flags).toEqual([]);
   });
+  it('truyền số đã chi theo Tổng chi phí → dùng đúng số đó (gồm tiền trả NCC không gắn công trình), từng đồng', () => {
+    const spend = new Map([['P1', { paid: 1_132_875_045, pending: 12_345 }]]);
+    const rows = buildProjectFinance([proj({ contractValue: 3_000_000_000 })], [rec({ amount: 1_000_000_001 })], [pay({ amount: 300 })], TODAY, spend);
+    expect(rows[0].spent).toBe(1_132_875_045);        // không cộng thêm phiếu 300 (đã nằm trong số tổng chi phí)
+    expect(rows[0].pendingSpent).toBe(12_345);
+    expect(rows[0].cashMargin).toBe(1_000_000_001 - 1_132_875_045);
+    expect(sumFinance(rows).spent).toBe(1_132_875_045);
+  });
   it('cờ cảnh báo: vượt hợp đồng, sắp hết ngân sách, chi > thu, trễ tiến độ, chưa có giá trị HĐ', () => {
     const rows = buildProjectFinance([
       proj({ id: 'A', contractValue: 1000 }), proj({ id: 'B', contractValue: 1000 }), proj({ id: 'C', contractValue: 1000, endDate: '2026-09-01' }), proj({ id: 'D', contractValue: 0 }),

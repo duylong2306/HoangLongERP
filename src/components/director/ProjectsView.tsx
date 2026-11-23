@@ -14,7 +14,7 @@ import { computeProjectProgress, columnsForProject, stageIdOf, buildPipeline, pr
 import { useKanbanColumnsBySector } from '../../hooks/useKanbanColumnsBySector';
 import { useStageEntries } from '../../hooks/useStageEntries';
 import { buildProjectHealth, avgDaysInStage, ALERT_LABEL, type AlertKind } from '../../lib/projectAlerts';
-import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, usePager, fmtFull, fmtShort, dmy, tableHead, Th, type Tone } from './kit';
+import { Card, Stat, Badge, Bar, Empty, FilterBar, SearchBox, SelectBox, usePager, fmtFull, dmy, tableHead, Th, type Tone } from './kit';
 
 interface Props {
   projects: Project[]; tasks: Task[]; receipts: Receipt[]; payments: Payment[]; employees: Employee[]; customers: Customer[];
@@ -202,7 +202,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
               className={`text-left border rounded-xl px-3 py-2 cursor-pointer transition-colors ${type === x.t ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200 hover:bg-amber-50/40'}`}>
               <span className="block text-[11px] font-black text-slate-700">{TYPE_LABEL[x.t]}</span>
               <span className="block text-[11px] text-slate-500">{x.count} công trình · {x.running} đang chạy</span>
-              <span className="block text-[11px] font-mono font-bold text-indigo-600">{fmtShort(x.value)}</span>
+              <span className="block text-[11px] font-mono font-bold text-indigo-600">{fmtFull(x.value)}</span>
             </button>
           ))}
         </div>
@@ -231,7 +231,7 @@ export default function ProjectsView({ projects, tasks, receipts, payments, empl
                   className={`w-full text-left grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_auto] items-center gap-2.5 border rounded-xl px-3 py-2 transition-colors ${on ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'} ${st.count ? 'cursor-pointer hover:bg-amber-50/40' : 'opacity-60 cursor-default'}`}>
                   <span className="text-[11px] font-black text-slate-700 truncate"><span className="text-slate-400 font-mono mr-1">{st.index + 1}</span>{st.name}</span>
                   <span className="min-w-0"><Bar pct={(st.count / funnelMax) * 100} tone="amber" h="h-2" /></span>
-                  <span className="text-right whitespace-nowrap"><b className="text-[12px] text-slate-800" data-testid="funnel-count">{st.count}</b><span className="text-[10.5px] text-slate-500"> dự án{st.count ? ` · ${fmtShort(st.value)} · TB ${st.avgProgress}%` : ''}</span>
+                  <span className="text-right whitespace-nowrap"><b className="text-[12px] text-slate-800" data-testid="funnel-count">{st.count}</b><span className="text-[10.5px] text-slate-500"> dự án{st.count ? ` · ${fmtFull(st.value)} · TB ${st.avgProgress}%` : ''}</span>
                     {st.count > 0 && (() => {
                       const avg = avgDaysInStage(st.projectIds, healthMap);
                       const stuck = st.projectIds.filter(id => healthMap.get(id)?.alerts.some(a => a.kind === 'stuck')).length;
