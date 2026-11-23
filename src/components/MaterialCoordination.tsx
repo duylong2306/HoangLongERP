@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { dbService } from '../lib/dbService';
 import { createMaterialProposalsFromItems } from '../lib/materialProposals';
+import { matchesMaterialSearch } from '../lib/materialSearch';   // tìm đề xuất theo tên/mã/dự án/mã đơn hàng
 import { ordersToVoidOnProposalDelete } from '../lib/proposalVoid';   // hủy đơn treo trước khi xóa đề xuất đã hủy
 import { ensureProjectChatGroup, sendGroupChatMessage, addMemberToConversation } from '../lib/chatStore';
 import {
@@ -471,17 +472,25 @@ export default function MaterialCoordination({
   // Bọc useMemo vì boardItems có thể vài trăm thẻ và trước đây filteredDocs/stats
   // tính lại (gồm gọi resolveStatus() lặp 7 lần/thẻ) ở MỌI re-render, kể cả khi
   // chỉ gõ tìm kiếm hay mở 1 thẻ chi tiết không liên quan.
+  // Mã các đơn mua hàng (PO-…) của từng đề xuất, để tìm đề xuất theo MÃ ĐƠN HÀNG. Gộp 2 nguồn: danh sách đơn ghi trên đề xuất
+  // (purchaseOrderIds) và các đơn trỏ ngược về đề xuất (proposalId) — đơn cũ có thể chỉ có 1 trong 2 liên kết.
+  const poCodesByProposal = React.useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const o of purchaseOrders) {
+      if (!o?.proposalId || !o?.id) continue;
+      (m.get(o.proposalId) || m.set(o.proposalId, []).get(o.proposalId)!).push(String(o.id));
+    }
+    return m;
+  }, [purchaseOrders]);
+
   const filteredDocs = React.useMemo(() => boardItems.filter(item => {
-    const docName = item.doc.name?.toLowerCase() || '';
-    const docCode = item.doc.code?.toLowerCase() || '';
-    const projName = item.project.name?.toLowerCase() || '';
-    const projCode = item.project.code?.toLowerCase() || '';
-    const search = searchTerm.toLowerCase();
-    const matchesSearch = docName.includes(search) || docCode.includes(search) || projName.includes(search) || projCode.includes(search);
+    // Mã đơn hàng của đề xuất: danh sách đơn ghi trên đề xuất + các đơn trỏ ngược về đề xuất
+    const poCodes = [...((item.doc.purchaseOrderIds as string[] | undefined) || []), ...(poCodesByProposal.get(item.doc.id) || [])];
+    const matchesSearch = matchesMaterialSearch(searchTerm, { docName: item.doc.name, docCode: item.doc.code, projName: item.project.name, projCode: item.project.code, poCodes });
     const st = resolveStatus(item);
     const matchesStatus = statusFilter === 'all' || st === statusFilter;
     return matchesSearch && matchesStatus;
-  }), [boardItems, searchTerm, statusFilter]);
+  }), [boardItems, searchTerm, statusFilter, poCodesByProposal]);
 
   const stats = React.useMemo(() => {
     // Chỉ gọi resolveStatus() 1 lần/thẻ thay vì 6 lần filter riêng biệt.
@@ -1950,7 +1959,7 @@ export default function MaterialCoordination({
               <input
                 type="text"
                 data-testid="material-search"
-                placeholder="Mã dự án, tên, vật tư…"
+                placeholder="Mã dự án, tên, vật tư, mã đơn hàng…"
                 value={searchTerm}
                 onChange={(e) => { setSearchTerm(e.target.value); setColPage({}); }}
                 className="h-9 w-64 max-w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 text-[13px] text-slate-800 outline-none focus:border-[#0d47c9]"
