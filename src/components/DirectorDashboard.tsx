@@ -1,7 +1,7 @@
 // ─── Phòng Giám Đốc: Bảng điều hành ──────────────────────────────────────────────────────────────────────────
 // Thanh tab: Tổng Hợp (bảng điều hành chung) + 5 phòng ban. Mỗi tab là một màn hình riêng trong src/components/director/ (có bộ lọc, phân trang, chọn số dòng).
 // File này chỉ còn lo thanh tab và chuyển màn hình; số liệu và giao diện nằm ở các màn hình con.
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Folder, Users, DollarSign, Warehouse, Briefcase, ClipboardList } from 'lucide-react';
 import { Project, Task, Receipt, Payment, Employee, Customer } from '../types';
 import ExecutiveDashboard from './ExecutiveDashboard';
@@ -10,6 +10,8 @@ import HrView from './director/HrView';
 import AccountingView from './director/AccountingView';
 import WarehouseView from './director/WarehouseView';
 import SubcontractorView from './director/SubcontractorView';
+import { dbService } from '../lib/dbService';
+import { withApprovedContractValue } from '../lib/projectContract';
 
 type SubDept = 'projects' | 'hr' | 'accounting' | 'warehouse' | 'subcontractor' | 'summary';
 
@@ -39,9 +41,23 @@ const NAV_TABS = [
 ] as const;
 
 export default function DirectorDashboard({
-  projects = [], tasks = [], receipts = [], payments = [], employees = [], customers = [],
+  projects: rawProjects = [], tasks = [], receipts = [], payments = [], employees = [], customers = [],
   activeSubDepartment, onChangeSubDepartment, onNavigateTab,
 }: DirectorDashboardProps) {
+  // Giá trị hợp đồng của công trình: cộng các hợp đồng ĐÃ DUYỆT (cùng cách tính với Kế toán và bảng Kanban dự án), thay cho trường
+  // project.contractValue lưu cứng — trường này không được cập nhật khi duyệt hợp đồng nên Phòng Giám Đốc từng hiện 0 dù Kế toán đã thấy.
+  // Làm ở đây (một chỗ) để MỌI tab Giám đốc đều dùng cùng một số. Chưa tải xong thì tạm dùng giá trị đang lưu.
+  const [quotes, setQuotes] = useState<any[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () => { dbService.archivedQuotes.list().then(l => { if (alive) setQuotes(l || []); }).catch(() => { /* lỗi tải: giữ giá trị đang lưu */ }); };
+    load();
+    // Duyệt / hủy duyệt hợp đồng (ContractDocument) bắn đúng event này
+    window.addEventListener('hl-archived-quotes-updated', load);
+    return () => { alive = false; window.removeEventListener('hl-archived-quotes-updated', load); };
+  }, []);
+  const projects = useMemo(() => withApprovedContractValue(rawProjects, quotes), [rawProjects, quotes]);
+
   return (
     <div className="space-y-4" id="director_office_dashboard">
       <div className="flex flex-wrap gap-2 p-1 bg-white border border-slate-200 rounded-xl" role="tablist" aria-label="Phòng ban">
